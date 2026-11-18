@@ -108,11 +108,15 @@ def _iter_active_text_files() -> list[pathlib.Path]:
 
 class TestConformance(unittest.TestCase):
     def test_agents_and_claude_md_within_50_line_budget(self) -> None:
+        contents: dict[str, str] = {}
         for doc_name in ("AGENTS.md", "CLAUDE.md"):
             p = REPO_ROOT / doc_name
             self.assertTrue(p.is_file(), f"Missing {doc_name}")
-            lines = p.read_text(encoding="utf-8").splitlines()
+            txt = p.read_text(encoding="utf-8")
+            contents[doc_name] = txt
+            lines = txt.splitlines()
             self.assertLessEqual(len(lines), 50, f"{doc_name} has {len(lines)} lines (must be <= 50)")
+        self.assertEqual(contents["AGENTS.md"], contents["CLAUDE.md"], "AGENTS.md and CLAUDE.md must be byte-identical")
 
     def test_zero_banned_jargon_across_active_code_docs_and_skills(self) -> None:
         violations: list[str] = []
@@ -134,6 +138,7 @@ class TestConformance(unittest.TestCase):
             REPO_ROOT / "docs" / "architecture.md",
             REPO_ROOT / "docs" / "decisions" / "README.md",
             REPO_ROOT / "docs" / "decisions" / "0017-ajar-v3-dual-mode-architecture.md",
+            REPO_ROOT / "docs" / "decisions" / "0018-ajar-v3-1-bug-brain-and-platform-economics.md",
             REPO_ROOT / "docs" / "engineering" / "AGENTS.md",
         ]
         md_files.extend(sorted((REPO_ROOT / "skills").rglob("*.md")))

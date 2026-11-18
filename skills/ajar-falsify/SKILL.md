@@ -1,11 +1,11 @@
 ---
 name: ajar-falsify
-description: Challenge proposed vulnerability claims from an independent worker identity before spending reproduction budget.
+description: Challenge proposed vulnerability claims from an independent worker identity and rescope shifted claims before spending reproduction budget.
 ---
 
 # Ajar Falsify
 
-Use this skill to attempt disconfirmation of a `proposed` claim using an independent challenger identity (`falsifier_worker_id != proposer_worker_id`). Closeout gate `G3` rejects self-certified claims.
+Use this skill as the kill-biased disconfirmation filter on `proposed` claims using an independent challenger identity (`falsifier_worker_id != proposer_worker_id`). Closeout gate `G3` blocks self-certified claims.
 
 ## 1. Lease a Falsification Task
 
@@ -18,18 +18,18 @@ Never pass the same `--worker` identifier stored in `proposer_worker_id` on the 
 
 ## 2. Execute the Four Disconfirmation Checks
 
-Run the claim's declared `falsification_test` and check all four failure modes documented in `skills/references/false-positive-controls-corpus.md` and `skills/references/rejected-disputed-cve-corpus.md`:
+Run the claim's declared `falsification_test`, check `Active Workspace Steers`, and test all four failure modes documented in `skills/references/false-positive-controls-corpus.md` and `skills/references/rejected-disputed-cve-corpus.md`:
 
 1. **Upstream Guard Check (`reachability`):**
    ```bash
    ajar ref query --kind reachability "<sink_or_handler_symbol>"
    ```
    Verify whether middleware, router prefixes, Solidity modifiers, database RLS policies, framework auto-escaping, or caller bounds checks normalize or reject the payload before `locus`.
-2. **Design and Trust-Boundary Check (`intent`):**
+2. **Design, Steer, and Trust-Boundary Check (`intent`):**
    ```bash
    ajar ref query --kind intent "<feature_or_module>"
    ```
-   Verify that the required attacker precondition does not already grant the claimed capability (for example, database superuser running OS commands, admin HTML authoring, or local CLI user self-DoS).
+   Verify that the required attacker precondition does not already grant the claimed capability (for example, database superuser running OS commands, admin HTML authoring, or local CLI self-DoS) and does not violate an active operator `Steer`.
 3. **Precedent and False-Positive Trap Check (`precedent`):**
    ```bash
    ajar precedent search "<defect_class or component>"
@@ -38,23 +38,34 @@ Run the claim's declared `falsification_test` and check all four failure modes d
 4. **State Invariant Check:**
    Confirm whether constructor constraints, decimal offsets, lock ordering, or saturating/checked arithmetic make the alleged bad state unreachable.
 
-## 3. Record the Ruling
+## 3. Record the Ruling (`falsify`, `rescope`, or `survive`)
 
-- **If you find a concrete compensating control or broken reachability link, falsify the claim:**
+- **If a concrete compensating control or unreachable precondition refutes the claim completely, falsify it:**
   ```bash
   ajar claim falsify <claim_id> \
     --worker <challenger_worker_id> \
     --control-locus "<file:line>" \
     --notes "<exact guard or unreachable precondition that refutes the mechanism>"
   ```
-  Falsifying a claim marks the hypothesis `falsified` (`rejected_during_research`), while preserving any underlying `anomaly` as `unexplained` so real crashes or differentials are never silently discarded. If the underlying anomaly itself is benign, explain it explicitly:
+  Falsifying a claim marks the hypothesis `falsified` (`rejected_during_research`) while restoring any linked `anomaly` to `unexplained` so real crashes or state differentials are never silently lost. If the underlying anomaly itself is intended behavior, explain it explicitly:
   ```bash
   ajar anomaly explain <anomaly_id> \
     --locus "<file:line>" \
     --reason "<why the observed behavior is benign and intended>"
   ```
 
-- **If the claim survives every disconfirmation check, promote it to reproduction:**
+- **If a real defect exists but its true causal `locus`, preconditions, or `severity` differ from the proposal, rescope instead of discarding:**
+  ```bash
+  ajar claim rescope <claim_id> \
+    --worker <challenger_worker_id> \
+    --locus "<true_root_cause_file:line>" \
+    --severity <critical|high|medium|low> \
+    --mechanism "<updated causal mechanism and preconditions>" \
+    --reason "<why locus or severity shifted during disconfirmation>"
+  ```
+  When `--locus` or `--mechanism` changes, `rescope` resets the claim to `proposed` so a fresh challenger verifies the updated root cause cleanly.
+
+- **If the claim survives every disconfirmation check at its stated `locus`, promote it to reproduction:**
   ```bash
   ajar claim survive <claim_id> \
     --worker <challenger_worker_id> \

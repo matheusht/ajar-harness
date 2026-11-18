@@ -31,7 +31,7 @@ from ajar.db import (
 )
 from ajar.oracles import index_target_oracles
 from ajar.redact import scrub_text
-from ajar.repomap import build_repomap, count_in_scope_loc
+from ajar.repomap import build_repomap, compute_cogs_cap_usd, count_in_scope_loc
 from ajar.repro_source import init_source_mirror
 
 UNTRUSTED_TARGET_AGENT_CONFIGS: frozenset[str] = frozenset(
@@ -167,7 +167,7 @@ def init_run_workspace(
     workspace_mode: str = "envelope",
     goal: str = "Identify, falsify, and reproduce high-severity software vulnerabilities.",
     stopping_criterion: str = "exhaustive-high",
-    budget_usd: float = 40.0,
+    budget_usd: float | None = None,
     allowed_hosts: list[str] | None = None,
     allow_live_requests: bool = False,
     allow_live_mutations: bool = False,
@@ -236,6 +236,14 @@ def init_run_workspace(
         }
         target_sha = _compute_target_digest(effective_target_dir, target_mode)
 
+    quote_usd = float(loc_info["code_quote_usd"])
+    if budget_usd is None:
+        eff_cogs_cap = compute_cogs_cap_usd(quote_usd)
+        pricing_mode = "commercial_code"
+    else:
+        eff_cogs_cap = round(float(budget_usd), 4)
+        pricing_mode = "custom_or_bounty"
+
     (rdir / "artifacts").mkdir(parents=True, exist_ok=True)
     created_at = utc_now_iso()
     clean_goal = scrub_text(goal)
@@ -248,8 +256,8 @@ def init_run_workspace(
             INSERT INTO runs(
                 run_id, target_path, workspace_path, target_mode, workspace_mode,
                 goal, stopping_criterion, budget_usd, in_scope_loc, code_quote_usd,
-                commitment_hash, status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+                cogs_cap_usd, pricing_mode, commitment_hash, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
             """,
             (
                 rid,
@@ -259,9 +267,11 @@ def init_run_workspace(
                 workspace_mode,
                 clean_goal,
                 stopping_criterion,
-                float(budget_usd),
+                eff_cogs_cap,
                 int(loc_info["total_loc"]),
-                float(loc_info["code_quote_usd"]),
+                quote_usd,
+                eff_cogs_cap,
+                pricing_mode,
                 commit_hash,
                 created_at,
             ),
@@ -313,7 +323,9 @@ def init_run_workspace(
                 "target_mode": target_mode,
                 "workspace_mode": workspace_mode,
                 "in_scope_loc": loc_info["total_loc"],
-                "code_quote_usd": loc_info["code_quote_usd"],
+                "code_quote_usd": quote_usd,
+                "cogs_cap_usd": eff_cogs_cap,
+                "pricing_mode": pricing_mode,
                 "commitment_hash": commit_hash,
             },
         )
@@ -331,8 +343,10 @@ def init_run_workspace(
         "target_mode": target_mode,
         "workspace_mode": workspace_mode,
         "in_scope_loc": int(loc_info["total_loc"]),
-        "code_quote_usd": float(loc_info["code_quote_usd"]),
-        "budget_usd": float(budget_usd),
+        "code_quote_usd": quote_usd,
+        "cogs_cap_usd": eff_cogs_cap,
+        "pricing_mode": pricing_mode,
+        "budget_usd": eff_cogs_cap,
         "commitment_hash": commit_hash,
         "repomap": map_summary,
         "indexed_docs": oracle_counts,

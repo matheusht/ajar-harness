@@ -28,10 +28,35 @@ from ajar.db import (
     run_pulse,
     utc_now_iso,
 )
-from ajar.gates import check_all_gates, compute_attribution_and_economics
+from ajar.gates import (
+    check_all_gates,
+    compute_attribution_and_economics,
+    evaluate_dry_surface_breaker,
+)
 from ajar.redact import scrub_text
 from ajar.report import build_report_data, render_markdown_report
 from ajar.workspace import init_run_workspace
+
+REASON_TASK_KINDS: frozenset[str] = frozenset({"map", "falsify", "chain", "patch"})
+REFUSAL_MARKERS: tuple[str, ...] = (
+    "i cannot assist",
+    "i can't assist",
+    "i'm sorry, but i can't",
+    "unable to help with",
+    "cannot fulfill this request",
+)
+
+
+def select_model_for_task(task: dict[str, Any], *, fallback: bool = False) -> str:
+    """Route tasks across reasoning (`map`/`falsify`/`chain`/`patch` + `zero_skill` `investigate`), hunting, and refusal fallback tiers."""
+    default_model = os.environ.get("AJAR_MODEL", "gpt-4.1-mini").strip() or "gpt-4.1-mini"
+    if fallback:
+        return os.environ.get("AJAR_MODEL_FALLBACK", "").strip() or default_model
+    kind = str(task.get("kind") or "investigate")
+    skill_mode = str(task.get("skill_mode") or "domain")
+    if kind in REASON_TASK_KINDS or (kind == "investigate" and skill_mode == "zero_skill"):
+        return os.environ.get("AJAR_MODEL_REASON", "").strip() or default_model
+    return os.environ.get("AJAR_MODEL_HUNT", "").strip() or default_model
 
 
 def _enqueue_verification_drain_tasks(conn: Any) -> int:
@@ -110,8 +135,10 @@ def _invoke_worker_cmd(
     env["AJAR_RUN_ID"] = run_id
     env["AJAR_TASK_ID"] = str(task["task_id"])
     env["AJAR_TASK_KIND"] = str(task["kind"])
+    env["AJAR_TASK_DIRECTION"] = str(task.get("direction") or "outside_in")
     env["AJAR_WORKER_ID"] = worker_id
     env["AJAR_SKILL_MODE"] = str(task["skill_mode"])
+    env["AJAR_SELECTED_MODEL"] = select_model_for_task(task)
     env["AJAR_WORKSPACE"] = str(workspace_path)
     if ajar_home is not None:
         env["AJAR_HOME"] = str(ajar_home)
@@ -135,19 +162,7 @@ def _invoke_worker_cmd(
     }
 
 
-def _invoke_openai_compatible_step(
-    *,
-    run_id: str,
-    task: dict[str, Any],
-    context_md: str,
-) -> dict[str, Any]:
-    """Minimal zero-dependency HTTPS worker call when OPENAI_API_KEY is configured."""
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        return {"skipped": True, "reason": "No --worker-cmd or OPENAI_API_KEY configured."}
-    base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-    model = os.environ.get("AJAR_MODEL", "gpt-4.1-mini")
-
+def _call_chat_completion(base_url: str, api_key: str, model: str, context_md: str) -> dict[str, Any]:
     body = json.dumps(
         {
             "model": model,
@@ -171,14 +186,66 @@ def _invoke_openai_compatible_step(
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=45) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _invoke_openai_compatible_step(
+    *,
+    run_id: str,
+    task: dict[str, Any],
+    context_md: str,
+) -> dict[str, Any]:
+    """Minimal zero-dependency HTTPS worker call with role-tier routing and refusal fallback."""
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return {"skipped": True, "reason": "No --worker-cmd or OPENAI_API_KEY configured."}
+    base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    model = select_model_for_task(task, fallback=False)
+    payload = _call_chat_completion(base_url, api_key, model, context_md)
+    choices = payload.get("choices") or []
+    reply_text = str(((choices[0].get("message") or {}).get("content") or "") if choices else "").lower()
+
+    used_fallback = False
+    fallback_model = select_model_for_task(task, fallback=True)
+    if fallback_model != model and any(marker in reply_text for marker in REFUSAL_MARKERS):
+        payload = _call_chat_completion(base_url, api_key, fallback_model, context_md)
+        model = fallback_model
+        used_fallback = True
+
     usage = payload.get("usage") or {}
     return {
         "skipped": False,
         "model": model,
+        "used_fallback": used_fallback,
         "tokens_in": int(usage.get("prompt_tokens", 0)),
         "tokens_out": int(usage.get("completion_tokens", 0)),
     }
+
+
+def _seed_discover_passes(conn: Any, discover_passes: int) -> int:
+    """Seed complementary Best-of-N discovery passes (`outside_in`, `inside_out`, `native_ffi`, `peer_symmetry`)."""
+    n_passes = max(1, min(8, int(discover_passes)))
+    now_iso = utc_now_iso()
+    templates = [
+        ("map", "outside_in", "critical", 90, "Map entrypoints, trust boundaries, and high-risk surfaces"),
+        ("investigate", "inside_out", "high", 84, "Audit state-mutation, arithmetic, and privilege sinks inside-out"),
+        ("investigate", "native_ffi", "high", 82, "Audit native FFI, unsafe memory boundaries, and parser sinks"),
+        ("investigate", "peer_symmetry", "high", 80, "Audit sibling routes and peer lifecycle hooks for missing guards"),
+    ]
+    created = 0
+    for idx in range(n_passes):
+        kind, direction, prio, sal, base_title = templates[idx % len(templates)]
+        title = base_title if idx < len(templates) else f"{base_title} (pass {idx + 1})"
+        conn.execute(
+            """
+            INSERT INTO tasks(
+                task_id, kind, direction, title, subsystem, locus, priority, status, salience_score, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, 'root', '', ?, 'open', ?, ?, ?)
+            """,
+            (new_id("task"), kind, direction, title, prio, sal - idx, now_iso, now_iso),
+        )
+        created += 1
+    return created
 
 
 def run_autonomous_schedule(
@@ -188,8 +255,9 @@ def run_autonomous_schedule(
     target_mode: str = "source",
     goal: str = "Identify, falsify, and reproduce high-severity software vulnerabilities.",
     stopping_criterion: str = "exhaustive-high",
-    budget_usd: float = 40.0,
+    budget_usd: float | None = None,
     workers: int = 2,
+    discover_passes: int = 1,
     worker_cmd: str | None = None,
     max_steps: int = 50,
     ajar_home: pathlib.Path | str | None = None,
@@ -218,18 +286,10 @@ def run_autonomous_schedule(
         ws_path = pathlib.Path(run_row["workspace_path"])
         tpath = pathlib.Path(run_row["target_path"])
 
-        # Seed initial `map` task if task board is empty.
+        # Seed initial Best-of-N discovery passes if task board is empty.
         task_total = conn.execute("SELECT COUNT(*) AS c FROM tasks").fetchone()["c"]
         if int(task_total) == 0:
-            now_iso = utc_now_iso()
-            conn.execute(
-                """
-                INSERT INTO tasks(
-                    task_id, kind, title, subsystem, locus, priority, status, salience_score, created_at, updated_at
-                ) VALUES (?, 'map', 'Map entrypoints, trust boundaries, and high-risk surfaces', 'root', '', 'critical', 'open', 90, ?, ?)
-                """,
-                (new_id("task"), now_iso, now_iso),
-            )
+            _seed_discover_passes(conn, discover_passes)
     finally:
         conn.close()
 
@@ -237,6 +297,7 @@ def run_autonomous_schedule(
     steps_executed = 0
     stop_reason = "max_steps_reached"
     verify_cutoff_triggered = False
+    dry_breaker_events: list[dict[str, Any]] = []
 
     for step in range(max_steps):
         conn = open_run_db(rid, ajar_home=ajar_home)
@@ -253,6 +314,10 @@ def run_autonomous_schedule(
                     (stop_reason, utc_now_iso()),
                 )
                 break
+
+            tripped = evaluate_dry_surface_breaker(conn)
+            if tripped:
+                dry_breaker_events.extend(tripped)
 
             # 80/20 Explore-vs-Verify Reserve Cutoff:
             if spent >= 0.80 * cap and run_row["status"] == "active":
@@ -358,8 +423,10 @@ def run_autonomous_schedule(
     return {
         "run_id": rid,
         "steps_executed": steps_executed,
+        "discover_passes": max(1, int(discover_passes)),
         "stop_reason": stop_reason,
         "verify_cutoff_triggered": verify_cutoff_triggered,
+        "dry_surface_breaker_events": dry_breaker_events,
         "gates_passed": bool(final_gates["passed"]),
         "findings_count": int(final_gates["findings_count"]),
         "economics": final_gates["economics"],

@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-from ajar.db import list_rows
+from ajar.db import list_rows, list_steers
 from ajar.gates import check_all_gates
 from ajar.redact import scrub_text
 
@@ -46,6 +46,11 @@ def build_report_data(
         conn,
         "SELECT claim_id, title, locus, blocker_reason FROM claims WHERE status = 'blocked'",
     )
+    active_steers = list_steers(conn, active_only=True)
+    patch_verifications = list_rows(
+        conn,
+        "SELECT verification_id, finding_id, claim_id, passed, caller_audit, sibling_audit, created_at FROM patch_verifications ORDER BY created_at ASC",
+    )
     claim_counts = {
         r["status"]: int(r["c"])
         for r in conn.execute("SELECT status, COUNT(*) AS c FROM claims GROUP BY status").fetchall()
@@ -64,6 +69,8 @@ def build_report_data(
         "finished_at": run.get("finished_at"),
         "findings": findings,
         "verified_chains": chains,
+        "patch_verifications": patch_verifications,
+        "active_steers": active_steers,
         "surfaces_covered": surfaces,
         "dry_controls": dry_controls,
         "blocked_items": blocked_claims,
@@ -98,7 +105,7 @@ def render_markdown_report(
         f"- **Target:** `{data['target_path']}` (`{data['target_mode']}`)",
         f"- **Run Status:** `{data['status']}` (Closeout gates passed: `{data['gates_passed']}`)",
         f"- **Commitment Hash (`ajar-research-ledger/1`):** `{data['commitment_hash']}`",
-        f"- **In-Scope Code Size:** `{econ['in_scope_loc']}` LoC (`Code` cap quote: `${econ['code_quote_usd']:.2f}`)",
+        f"- **In-Scope Code Size:** `{econ['in_scope_loc']}` LoC (`Code` cap quote: `${econ['code_quote_usd']:.2f}`, COGS cap: `${econ['cogs_cap_usd']:.2f}`)",
         f"- **Measured Compute Spend:** `${econ['total_spend_usd']:.4f}` (`${econ['cost_usd_per_kloc']:.4f} / 1K LoC`)",
         f"- **Autonomy Checks:** `research_independence_pass={econ['research_independence_pass']}`, "
         f"`product_operability_pass={econ['product_operability_pass']}`",
@@ -119,6 +126,7 @@ def render_markdown_report(
                     "",
                     f"- **Location:** `{f['locus']}`",
                     f"- **Attribution:** `{f['attribution']}`",
+                    f"- **Remediation State:** `{f['remediation_state']}`",
                     f"- **Claim & Independent Skeptic:** `{f['claim_id']}` (verified by `{f['falsifier_worker_id']}`)",
                     f"- **Root Cause:** {f['root_cause']}",
                     f"- **Reproduction Command (Arm 1):** `{f['poc_cmd']}`",
@@ -144,6 +152,14 @@ def render_markdown_report(
             lines.append(
                 f"- **[{str(c['severity']).upper()}] {c['title']} (`{c['chain_id']}`):** "
                 f"Steps `{c['step_ids_json']}` | PoC: `{c['e2e_poc_cmd']}`"
+            )
+        lines.append("")
+
+    if data["active_steers"]:
+        lines.extend(["## Workspace Steers Applied", ""])
+        for st in data["active_steers"]:
+            lines.append(
+                f"- `{st['steer_id']}` [`{st['scope']}:{st['target_filter'] or '*'}`] (`{st['touch_kind']}` by `{st['author']}`): {st['rule_text']}"
             )
         lines.append("")
 

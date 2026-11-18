@@ -1,26 +1,26 @@
 # Ajar Agent Instructions
 
-Ajar is a verification-backed security engine for `Code`, `Fixes`, `Security reviews`, and `Supply chain`.
-Your product is causal proof, not plausible prose. A claim becomes a confirmed finding only when all four reproduction arms pass (`ajar claim reproduce`).
+Ajar (built by Ajar Labs) is a verification-backed security engine for `Platform`, `Code`, `Fixes`, `Security reviews`, and `Supply chain`.
+Your product is causal proof, not plausible prose. A claim becomes a confirmed finding only when all four reproduction arms and causal locus alignment pass (`ajar claim reproduce`).
 
 ## Route Selection
 
 - **Security run (`source`, `binary`, or `live`):** Follow the canonical workflow below and load the step skill under `skills/ajar-*/SKILL.md`.
-- **Repository engineering on Ajar itself:** Read `docs/engineering/AGENTS.md`, `docs/architecture.md`, and `docs/decisions/0017-ajar-v3-dual-mode-architecture.md`.
+- **Repository engineering on Ajar itself:** Read `docs/engineering/AGENTS.md`, `docs/architecture.md`, and `docs/decisions/README.md`.
 
-## Canonical Workflow (`investigate -> falsify -> reproduce -> fix`)
+## Canonical Workflow (`map -> investigate -> falsify -> reproduce -> converge -> fix`)
 
-1. **Initialize or inspect state:** Store all run data outside the target repository in `~/.ajar/runs/<run_id>/run.db` (`ajar init`, `ajar status`, `ajar doctor`).
-2. **Map surfaces (`skills/ajar-map/SKILL.md`):** Run `ajar map --budget-tokens 1500`, query `ajar ref query --kind intent|reachability`, register entrypoints (`ajar surface add`, `ajar driver add`), and enqueue `investigate` tasks (`ajar task add`).
-3. **Investigate (`skills/ajar-investigate/SKILL.md`):** Lease work (`ajar task lease --worker <id> --recover`) and load `ajar context --task <id>`.
-   - When `skill_mode=zero_skill`, analyze target code from first principles and do **not** open `skills/domains/*`.
-   - When `skill_mode=domain`, open only the matching pack in `skills/domains/{evm-solidity,consensus-vm,rust-systems,web-api,auth-crypto}/SKILL.md` and exit immediately with `ajar task dry` when a concrete upstream guard holds.
-   - Persist verified constants (`ajar binding set`), unexpected behaviors (`ajar anomaly add`), and composable capabilities (`ajar primitive add`).
-   - Propose claims (`ajar claim propose`) only with concrete state reachability, `--falsification-prediction`, and `--falsification-test`.
-4. **Falsify (`skills/ajar-falsify/SKILL.md`):** Challenge every proposed claim from an independent worker identity (`falsifier != proposer`) against upstream guards and `skills/references/{false-positive-controls-corpus,rejected-disputed-cve-corpus}.md` (`ajar claim falsify` or `ajar claim survive`).
-5. **Reproduce (`skills/ajar-reproduce/SKILL.md`):** Run `ajar claim reproduce` across all four arms (Arm 1: clean + PoC fires; Arm 2: clean + control passes; Arm 3: minimal root-cause fix + PoC blocks; Arm 4: minimal fix + control passes). After two unchanged reproduction failures, stop guessing and instrument the target (`needs_instrumentation`).
-6. **Chain and Fix (`skills/ajar-chain/SKILL.md`, `skills/ajar-patch/SKILL.md`):** Compose multi-step exploit paths (`ajar chain propose`) and upgrade verified micro-patches into idiom-preserving remediations tested against `>= 3` bypass variants.
-7. **Close Out (`skills/ajar-report/SKILL.md`):** Verify deterministic SQL gates `G1–G5` (`ajar gate check`), seal the run (`ajar finish`), and emit calibrated deliverables (`ajar report`).
+1. **Quote and initialize:** Preview scope and the `35%` COGS cap (`ajar quote`), then store run state in `~/.ajar/runs/<run_id>/run.db` (`ajar init`, `ajar steer add`, `ajar status`).
+2. **Map bi-directionally (`skills/ajar-map/SKILL.md`):** Run `ajar map --budget-tokens 1500`, query `ajar ref query --kind intent|reachability`, register surfaces/drivers, and enqueue `investigate` tasks across `outside_in`, `inside_out`, `native_ffi`, and `peer_symmetry`.
+3. **Investigate (`skills/ajar-investigate/SKILL.md`):** Lease work (`ajar task lease --worker <id> --recover`) and load prefix-stable context (`ajar context --task <id>`).
+   - Obey `Active Workspace Steers`. When `skill_mode=zero_skill`, derive invariants from target code and do **not** open `skills/domains/*`.
+   - When `skill_mode=domain`, open only the matching pack in `skills/domains/{evm-solidity,consensus-vm,rust-systems,web-api,auth-crypto}/SKILL.md`.
+   - Persist bindings (`ajar binding set`), anomalies (`ajar anomaly add`), and capabilities (`ajar primitive add --guarded-by <locus>`). Never close `dry` while an inner primitive remains guarded by an untested assumption.
+   - Propose claims (`ajar claim propose`) with concrete state reachability, `--falsification-prediction`, and `--falsification-test`.
+4. **Falsify or Rescope (`skills/ajar-falsify/SKILL.md`):** Challenge every claim from an independent worker (`falsifier != proposer`) via `ajar claim falsify`, `ajar claim rescope`, or `ajar claim survive`.
+5. **Reproduce (`skills/ajar-reproduce/SKILL.md`):** Prove causal path and impact via `ajar claim reproduce` (4 arms + `claim.locus` patch overlap + 12 PoC lenses). After two unchanged failures, stop guessing and instrument (`needs_instrumentation`).
+6. **Converge and Fix (`skills/ajar-chain/SKILL.md`, `skills/ajar-patch/SKILL.md`):** Break upstream guards across stages (`ajar chain propose`) and verify production `Fixes` across all 8 arms (`ajar patch verify`).
+7. **Close Out (`skills/ajar-report/SKILL.md`):** Verify SQL gates `G1–G5` (`ajar gate check`), export the `Platform` graph (`ajar export-graph`), seal the run (`ajar finish`), and emit reports (`ajar report`).
 
 ## Non-Negotiable Boundaries
 

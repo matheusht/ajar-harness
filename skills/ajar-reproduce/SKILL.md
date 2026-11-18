@@ -1,40 +1,56 @@
 ---
 name: ajar-reproduce
-description: Prove survived vulnerability claims through deterministic 4-arm causal reproduction across source, binary, or live targets.
+description: Prove survived vulnerability claims through locus-bound 4-arm causal reproduction and the 12 PoC interrogation lenses.
 ---
 
 # Ajar Reproduce
 
-Use this skill to convert a `survived_falsify` claim into a causally verified finding. Prose agreement never confirms a finding; `ajar claim reproduce` requires all four experimental arms to pass.
+Use this skill to convert a `survived_falsify` claim into a causally verified finding. Prose agreement never confirms a finding; `ajar claim reproduce` requires all four experimental arms plus causal locus alignment to pass.
 
-## The 4-Arm Causal Proof
+## 1. The Locus-Bound 4-Arm Causal Proof
 
 | Arm | Target State | Input | Required Outcome |
 | --- | --- | --- | --- |
-| **Arm 1** | Unmodified target | Exploit PoC (`--poc-cmd`) | Fires the specific security assertion, sanitizer signature, or unauthorized canary effect |
-| **Arm 2** | Unmodified target | Benign control (`--control-cmd`) | Completes normal operation without triggering the exploit assertion |
-| **Arm 3** | Minimal root-cause fix (`--micropatch` / `--guard-json`) | Exploit PoC (`--poc-cmd`) | Blocks the exploit assertion (`reproduce` rejects reward-hacked assertions that still fire) |
-| **Arm 4** | Minimal root-cause fix (`--micropatch` / `--guard-json`) | Benign control (`--control-cmd`) | Completes normal operation without breaking legitimate functionality |
+| **Arm 1** | Unmodified target | Exploit PoC (`--poc-cmd`) | Fires the specific security assertion, sanitizer crash, or unauthorized canary effect |
+| **Arm 2** | Unmodified target | Benign control (`--control-cmd`) | Completes normal operation on the same surface without triggering the exploit assertion |
+| **Arm 3** | Minimal root-cause fix (`--micropatch` / `--guard-json`) | Exploit PoC (`--poc-cmd`) | Blocks the exploit assertion via a `1–5` line edit overlapping `claim.locus` (`±60` lines) |
+| **Arm 4** | Minimal root-cause fix (`--micropatch` / `--guard-json`) | Benign control (`--control-cmd`) | Completes normal operation without breaking legitimate callers |
 
-## Mode 1: Source Targets (`--mode source`)
+**Locus-Match & `claim_mismatch` Recovery:** In `source` mode, `ajar claim reproduce` verifies that `--micropatch` modifies lines overlapping `claim.locus` (or an explicit `--shared-guard-locus` when fixing a shared chokepoint). If your patch fixes a different file or distant function, `reproduce` rejects it with `claim_mismatch:`. Recover by running `ajar claim rescope <claim_id> --locus "<actual_file:line>" --reason "..."`, passing independent `survive`, and re-running `reproduce`.
 
-1. Write a minimal 1–5 line root-cause diff (`micropatch.diff`) against the target source.
-   - **Strict Micro-Patch Rules:** Edit only production code at the root-cause locus. Never modify tests, add `sys.exit(0)` / `os._exit(0)`, swallow all exceptions (`except Exception: pass`), or unconditionally disable the endpoint (`return None` / `return False` at function entry). The anti-mitigation validator rejects deceptive patches.
-2. Run 4-arm reproduction in isolated worktree slots:
-   ```bash
-   ajar claim reproduce <claim_id> \
-     --worker <worker_id> \
-     --mode source \
-     --poc-cmd "<command proving exploit impact>" \
-     --control-cmd "<command exercising benign caller path>" \
-     --micropatch <path/to/micropatch.diff> \
-     --determinism strict
-   ```
-   For race conditions, pass `--determinism probabilistic --trials 10` so statistical contrast verifies Arm 1 vs Arm 3. Pass `--sibling-poc-cmd "<cmd>"` when checking whether the same root-cause patch kills a candidate duplicate claim.
+## 2. The 12 PoC Interrogation Lenses
 
-## Mode 2: Stripped or Closed-Source Binaries (`--mode binary`)
+Interrogate every PoC, control, and micro-patch against all 12 lenses before invoking `ajar claim reproduce`:
 
-When source code is unavailable, prove root-cause specificity using ASLR-normalized crash/trap PCs, input-field ablation, and a runtime preload/eBPF/wrapper guard:
+1. **Control Contrast:** Arm 2 invokes the same handler or state path with valid input rather than `true` or an unrelated noop.
+2. **Path Proof:** The PoC reaches `claim.locus` rather than failing early in an unrelated parser or fixture check.
+3. **Locus Match:** The `1–5` line `--micropatch` overlaps `claim.locus` (or `--shared-guard-locus`), proving causal alignment between prose and patch.
+4. **Cross-Boundary Provenance:** Attacker input crosses an actual trust boundary rather than mutating caller-owned local state.
+5. **State Mutation vs Echo:** The PoC proves unauthorized state corruption, read disclosure, or memory fault—never bare HTTP `200` or harmless input reflection.
+6. **Privilege Delta:** The unprivileged caller achieves an outcome denied to that role's intended baseline permissions.
+7. **Default Configuration:** Reproduction holds under default or documented production settings without artificial debug flags.
+8. **Determinism / Statistical Contrast:** Use `--determinism deterministic` by default; for race conditions, use `--determinism probabilistic_race --trials 8` to prove repeatable Arm 1 vs Arm 3 separation.
+9. **Zero Harness Artifact:** The failure originates in target production code, not a bug inside the PoC script or mock harness.
+10. **Anti-Mitigation Cleanliness:** `--micropatch` never edits tests, calls `exit(0)` / `os._exit(0)`, swallows all exceptions (`except Exception: pass`), or disables the endpoint unconditionally.
+11. **Warm Sibling Cross-Kill:** Pass `--sibling-poc-cmd "<cmd>"` when testing whether one root-cause micro-patch simultaneously kills candidate duplicate claims (`duplicate_root_cause`).
+12. **Sample Enumeration (`N`):** Before stating blast radius or severity, count exact affected routes, records, or sibling call sites (`N = verified count`) instead of extrapolating from `N = 1`.
+
+## 3. Execution by Target Mode
+
+### Source Targets (`--mode source`)
+
+```bash
+ajar claim reproduce <claim_id> \
+  --worker <worker_id> \
+  --mode source \
+  --poc-cmd "<command proving exploit impact>" \
+  --control-cmd "<command exercising benign caller path>" \
+  --micropatch <path/to/micropatch.diff> \
+  [--shared-guard-locus "<file:line>"] \
+  --determinism deterministic
+```
+
+### Stripped or Closed-Source Binaries (`--mode binary`)
 
 ```bash
 ajar claim reproduce <claim_id> \
@@ -47,9 +63,9 @@ ajar claim reproduce <claim_id> \
   --ablation-json <ablation_spec.json>
 ```
 
-## Mode 3: Authorized Live Endpoints (`--mode live`)
+### Authorized Live Endpoints (`--mode live`)
 
-Only run `--mode live` when `scope_rules` explicitly permits live target requests (`--allow-live-requests` and `--allow-host <host>`). Live reproduction plants a fresh 128-bit CSPRNG canary (`ajar_canary_<32hex>`) owned by Principal A and tests cross-principal access from Principal B with mandatory teardown verification:
+Only run `--mode live` when `scope_rules` explicitly authorizes the target host (`--allow-live-requests` and `--allow-host <host>`). Plant a 128-bit CSPRNG canary (`ajar_canary_<32hex>`) owned by Principal A, test cross-principal access from Principal B, and verify teardown removal:
 
 ```bash
 ajar claim reproduce <claim_id> \
@@ -62,6 +78,6 @@ ajar claim reproduce <claim_id> \
   --teardown-cmd "<delete canary and verify HTTP 404/absent>"
 ```
 
-## Two-Failure Telemetry Pivot
+## 4. Two-Failure Telemetry Pivot
 
-If `ajar claim reproduce` fails twice on the same claim with an unchanged observation hash, `run.db` transitions the claim to `needs_instrumentation` and spawns an `instrument` task. Stop guessing payload variations; add tracing, inspect exact state values at the sink, record a `binding` or `anomaly`, and resume reproduction only after new evidence is recorded.
+If `ajar claim reproduce` fails twice on the same claim with an unchanged observation hash, `run.db` transitions the claim to `needs_instrumentation` and spawns an `instrument` task. Stop guessing payload variations; instrument the target, inspect runtime values at `claim.locus`, record a `binding` or `anomaly`, and retry only after new runtime evidence lands.

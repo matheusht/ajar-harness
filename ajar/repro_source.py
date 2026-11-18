@@ -187,12 +187,44 @@ def init_source_mirror(run_dir: pathlib.Path, target_dir: pathlib.Path) -> pathl
     return mirror_dir
 
 
-def validate_micropatch_diff(diff_text: str, *, max_changed_lines: int = 16) -> tuple[bool, str, list[str]]:
-    """Verify micro-patch touches only production source files and stays minimal."""
+HUNK_HEADER_RE = re.compile(r"^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@")
+
+
+def _parse_locus_spec(locus: str) -> tuple[str, int | None, int | None]:
+    raw_file, _, span = locus.strip().partition(":")
+    clean_file = raw_file.strip().lstrip("./")
+    if not span:
+        return (clean_file, None, None)
+    m = re.match(r"^(\d+)(?:-(\d+))?", span.strip())
+    if not m:
+        return (clean_file, None, None)
+    start_l = int(m.group(1))
+    end_l = int(m.group(2)) if m.group(2) else start_l
+    return (clean_file, min(start_l, end_l), max(start_l, end_l))
+
+
+def _file_matches_locus(touched_file: str, loc_file: str) -> bool:
+    t = touched_file.strip().lstrip("./")
+    lf = loc_file.strip().lstrip("./")
+    if not lf:
+        return True
+    return t == lf or t.endswith("/" + lf) or lf.endswith("/" + t)
+
+
+def validate_micropatch_diff(
+    diff_text: str,
+    *,
+    max_changed_lines: int = 16,
+    claim_locus: str = "",
+    shared_guard_locus: str = "",
+) -> tuple[bool, str, list[str]]:
+    """Verify micro-patch touches only production source files, stays minimal, and matches claim.locus."""
     if not diff_text or not diff_text.strip():
         return (False, "Micro-patch diff is empty.", [])
 
     touched_files: list[str] = []
+    hunks_by_file: dict[str, list[tuple[int, int]]] = {}
+    current_file = ""
     changed_code_lines = 0
     saw_hunk = False
 
@@ -210,10 +242,17 @@ def validate_micropatch_diff(diff_text: str, *, max_changed_lines: int = 16) -> 
                     f"Micro-patch is forbidden from modifying test or build manifest file: {clean_path}",
                     [],
                 )
+            if line.startswith("+++ ") or not current_file:
+                current_file = clean_path
             if clean_path not in touched_files:
                 touched_files.append(clean_path)
         elif line.startswith("@@"):
             saw_hunk = True
+            hm = HUNK_HEADER_RE.match(line)
+            if hm and current_file:
+                old_start = int(hm.group(1))
+                old_cnt = int(hm.group(2)) if hm.group(2) is not None else 1
+                hunks_by_file.setdefault(current_file, []).append((old_start, old_start + max(1, old_cnt)))
         elif saw_hunk and (line.startswith("+") or line.startswith("-")) and not line.startswith(("+++", "---")):
             body = line[1:].strip()
             if line.startswith("+") and FORBIDDEN_PATCH_ADDED_LINE_RE.search(body):
@@ -231,6 +270,37 @@ def validate_micropatch_diff(diff_text: str, *, max_changed_lines: int = 16) -> 
             f"Micro-patch changes {changed_code_lines} non-comment lines (max {max_changed_lines} for root-cause proof).",
             touched_files,
         )
+
+    if claim_locus.strip():
+        allowed_specs = [_parse_locus_spec(claim_locus)]
+        if shared_guard_locus.strip():
+            allowed_specs.append(_parse_locus_spec(shared_guard_locus))
+
+        locus_matched = False
+        for loc_file, loc_start, loc_end in allowed_specs:
+            for tf in touched_files:
+                if not _file_matches_locus(tf, loc_file):
+                    continue
+                if loc_start is None or loc_end is None:
+                    locus_matched = True
+                    break
+                for h_start, h_end in hunks_by_file.get(tf, [(1, 1000000)]):
+                    if (h_start - 60) <= loc_end and loc_start <= (h_end + 60):
+                        locus_matched = True
+                        break
+                if locus_matched:
+                    break
+            if locus_matched:
+                break
+
+        if not locus_matched:
+            return (
+                False,
+                f"claim_mismatch: micro-patch modifies {touched_files} outside claimed locus {claim_locus!r}. "
+                "Re-scope the claim via `ajar claim rescope` or pass `--shared-guard-locus` if fixing an upstream guard.",
+                touched_files,
+            )
+
     return (True, "ok", touched_files)
 
 
@@ -442,6 +512,9 @@ def run_source_reproduction(
     trials: int = 8,
     timeout_sec: int = 60,
     warm_cross_kill_claims: list[dict[str, str]] | None = None,
+    claim_locus: str = "",
+    shared_guard_locus: str = "",
+    max_changed_lines: int = 16,
 ) -> dict[str, Any]:
     """Execute 4-arm counterfactual source reproduction inside an isolated fixed-path slot."""
     if not micropatch_path.is_file():
@@ -458,11 +531,17 @@ def run_source_reproduction(
         }
 
     diff_text = micropatch_path.read_text(encoding="utf-8", errors="replace")
-    valid_diff, diff_msg, touched_files = validate_micropatch_diff(diff_text)
+    valid_diff, diff_msg, touched_files = validate_micropatch_diff(
+        diff_text,
+        max_changed_lines=max_changed_lines,
+        claim_locus=claim_locus,
+        shared_guard_locus=shared_guard_locus,
+    )
     if not valid_diff:
         return {
             "passed": False,
             "reason": f"Pre-flight micro-patch validation failed: {diff_msg}",
+            "claim_mismatch": diff_msg.startswith("claim_mismatch:"),
             "observation_hash": hashlib.sha256(diff_msg.encode("utf-8")).hexdigest()[:16],
             "micropatch_diff": scrub_text(diff_text[:4000]),
             "arm1_clean_poc": {"arm_passed": False},

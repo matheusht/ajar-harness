@@ -1,42 +1,56 @@
 ---
 name: ajar-chain
-description: Compose bounded primitives, unexplained anomalies, and low-or-medium findings into verified end-to-end exploit chains.
+description: Run Stage-5 Converge synthesis to break upstream guards, apply the 6 chain angle-shapes, challenge severity caps, and verify end-to-end exploit chains.
 ---
 
-# Ajar Chain
+# Ajar Chain (Stage-5 Converge)
 
-Use this skill when two or more `primitives`, `unexplained` anomalies, or low/medium `findings` exist in `run.db`, or when closeout gate `G5` enqueues a `chain` composition task.
+Use this skill when closeout gate `G5` enqueues a Stage-5 `Converge` (`chain`) task, when guarded primitives (`guarded_by_locus != ''`) await guard breaking, or when two or more `primitives`, `unexplained` anomalies, or `low`/`medium` findings exist in `run.db`.
 
-## 1. Enumerate Composable Building Blocks
+## 1. Load All Composable Signals
 
-Inspect all recorded capabilities, anomalies, and findings across subsystems:
+Inspect every recorded capability, guarded sink, anomaly, binding, and capped claim across subsystems:
 
 ```bash
 ajar primitive list
 ajar anomaly list
 ajar claim list
 ajar binding list
-```
-
-Query historical multi-stage exploit precedents when evaluating cross-boundary composition:
-
-```bash
 ajar precedent search "<stage1_kind> <stage2_kind>"
 ```
 
-Consult `skills/references/project-zero-zdi-chain-corpus.md` (system, browser, virtualization, and enterprise chains) and `skills/references/defi-exploit-chain-corpus.md` (flash-loan, oracle manipulation, callback reentrancy, and governance chains) for verified stage handoff patterns.
+Consult `skills/references/project-zero-zdi-chain-corpus.md` and `skills/references/defi-exploit-chain-corpus.md` for verified multi-stage handoff patterns.
 
-## 2. Backward and Forward Interface Matching
+## 2. Invariant-Pair Guard Breaking
 
-Compose chains using strict contract matching between stages:
+Match `primitives.postconditions` against every guarded sink (`primitives.guarded_by_locus` / `guard_assumption`) and `conditional_blocked` task predicate:
 
-1. **Backward Goal Chaining:** Start from a high-impact sink (`critical` or `high` surface whose direct exploitation was blocked by a precondition such as internal-only network origin, missing admin token, non-zero vault supply, or KASLR/ASLR). Search `primitives` whose `postconditions` satisfy that exact precondition.
-2. **Forward Escalation:** Start from a verified entry primitive (such as SSRF, open redirect in privileged WebView, arbitrary header/cookie write, or unauthenticated state nudge) and query `reachability` for internal surfaces exposed by that postcondition.
-3. **Modular Stage Boundaries:** Keep each stage interface explicit (`input -> state transition -> output artifact/token`). If one intermediate stage fails under a specific configuration, substitute an alternative primitive that satisfies the same interface contract without discarding the rest of the chain.
+1. List every guarded primitive where standalone exploitation was blocked by an upstream invariant `I`.
+2. Search all other `primitives`, `anomalies`, and `low`/`medium` findings across sibling routes, background workers, callbacks, or batch endpoints whose `postconditions` falsify or bypass `I`.
+3. Run `ajar pulse` after recording new primitives so `conditional_blocked` tasks whose predicates are satisfied reopen automatically with boosted salience.
 
-## 3. Verify and Propose the End-to-End Chain
+## 3. Check All 6 Chain Angle-Shapes
 
-Never assert a theoretical chain from prose alone. Build a single end-to-end script or test that executes every stage sequentially in one run and passes a benign negative control:
+Evaluate composition across six concrete structural patterns:
+
+1. **Entry -> Guard Bypass -> Inner Sink:** Combine path/host normalization drift, SSRF, or header/parameter smuggling with an internal or guarded mutation sink.
+2. **State Nudge -> Invariant Drift -> Accounting/Auth Corruption:** Combine dust/rounding nudges, stale cache/oracle reads, or partial state writes with downstream share, collateral, or quota math.
+3. **Disclosure -> Secret/Nonce Recovery -> Forgery:** Combine an information leak, timing/error oracle, or unauthenticated metadata read with token, webhook, or signature verification.
+4. **Peer-Hook / Lifecycle Asymmetry:** Enter state through a permissive sibling route or `update`/`transfer`/`callback` hook that omits an invariant enforced only on `create`.
+5. **Defeats-Its-Own-Mitigations:** Test whether a sanitizer, canonicalizer, retry handler, lock fallback, or rate limiter mutates input or state in a way that enables a secondary exploit primitive.
+6. **Shared-Chokepoint Widening:** When one broken helper, middleware, or deserialization wrapper feeds multiple downstream subsystems, trace the highest-impact reachable sink rather than stopping at the first low-impact caller.
+
+## 4. Three Mandatory Converge Critiques
+
+Before proposing or closing out chains, apply three critiques:
+
+1. **Attack Your Own Caps First:** Inspect every `low`/`medium` finding and `blocked` claim. Ask: *"Which recorded primitive or sibling route removes the precondition that capped this bug's severity?"*
+2. **Marginal-Contribution Critique:** Every step listed in `--steps` must be causally required. Remove any step whose deletion still allows `--poc-cmd` to cross the final trust boundary; never pad a standalone bug into a synthetic multi-step chain.
+3. **Sibling Cross-Kill Deduplication:** When multiple candidate chains or claims pivot through the exact same broken chokepoint, group them under one root cause or verify duplicate cross-kill rather than inflating finding counts.
+
+## 5. Verify and Propose the End-to-End Chain
+
+Build one deterministic end-to-end command that executes all stages sequentially without manual state injection between steps, paired with a benign workflow control:
 
 ```bash
 ajar chain propose \
@@ -47,8 +61,4 @@ ajar chain propose \
   --severity critical
 ```
 
-## 4. Severity Calibration Rule
-
-Elevate chain severity above its individual links only when:
-- Every stage executes end-to-end without manual state injection between stages, and
-- The combined path crosses a trust boundary or achieves an impact (`C`/`I`/`A`) that no single stage reaches on its own.
+Elevate chain severity above its individual links only when the end-to-end PoC executes automatically and achieves an unauthorized `C`/`I`/`A` impact that no single step reaches alone.

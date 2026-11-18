@@ -194,6 +194,95 @@ def count_in_scope_loc(target_dir: pathlib.Path) -> dict[str, Any]:
     }
 
 
+def compute_cogs_cap_usd(code_quote_usd: float, ratio: float = 0.35) -> float:
+    """Compute default commercial COGS cap (`<= 0.35 * quote`, preserving `>= 65%` gross margin)."""
+    return round(max(1.0, float(code_quote_usd) * float(ratio)), 2)
+
+
+def count_diff_loc(target_dir: pathlib.Path, diff_range: str) -> dict[str, Any]:
+    """Count changed code lines in a git diff range (`base..head`) for PR `Code` sizing."""
+    import subprocess
+
+    root = target_dir.resolve()
+    if root.is_file():
+        root = root.parent
+    proc = subprocess.run(
+        ["git", "-C", str(root), "diff", "--numstat", diff_range],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise ValueError(f"git diff --numstat failed for {diff_range!r}: {proc.stderr.strip()[:200]}")
+
+    changed_loc = 0
+    files_counted = 0
+    by_ext: dict[str, int] = {}
+    for line in proc.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        added_s, deleted_s, rel_path = parts[0].strip(), parts[1].strip(), parts[2].strip()
+        if added_s == "-" or deleted_s == "-":
+            continue
+        p = pathlib.PurePosixPath(rel_path)
+        if p.name in SKIP_FILES or any(seg in SKIP_DIRS for seg in p.parts):
+            continue
+        ext = p.suffix.lower()
+        if ext not in CODE_EXTENSIONS:
+            continue
+        delta = int(added_s) + int(deleted_s)
+        if delta <= 0:
+            continue
+        changed_loc += delta
+        files_counted += 1
+        by_ext[ext] = by_ext.get(ext, 0) + delta
+
+    quote_usd = compute_code_quote_usd(changed_loc)
+    return {
+        "total_loc": changed_loc,
+        "files_counted": files_counted,
+        "by_ext": dict(sorted(by_ext.items())),
+        "code_quote_usd": quote_usd,
+        "exceeds_single_run_cap": changed_loc > 50_000,
+        "diff_range": diff_range,
+    }
+
+
+def compute_quote_summary(target_dir: pathlib.Path, diff_range: str | None = None) -> dict[str, Any]:
+    """Build deterministic pre-run `Code` quote and default `0.35 * quote` COGS budget cap."""
+    import hashlib
+    import json
+
+    sizing = count_diff_loc(target_dir, diff_range) if diff_range else count_in_scope_loc(target_dir)
+    quote_usd = float(sizing["code_quote_usd"])
+    cogs_cap = compute_cogs_cap_usd(quote_usd)
+    canonical = json.dumps(
+        {
+            "diff_range": diff_range or "",
+            "files_counted": sizing["files_counted"],
+            "in_scope_loc": sizing["total_loc"],
+            "target": str(target_dir.resolve()),
+        },
+        sort_keys=True,
+    ).encode("utf-8")
+    quote_id = "qte-" + hashlib.sha256(canonical).hexdigest()[:10]
+    return {
+        "quote_id": quote_id,
+        "target_path": str(target_dir.resolve()),
+        "scope_mode": "diff" if diff_range else "full_repo",
+        "diff_range": diff_range or "",
+        "in_scope_loc": int(sizing["total_loc"]),
+        "files_counted": int(sizing["files_counted"]),
+        "by_ext": sizing["by_ext"],
+        "code_quote_usd": quote_usd,
+        "cogs_cap_usd": cogs_cap,
+        "recommended_cogs_cap_usd": cogs_cap,
+        "gross_margin_floor_pct": 65.0,
+        "exceeds_single_run_cap": bool(sizing["exceeds_single_run_cap"]),
+    }
+
+
 def _extract_python_symbols(rel_path: str, text: str) -> list[dict[str, Any]]:
     symbols: list[dict[str, Any]] = []
     try:

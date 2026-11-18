@@ -1,27 +1,31 @@
 ---
 name: ajar-investigate
-description: Lease prioritized investigation tasks, trace attacker inputs across trust boundaries, record durable anomalies and primitives, and propose falsifiable claims.
+description: Lease bi-directional investigation tasks, apply keep-biased discovery, enforce the guarded-primitive anti-premature-dry rule, and propose falsifiable claims.
 ---
 
 # Ajar Investigate
 
-Use this skill to execute leased `investigate` or `instrument` tasks, record verified code facts, and propose concrete vulnerability claims.
+Use this skill to execute leased `investigate` or `instrument` tasks, persist verified code facts, and propose falsifiable vulnerability claims.
 
-## 1. Lease and Hydrate Context
+## 1. Lease and Hydrate Prefix-Stable Context
 
-1. Lease the highest-salience open task and recover any expired worker leases:
+1. Lease the highest-salience open task and recover expired worker leases:
    ```bash
    ajar task lease --worker <worker_id> --kind investigate --recover
    ```
-2. Load the `< 4 KB` context frame for the leased task:
+2. Load the prefix-stable `< 4 KB` certified context frame:
    ```bash
    ajar context --task <task_id>
    ```
-3. Check the assigned `skill_mode` on the leased task:
-   - If `skill_mode` is `zero_skill`: Read the target source code from first principles. Do **not** open any file under `skills/domains/`. Derive invariants directly from state transitions, types, locks, and callers.
-   - If `skill_mode` is `domain`: Open only the single matching contrastive pack under `skills/domains/<domain>/SKILL.md`. Stop following a domain pattern immediately if Step 2 shows a concrete guard or divergent architecture.
+3. Follow the task's `skill_mode`, `direction`, and `Active Workspace Steers`:
+   - **Workspace Steers:** Obey all `Active Workspace Steers` listed at the top of the context frame. Never pursue out-of-scope paths barred by a Steer.
+   - **`skill_mode=zero_skill`:** Analyze target code from first principles. Do **not** open any file under `skills/domains/`. Derive invariants directly from state transitions, types, locks, and callers.
+   - **`skill_mode=domain`:** Open only the single matching contrastive pack under `skills/domains/<domain>/SKILL.md`. Exit immediately if target code enforces a verified compensating control.
+   - **`direction`:** Follow the assigned search direction (`outside_in` entrypoint-to-sink, `inside_out` sink-to-callers, `native_ffi` memory/FFI boundary, or `peer_symmetry` sibling route/hook comparison).
 
-## 2. Trace State Reachability and Record Durable Facts
+## 2. Keep-Biased Discovery and Durable Memory
+
+Discovery is **keep-biased**: capture real behavioral signals first and let `ajar-falsify` and `ajar-reproduce` act as the kill-biased disconfirmation funnel.
 
 1. Pin verified constants, offsets, role bitmasks, or route guards as line-hashed bindings so downstream workers never re-derive them:
    ```bash
@@ -31,7 +35,7 @@ Use this skill to execute leased `investigate` or `instrument` tasks, record ver
      --locus "<file:line>" \
      --task <task_id>
    ```
-2. When you observe unexpected state, differential behavior, or a crash whose full exploit path is not yet clear, record an `anomaly` immediately (anomalies survive even if a specific hypothesis is later falsified):
+2. Record unexpected state, differential behavior, or crashes immediately as an `anomaly` (anomalies survive even if an initial claim is later falsified):
    ```bash
    ajar anomaly add \
      --locus "<file:line>" \
@@ -39,19 +43,30 @@ Use this skill to execute leased `investigate` or `instrument` tasks, record ver
      --repro-cmd "<command that triggers observation>" \
      --surface <surface_id>
    ```
-3. When you prove a bounded capability (such as partial path traversal, header injection, stale price read, or unauthenticated state write) that lacks standalone high impact, record a `primitive` for chain composition:
+3. Record bounded capabilities (partial path traversal, header write, rounding drift, unauthenticated state nudge, or guarded inner sink) as a `primitive`:
    ```bash
    ajar primitive add \
+     --surface <surface_id> \
      --locus "<file:line>" \
      --kind "<capability_type>" \
      --preconditions "<required caller state and inputs>" \
      --postconditions "<state or capability gained>" \
+     --guarded-by "<optional upstream guard file:line>" \
+     --guard-assumption "<optional invariant assumed by upstream guard>" \
      --evidence-cmd "<verification command>"
    ```
 
-## 3. Propose Falsifiable Claims
+## 3. Anti-Premature-`dry` Rule for Guarded Sinks
 
-Before proposing a claim, trace reachability from an untrusted entrypoint to the sink and state a concrete disconfirmation test:
+Never mark a task `dry` the moment you spot an upstream check if an inner sink or primitive remains dangerous when that check's assumption breaks:
+
+1. Register the inner capability with `ajar primitive add --guarded-by "<guard_file:line>" --guard-assumption "<assumption>"`.
+2. Either enqueue a `chain` / `investigate` task targeting ways to violate `<assumption>` (via sibling routes, callbacks, race windows, or encoding drift), or park the task with `ajar task block`.
+3. `ajar task dry` deterministically rejects closing a task when an unchained guarded primitive on the same surface/subsystem still awaits guard-break evaluation.
+
+## 4. Propose Falsifiable Claims
+
+Trace reachability from an untrusted entrypoint to the sink and state a concrete disconfirmation test:
 
 ```bash
 ajar claim propose \
@@ -62,30 +77,28 @@ ajar claim propose \
   --mechanism "<entry -> missing guard -> corrupted invariant -> impact>" \
   --severity <critical|high|medium|low> \
   --falsification-prediction "<what must hold if a hidden upstream guard blocks this path>" \
-  --falsification-test "<exact file/caller check or negative-control command to try disproving the claim>"
+  --falsification-test "<exact caller check or negative-control command to try disproving the claim>"
 ```
 
-## 4. Close the Task Cleanly
+## 5. Close the Task Cleanly
 
-Every leased task must end in an explicit terminal or conditional state:
+Every leased task must end in an explicit state:
 
 - **Completed investigation (claim, primitive, or child tasks recorded):**
   ```bash
   ajar task done <task_id> --worker <worker_id> --summary "<concise result>"
   ```
-- **Safe surface (`dry` — requires verified `file:line` and `>= 15`-character guard explanation):**
+- **Verified safe surface (`dry` — requires verified `file:line`, `>= 15`-char guard explanation, and zero unchained guarded primitives):**
   ```bash
   ajar task dry <task_id> \
     --worker <worker_id> \
     --locus "<file:line>" \
     --control "<exact upstream check, type invariant, or modifier that blocks exploitation>"
   ```
-- **Conditionally blocked on an unmet prerequisite:**
+- **Conditionally blocked on an unmet prerequisite (auto-reopened by `ajar pulse` when a matching primitive/anomaly lands):**
   ```bash
   ajar task block <task_id> \
     --worker <worker_id> \
     --predicate "<condition required to unblock>" \
     --check-locus "<file:line>"
   ```
-
-Run `ajar pulse` periodically (automatic check every 8 closed tasks) to surface stale bindings, unblocked tasks, or unchained primitives.

@@ -45,9 +45,12 @@ CREATE TABLE IF NOT EXISTS runs (
     goal TEXT NOT NULL,
     stopping_criterion TEXT NOT NULL DEFAULT 'exhaustive-high'
         CHECK(stopping_criterion IN ('exhaustive-high', 'first-verified-high')),
-    budget_usd REAL NOT NULL DEFAULT 40.0,
+    budget_usd REAL NOT NULL DEFAULT 14.0,
     in_scope_loc INTEGER NOT NULL DEFAULT 0,
     code_quote_usd REAL NOT NULL DEFAULT 10.0,
+    cogs_cap_usd REAL NOT NULL DEFAULT 3.5,
+    pricing_mode TEXT NOT NULL DEFAULT 'commercial_code'
+        CHECK(pricing_mode IN ('commercial_code', 'custom_or_bounty')),
     commitment_hash TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'active'
         CHECK(status IN ('active', 'verify_only', 'finished', 'blocked')),
@@ -101,6 +104,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     surface_id TEXT,
     kind TEXT NOT NULL
         CHECK(kind IN ('map', 'investigate', 'falsify', 'reproduce', 'instrument', 'chain', 'patch')),
+    direction TEXT NOT NULL DEFAULT 'outside_in'
+        CHECK(direction IN ('outside_in', 'inside_out', 'native_ffi', 'peer_symmetry')),
     title TEXT NOT NULL,
     subsystem TEXT NOT NULL DEFAULT '',
     locus TEXT NOT NULL DEFAULT '',
@@ -144,11 +149,14 @@ CREATE TABLE IF NOT EXISTS anomalies (
 
 CREATE TABLE IF NOT EXISTS primitives (
     primitive_id TEXT PRIMARY KEY,
+    surface_id TEXT,
     subsystem TEXT NOT NULL DEFAULT '',
     locus TEXT NOT NULL,
     kind TEXT NOT NULL,
     preconditions TEXT NOT NULL,
     postconditions TEXT NOT NULL,
+    guarded_by_locus TEXT NOT NULL DEFAULT '',
+    guard_assumption TEXT NOT NULL DEFAULT '',
     evidence_cmd TEXT NOT NULL,
     evidence_output TEXT NOT NULL DEFAULT '',
     chained INTEGER NOT NULL DEFAULT 0,
@@ -259,6 +267,7 @@ CREATE TABLE IF NOT EXISTS human_touches (
 CREATE TABLE IF NOT EXISTS spend_ledger (
     entry_id TEXT PRIMARY KEY,
     worker_id TEXT NOT NULL,
+    surface_id TEXT NOT NULL DEFAULT '',
     phase TEXT NOT NULL DEFAULT 'explore'
         CHECK(phase IN ('explore', 'verify')),
     model TEXT NOT NULL DEFAULT '',
@@ -267,6 +276,38 @@ CREATE TABLE IF NOT EXISTS spend_ledger (
     cost_usd REAL NOT NULL DEFAULT 0.0,
     notes TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS steers (
+    steer_id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL DEFAULT 'global'
+        CHECK(scope IN ('global', 'subsystem', 'path')),
+    target_filter TEXT NOT NULL DEFAULT '',
+    rule_text TEXT NOT NULL,
+    author TEXT NOT NULL DEFAULT 'operator',
+    touch_kind TEXT NOT NULL DEFAULT 'scope_authority'
+        CHECK(touch_kind IN ('scope_authority', 'research_steering')),
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    revoked_at TEXT,
+    revoke_reason TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS patch_verifications (
+    verification_id TEXT PRIMARY KEY,
+    finding_id TEXT NOT NULL,
+    claim_id TEXT NOT NULL,
+    patch_path TEXT NOT NULL,
+    patch_diff TEXT NOT NULL,
+    suite_cmd TEXT NOT NULL,
+    variant_cmds_json TEXT NOT NULL,
+    caller_audit TEXT NOT NULL,
+    sibling_audit TEXT NOT NULL,
+    arms_json TEXT NOT NULL,
+    passed INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(finding_id) REFERENCES findings(finding_id),
+    FOREIGN KEY(claim_id) REFERENCES claims(claim_id)
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -396,6 +437,61 @@ def resolve_run_id(
     )
 
 
+def _ensure_v31_schema(conn: sqlite3.Connection) -> None:
+    """Idempotently migrate v3.0 SQLite databases to include v3.1 columns and tables."""
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    if not tables:
+        return
+    alter_specs = (
+        ("runs", "cogs_cap_usd", "REAL NOT NULL DEFAULT 3.5"),
+        ("runs", "pricing_mode", "TEXT NOT NULL DEFAULT 'commercial_code'"),
+        ("tasks", "direction", "TEXT NOT NULL DEFAULT 'outside_in'"),
+        ("primitives", "surface_id", "TEXT"),
+        ("primitives", "guarded_by_locus", "TEXT NOT NULL DEFAULT ''"),
+        ("primitives", "guard_assumption", "TEXT NOT NULL DEFAULT ''"),
+        ("spend_ledger", "surface_id", "TEXT NOT NULL DEFAULT ''"),
+    )
+    for tbl, col, col_def in alter_specs:
+        if tbl in tables:
+            existing_cols = {r[1] for r in conn.execute(f"PRAGMA table_info({tbl})").fetchall()}
+            if col not in existing_cols:
+                conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {col_def}")
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS steers (
+            steer_id TEXT PRIMARY KEY,
+            scope TEXT NOT NULL DEFAULT 'global'
+                CHECK(scope IN ('global', 'subsystem', 'path')),
+            target_filter TEXT NOT NULL DEFAULT '',
+            rule_text TEXT NOT NULL,
+            author TEXT NOT NULL DEFAULT 'operator',
+            touch_kind TEXT NOT NULL DEFAULT 'scope_authority'
+                CHECK(touch_kind IN ('scope_authority', 'research_steering')),
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            revoked_at TEXT,
+            revoke_reason TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS patch_verifications (
+            verification_id TEXT PRIMARY KEY,
+            finding_id TEXT NOT NULL,
+            claim_id TEXT NOT NULL,
+            patch_path TEXT NOT NULL,
+            patch_diff TEXT NOT NULL,
+            suite_cmd TEXT NOT NULL,
+            variant_cmds_json TEXT NOT NULL,
+            caller_audit TEXT NOT NULL,
+            sibling_audit TEXT NOT NULL,
+            arms_json TEXT NOT NULL,
+            passed INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(finding_id) REFERENCES findings(finding_id),
+            FOREIGN KEY(claim_id) REFERENCES claims(claim_id)
+        );
+        """
+    )
+
+
 def open_run_db(
     run_id_or_path: str | pathlib.Path,
     *,
@@ -426,6 +522,8 @@ def open_run_db(
     conn.execute("PRAGMA busy_timeout=30000;")
     if create:
         conn.executescript(SCHEMA_SQL)
+    else:
+        _ensure_v31_schema(conn)
     return conn
 
 
@@ -801,8 +899,208 @@ def set_certified_binding(
     }
 
 
+def add_steer(
+    conn: sqlite3.Connection,
+    *,
+    rule_text: str,
+    scope: str = "global",
+    target_filter: str = "",
+    author: str = "operator",
+    touch_kind: str = "scope_authority",
+    record_human_touch: bool = True,
+) -> dict[str, Any]:
+    """Persist an attributable workspace Steer (`DEC-0049` / `DEC-0061`)."""
+    if scope not in ("global", "subsystem", "path"):
+        raise AjarError(f"Unsupported steer scope: {scope!r}", EXIT_USER_ERROR)
+    if touch_kind not in ("scope_authority", "research_steering"):
+        raise AjarError(f"Unsupported steer touch_kind: {touch_kind!r}", EXIT_USER_ERROR)
+    clean_rule = scrub_text(rule_text.strip())
+    if len(clean_rule) < 5:
+        raise AjarError("Steer rule_text must be at least 5 characters.", EXIT_USER_ERROR)
+
+    sid = new_id("str")
+    now_iso = utc_now_iso()
+    clean_filter = scrub_text(target_filter.strip())
+    clean_author = scrub_text(author.strip() or "operator")
+    conn.execute(
+        """
+        INSERT INTO steers(steer_id, scope, target_filter, rule_text, author, touch_kind, active, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+        """,
+        (sid, scope, clean_filter, clean_rule, clean_author, touch_kind, now_iso),
+    )
+    touch_id = None
+    if record_human_touch and clean_author != "system":
+        touch_id = new_id("tch")
+        conn.execute(
+            "INSERT INTO human_touches(touch_id, kind, actor, notes, created_at) VALUES (?, ?, ?, ?, ?)",
+            (touch_id, touch_kind, clean_author, f"steer {sid} [{scope}:{clean_filter or '*'}]: {clean_rule[:160]}", now_iso),
+        )
+    log_event(
+        conn,
+        clean_author,
+        "steer_added",
+        sid,
+        {"scope": scope, "target_filter": clean_filter, "touch_kind": touch_kind, "touch_id": touch_id},
+    )
+    return {
+        "steer_id": sid,
+        "scope": scope,
+        "target_filter": clean_filter,
+        "rule_text": clean_rule,
+        "author": clean_author,
+        "touch_kind": touch_kind,
+        "touch_id": touch_id,
+        "active": 1,
+    }
+
+
+def list_steers(
+    conn: sqlite3.Connection,
+    *,
+    active_only: bool = False,
+    subsystem: str = "",
+    locus: str = "",
+) -> list[dict[str, Any]]:
+    sql = "SELECT * FROM steers"
+    if active_only:
+        sql += " WHERE active = 1"
+    sql += " ORDER BY steer_id ASC"
+    rows = [dict(r) for r in conn.execute(sql).fetchall()]
+    if not subsystem and not locus:
+        return rows
+    matched: list[dict[str, Any]] = []
+    loc_file = locus.split(":", 1)[0].strip().lstrip("./")
+    for r in rows:
+        sc = r["scope"]
+        flt = (r["target_filter"] or "").strip().lstrip("./")
+        if sc == "global" or not flt:
+            matched.append(r)
+        elif sc == "subsystem" and subsystem and (subsystem == flt or subsystem.startswith(flt + "/")):
+            matched.append(r)
+        elif sc == "path" and loc_file and (loc_file.startswith(flt) or flt in loc_file):
+            matched.append(r)
+    return matched
+
+
+def revoke_steer(
+    conn: sqlite3.Connection,
+    *,
+    steer_id: str,
+    reason: str,
+    actor: str = "operator",
+) -> dict[str, Any]:
+    row = conn.execute("SELECT * FROM steers WHERE steer_id = ?", (steer_id,)).fetchone()
+    if row is None:
+        raise AjarError(f"Unknown steer_id: {steer_id}", EXIT_USER_ERROR)
+    now_iso = utc_now_iso()
+    clean_reason = scrub_text(reason.strip() or "revoked")
+    conn.execute(
+        "UPDATE steers SET active = 0, revoked_at = ?, revoke_reason = ? WHERE steer_id = ?",
+        (now_iso, clean_reason, steer_id),
+    )
+    log_event(conn, actor, "steer_revoked", steer_id, {"reason": clean_reason})
+    return {"steer_id": steer_id, "active": 0, "revoked_at": now_iso, "revoke_reason": clean_reason}
+
+
+def rescope_claim(
+    conn: sqlite3.Connection,
+    *,
+    claim_id: str,
+    worker_id: str,
+    reason: str,
+    title: str | None = None,
+    locus: str | None = None,
+    mechanism: str | None = None,
+    severity: str | None = None,
+    falsification_prediction: str | None = None,
+    falsification_test: str | None = None,
+) -> dict[str, Any]:
+    """Re-scope a candidate claim when locus, preconditions, or severity shift (`claim_mismatch` recovery)."""
+    clm = conn.execute("SELECT * FROM claims WHERE claim_id = ?", (claim_id,)).fetchone()
+    if clm is None:
+        raise AjarError(f"Unknown claim_id: {claim_id}", EXIT_USER_ERROR)
+    if clm["status"] == "reproduced":
+        raise AjarError(
+            f"Truth-axis monotonicity gate: verified reproduced claim {claim_id} cannot be rescoped in place.",
+            EXIT_GATE_BLOCKED,
+        )
+    if len(reason.strip()) < 8:
+        raise AjarError("Claim rescope --reason must be at least 8 characters.", EXIT_USER_ERROR)
+
+    new_title = scrub_text(title.strip()) if title else str(clm["title"])
+    new_locus = locus.strip() if locus else str(clm["locus"])
+    new_mech = scrub_text(mechanism.strip()) if mechanism else str(clm["mechanism"])
+    new_sev = severity.strip() if severity else str(clm["severity"])
+    new_pred = scrub_text(falsification_prediction.strip()) if falsification_prediction else str(clm["falsification_prediction"])
+    new_test = scrub_text(falsification_test.strip()) if falsification_test else str(clm["falsification_test"])
+    new_sub = infer_subsystem(new_locus)
+    new_mech_key = normalize_mechanism_key(new_mech)
+
+    # Re-run independent falsification whenever root-cause locus or mechanism changed.
+    root_changed = (new_locus != clm["locus"]) or (new_mech_key != clm["mechanism_key"])
+    new_status = "proposed" if root_changed or clm["status"] in ("falsified", "rejected_repro") else str(clm["status"])
+    new_falsifier = None if new_status == "proposed" else clm["falsifier_worker_id"]
+    now_iso = utc_now_iso()
+
+    conn.execute(
+        """
+        UPDATE claims
+        SET title = ?, subsystem = ?, locus = ?, mechanism = ?, mechanism_key = ?,
+            severity = ?, falsification_prediction = ?, falsification_test = ?,
+            status = ?, falsifier_worker_id = ?, research_state = 'candidate',
+            evidence_state = CASE WHEN ? = 'proposed' THEN 'unverified' ELSE evidence_state END,
+            failed_repro_count = CASE WHEN ? THEN 0 ELSE failed_repro_count END,
+            updated_at = ?
+        WHERE claim_id = ?
+        """,
+        (
+            new_title,
+            new_sub,
+            new_locus,
+            new_mech,
+            new_mech_key,
+            new_sev,
+            new_pred,
+            new_test,
+            new_status,
+            new_falsifier,
+            new_status,
+            1 if root_changed else 0,
+            now_iso,
+            claim_id,
+        ),
+    )
+    log_event(
+        conn,
+        worker_id,
+        "claim_rescoped",
+        claim_id,
+        {
+            "old_locus": clm["locus"],
+            "new_locus": new_locus,
+            "old_severity": clm["severity"],
+            "new_severity": new_sev,
+            "new_status": new_status,
+            "reason": scrub_text(reason[:200]),
+        },
+    )
+    return {
+        "claim_id": claim_id,
+        "status": new_status,
+        "locus": new_locus,
+        "severity": new_sev,
+        "root_changed": root_changed,
+    }
+
+
 def render_task_context(conn: sqlite3.Connection, task_id: str) -> dict[str, Any]:
-    """Build a deterministic `< 4 KB` (`<= 50` lines) certified context projection."""
+    """Build a prefix-stable `< 4 KB` (`<= 50` lines) certified context projection.
+
+    Places run-invariant sections (`Goal`, `Active Workspace Steers`, sorted `Certified Bindings`)
+    at the top of the prompt so multi-worker LLM calls hit provider KV prompt caches, followed
+    by the task-specific delta at the tail.
+    """
     task = conn.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
     if task is None:
         raise AjarError(f"Unknown task_id: {task_id}", EXIT_USER_ERROR)
@@ -818,24 +1116,36 @@ def render_task_context(conn: sqlite3.Connection, task_id: str) -> dict[str, Any
         depth += 1
     lineage.reverse()
 
+    # Deterministic name-sorted bindings keep the top prompt prefix byte-identical across tasks.
     bindings = conn.execute(
-        "SELECT name, value, locus FROM certified_bindings WHERE valid = 1 ORDER BY updated_at DESC LIMIT 8"
+        "SELECT name, value, locus FROM certified_bindings WHERE valid = 1 ORDER BY name ASC LIMIT 8"
     ).fetchall()
     sub = task["subsystem"] or infer_subsystem(task["locus"] or "")
+    direction = str(task["direction"] if "direction" in task.keys() and task["direction"] else "outside_in")
+    steers = list_steers(conn, active_only=True, subsystem=sub, locus=str(task["locus"] or ""))[:5]
+
     anomalies = conn.execute(
         """
         SELECT anomaly_id, locus, observation FROM anomalies
         WHERE status = 'unexplained' AND (subsystem = ? OR subsystem = '')
-        ORDER BY created_at DESC LIMIT 5
+        ORDER BY created_at DESC LIMIT 4
         """,
         (sub,),
+    ).fetchall()
+    guarded_prims = conn.execute(
+        """
+        SELECT primitive_id, locus, kind, guarded_by_locus FROM primitives
+        WHERE chained = 0 AND guarded_by_locus != '' AND (subsystem = ? OR locus = ?)
+        ORDER BY created_at DESC LIMIT 3
+        """,
+        (sub, task["locus"]),
     ).fetchall()
     dead_claims = conn.execute(
         """
         SELECT claim_id, locus, mechanism, status FROM claims
         WHERE (subsystem = ? OR locus = ?)
           AND status IN ('falsified', 'rejected_repro', 'duplicate_root_cause')
-        ORDER BY updated_at DESC LIMIT 5
+        ORDER BY updated_at DESC LIMIT 4
         """,
         (sub, task["locus"]),
     ).fetchall()
@@ -843,25 +1153,41 @@ def render_task_context(conn: sqlite3.Connection, task_id: str) -> dict[str, Any
         """
         SELECT task_id, dry_control_locus, dry_control_reason FROM tasks
         WHERE status = 'dry' AND subsystem = ?
-        ORDER BY updated_at DESC LIMIT 5
+        ORDER BY updated_at DESC LIMIT 4
         """,
         (sub,),
     ).fetchall()
 
+    # 1. Run-Invariant Cacheable Prefix
     lines: list[str] = [
-        f"# Certified Task Context: {task['task_id']}",
+        f"# Certified Run Prefix: {(run['run_id'] if run else 'run')}",
         f"Goal: {(run['goal'] if run else '')[:160]}",
-        f"Mode: skill_mode={task['skill_mode']} | kind={task['kind']} | salience={task['salience_score']}",
     ]
+    if steers:
+        lines.append("## Active Workspace Steers (operator threat-model boundaries)")
+        for st in steers:
+            lines.append(f"- [{st['scope']}:{st['target_filter'] or '*'}] {st['rule_text'][:110]}")
+    if bindings:
+        lines.append("## Certified Bindings (valid=1)")
+        for b in bindings:
+            lines.append(f"- {b['name']} = {b['value'][:90]} @ {b['locus']}")
+
+    # 2. Task-Specific Delta
+    lines.extend(
+        [
+            f"## Task Delta: {task['task_id']}",
+            f"Mode: skill_mode={task['skill_mode']} | kind={task['kind']} | direction={direction} | salience={task['salience_score']}",
+        ]
+    )
     if task["skill_mode"] == "zero_skill":
         lines.append("Rule: ZERO-SKILL FIRST-PRINCIPLES LEASE. Do NOT read skills/domains/*; derive invariants strictly from target code.")
     lines.append(f"Target Locus: {task['locus'] or '(unassigned)'} (subsystem: {sub or 'root'})")
     lines.append("Lineage: " + " -> ".join(lineage))
 
-    if bindings:
-        lines.append("## Certified Bindings (valid=1)")
-        for b in bindings:
-            lines.append(f"- {b['name']} = {b['value'][:90]} @ {b['locus']}")
+    if guarded_prims:
+        lines.append("## Guarded Primitives (anti-premature-dry: test guard break before closing dry)")
+        for gp in guarded_prims:
+            lines.append(f"- {gp['primitive_id']} [{gp['kind']}] @ {gp['locus']} guarded_by={gp['guarded_by_locus']}")
     if anomalies:
         lines.append("## Unexplained Anomalies (must explain or consume)")
         for a in anomalies:
@@ -882,8 +1208,10 @@ def render_task_context(conn: sqlite3.Connection, task_id: str) -> dict[str, Any
     return {
         "task_id": task["task_id"],
         "skill_mode": task["skill_mode"],
+        "direction": direction,
         "suppress_domain_skills": task["skill_mode"] == "zero_skill",
         "salience_score": task["salience_score"],
+        "steers_count": len(steers),
         "bindings_count": len(bindings),
         "unexplained_anomalies_count": len(anomalies),
         "dead_ends_count": len(dead_claims) + len(dry_controls),
@@ -924,8 +1252,8 @@ def run_pulse(conn: sqlite3.Connection, *, target_dir: pathlib.Path | None = Non
     blocked_rows = conn.execute("SELECT * FROM tasks WHERE status = 'conditional_blocked'").fetchall()
     if blocked_rows:
         signal_blobs: list[str] = []
-        for p in conn.execute("SELECT locus, kind, postconditions FROM primitives").fetchall():
-            signal_blobs.append(f"{p['locus']} {p['kind']} {p['postconditions']}".lower())
+        for p in conn.execute("SELECT locus, kind, postconditions, guarded_by_locus FROM primitives").fetchall():
+            signal_blobs.append(f"{p['locus']} {p['kind']} {p['postconditions']} {p['guarded_by_locus']}".lower())
         for a in conn.execute("SELECT locus, observation FROM anomalies WHERE status = 'unexplained'").fetchall():
             signal_blobs.append(f"{a['locus']} {a['observation']}".lower())
         for f in conn.execute("SELECT locus, title, root_cause FROM findings").fetchall():

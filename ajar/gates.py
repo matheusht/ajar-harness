@@ -16,7 +16,7 @@ import pathlib
 import sqlite3
 from typing import Any
 
-from ajar.db import new_id, utc_now_iso
+from ajar.db import log_event, new_id, utc_now_iso
 
 
 def compute_attribution_and_economics(conn: sqlite3.Connection) -> dict[str, Any]:
@@ -48,13 +48,19 @@ def compute_attribution_and_economics(conn: sqlite3.Connection) -> dict[str, Any
 
     total_usd = round(float(spend_row["total_usd"] or 0.0), 4)
     loc = int(run["in_scope_loc"] if run else 0)
-    budget_usd = float(run["budget_usd"] if run else 40.0)
+    budget_usd = float(run["budget_usd"] if run else 14.0)
     code_quote_usd = float(run["code_quote_usd"] if run else 10.0)
+    run_keys = set(run.keys()) if run is not None else set()
+    cogs_cap_usd = float(run["cogs_cap_usd"]) if "cogs_cap_usd" in run_keys else round(0.35 * code_quote_usd, 2)
+    pricing_mode = str(run["pricing_mode"]) if "pricing_mode" in run_keys else "commercial_code"
     cost_usd_per_kloc = round((total_usd / (loc / 1000.0)), 4) if loc > 0 else 0.0
+    gross_margin_floor_pass = (total_usd <= cogs_cap_usd) if pricing_mode == "commercial_code" else (total_usd <= budget_usd)
 
     return {
         "in_scope_loc": loc,
         "code_quote_usd": code_quote_usd,
+        "cogs_cap_usd": cogs_cap_usd,
+        "pricing_mode": pricing_mode,
         "budget_usd": budget_usd,
         "total_spend_usd": total_usd,
         "explore_spend_usd": round(float(spend_row["explore_usd"] or 0.0), 4),
@@ -63,6 +69,7 @@ def compute_attribution_and_economics(conn: sqlite3.Connection) -> dict[str, Any
         "tokens_out": int(spend_row["tokens_out"] or 0),
         "cost_usd_per_kloc": cost_usd_per_kloc,
         "within_code_cogs_target": (cost_usd_per_kloc <= 2.0) if loc > 0 else True,
+        "gross_margin_floor_pass": gross_margin_floor_pass,
         "human_touch_counts": touch_counts,
         "research_independence_pass": research_independence_pass,
         "product_operability_pass": product_operability_pass,
@@ -93,6 +100,115 @@ def validate_dry_locus(target_dir: pathlib.Path | None, target_mode: str, locus:
         if not candidate.is_file():
             return (False, f"dry --locus file does not exist in target: {rel_file}")
     return (True, "ok")
+
+
+def check_guarded_primitive_dry_block(
+    conn: sqlite3.Connection,
+    *,
+    task_row: sqlite3.Row | dict[str, Any],
+    dry_locus: str,
+) -> tuple[bool, str]:
+    """Anti-Premature-`dry` Rule (`Sovereign` lesson):
+
+    When a real dangerous sink or invariant flaw was recorded as a `primitive` with
+    `guarded_by_locus`, block closing the investigation task as permanently `dry` unless
+    a `conditional_blocked` guard-watch task or a `chain` task tracks breaking that guard.
+    """
+    if str(task_row["kind"]) != "investigate":
+        return (True, "ok")
+    t_surf = str(task_row["surface_id"] or "")
+    t_loc = str(task_row["locus"] or "")
+    guarded = conn.execute(
+        """
+        SELECT primitive_id, locus, kind, guarded_by_locus FROM primitives
+        WHERE chained = 0 AND guarded_by_locus != ''
+          AND (
+              (? != '' AND surface_id = ?)
+              OR (? != '' AND locus = ?)
+              OR guarded_by_locus = ?
+          )
+        """,
+        (t_surf, t_surf, t_loc, t_loc, dry_locus.strip()),
+    ).fetchall()
+    if not guarded:
+        return (True, "ok")
+
+    for gp in guarded:
+        gloc = str(gp["guarded_by_locus"])
+        tracked = conn.execute(
+            """
+            SELECT 1 FROM tasks
+            WHERE (status = 'conditional_blocked' AND blocker_check_locus = ? AND task_id != ?)
+               OR (kind = 'chain' AND status IN ('open', 'leased', 'done', 'dry'))
+            LIMIT 1
+            """,
+            (gloc, str(task_row["task_id"])),
+        ).fetchone()
+        if not tracked:
+            return (
+                False,
+                f"Anti-premature-dry gate: guarded primitive {gp['primitive_id']} ({gp['kind']} @ {gp['locus']}) "
+                f"is only blocked by upstream guard {gloc}. Park this task via `ajar task block {task_row['task_id']} "
+                f"--predicate 'break guard {gloc}' --check-locus {gloc}` or enqueue a `chain` task instead of closing `dry`.",
+            )
+    return (True, "ok")
+
+
+def evaluate_dry_surface_breaker(
+    conn: sqlite3.Connection,
+    *,
+    max_zero_signal_share: float = 0.25,
+) -> list[dict[str, Any]]:
+    """Throttle speculative `investigate` tasks on any surface burning `> 25%` of COGS cap with zero signal."""
+    run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
+    if run is None:
+        return []
+    cap = float(run["budget_usd"] or 0.0)
+    if cap <= 0.0:
+        return []
+    threshold = cap * float(max_zero_signal_share)
+
+    rows = conn.execute(
+        """
+        SELECT surface_id, COALESCE(SUM(cost_usd), 0.0) AS surf_spend
+        FROM spend_ledger
+        WHERE surface_id != '' AND phase = 'explore'
+        GROUP BY surface_id
+        HAVING surf_spend > ?
+        """,
+        (threshold,),
+    ).fetchall()
+
+    tripped: list[dict[str, Any]] = []
+    now_iso = utc_now_iso()
+    for r in rows:
+        sid = str(r["surface_id"])
+        anom_c = conn.execute("SELECT COUNT(*) AS c FROM anomalies WHERE surface_id = ?", (sid,)).fetchone()["c"]
+        prim_c = conn.execute("SELECT COUNT(*) AS c FROM primitives WHERE surface_id = ?", (sid,)).fetchone()["c"]
+        clm_c = conn.execute("SELECT COUNT(*) AS c FROM claims WHERE surface_id = ?", (sid,)).fetchone()["c"]
+        if (int(anom_c) + int(prim_c) + int(clm_c)) > 0:
+            continue
+        cur = conn.execute(
+            """
+            UPDATE tasks
+            SET status = 'conditional_blocked',
+                blocker_predicate = 'dry_surface_breaker: >25% explore budget spent with zero anomalies/primitives/claims; reopen on cross-surface primitive',
+                updated_at = ?
+            WHERE surface_id = ? AND kind = 'investigate' AND status = 'open'
+            """,
+            (now_iso, sid),
+        )
+        throttled = int(cur.rowcount or 0)
+        if throttled > 0:
+            entry = {
+                "surface_id": sid,
+                "explore_spend_usd": round(float(r["surf_spend"]), 4),
+                "threshold_usd": round(threshold, 4),
+                "throttled_tasks": throttled,
+            }
+            tripped.append(entry)
+            log_event(conn, "scheduler", "dry_surface_breaker_tripped", sid, entry)
+    return tripped
 
 
 def check_all_gates(
@@ -146,7 +262,7 @@ def check_all_gates(
             WHERE s.priority IN ('critical', 'high')
               AND NOT EXISTS (
                   SELECT 1 FROM tasks t
-                  WHERE t.surface_id = s.surface_id AND t.status IN ('done', 'dry')
+                  WHERE t.surface_id = s.surface_id AND t.status IN ('done', 'dry', 'conditional_blocked')
               )
             """
         ).fetchall()
@@ -155,7 +271,6 @@ def check_all_gates(
             g1_issues.append(f"{len(uncovered_surfaces)} critical/high surface(s) have zero completed tasks: {sample}.")
 
         if stopping == "first-verified-high" and high_findings == 0 and surface_count > 0 and not open_high:
-            # Exhausted all high tasks dry without finding a high bug: valid dry completion!
             pass
 
     gates["G1_surface_coverage"] = {"passed": len(g1_issues) == 0, "issues": g1_issues}
@@ -245,7 +360,7 @@ def check_all_gates(
     gates["G4_zero_skill_and_dry_rigor"] = {"passed": len(g4_issues) == 0, "issues": g4_issues}
     all_blockers.extend(f"[G4] {m}" for m in g4_issues)
 
-    # --- G5: Orphaned Anomalies & Unchained Primitives ---
+    # --- G5: Stage-5 Converge (Orphaned Anomalies, Invariant-Pair Guard Breaking & Multi-Primitive Chains) ---
     g5_issues: list[str] = []
     unexplained = conn.execute(
         "SELECT anomaly_id, locus, observation FROM anomalies WHERE status = 'unexplained'"
@@ -258,13 +373,17 @@ def check_all_gates(
         )
 
     prim_count = conn.execute("SELECT COUNT(*) AS c FROM primitives").fetchone()["c"]
+    guarded_prim_count = conn.execute(
+        "SELECT COUNT(*) AS c FROM primitives WHERE guarded_by_locus != '' AND chained = 0"
+    ).fetchone()["c"]
     closed_chain_tasks = conn.execute(
         "SELECT COUNT(*) AS c FROM tasks WHERE kind = 'chain' AND status IN ('done', 'dry')"
     ).fetchone()["c"]
     open_chain_tasks = conn.execute(
         "SELECT COUNT(*) AS c FROM tasks WHERE kind = 'chain' AND status IN ('open', 'leased')"
     ).fetchone()["c"]
-    if int(prim_count) >= 2 and int(closed_chain_tasks) == 0:
+    needs_converge = int(prim_count) >= 2 or int(guarded_prim_count) >= 1
+    if needs_converge and int(closed_chain_tasks) == 0:
         if auto_enqueue_chain and int(open_chain_tasks) == 0:
             cid = new_id("task")
             now_iso = utc_now_iso()
@@ -272,12 +391,17 @@ def check_all_gates(
                 """
                 INSERT INTO tasks(
                     task_id, kind, title, priority, status, salience_score, summary, created_at, updated_at
-                ) VALUES (?, 'chain', 'Evaluate composition chains across discovered primitives', 'high', 'open', 75, ?, ?, ?)
+                ) VALUES (?, 'chain', 'Run Stage-5 Converge: evaluate invariant-pair guard breaks and multi-step chains', 'high', 'open', 75, ?, ?, ?)
                 """,
-                (cid, f"Auto-enqueued by G5: {prim_count} verified primitives exist.", now_iso, now_iso),
+                (
+                    cid,
+                    f"Auto-enqueued by G5: {prim_count} primitives ({guarded_prim_count} guarded) and {len(finding_rows)} findings.",
+                    now_iso,
+                    now_iso,
+                ),
             )
             g5_issues.append(
-                f"{prim_count} primitives exist with zero completed chain analysis; enqueued chain task {cid}."
+                f"Stage-5 Converge required ({prim_count} primitives, {guarded_prim_count} guarded); enqueued chain task {cid}."
             )
         else:
             g5_issues.append(f"{prim_count} primitives exist; complete open `chain` task before finishing.")

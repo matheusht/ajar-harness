@@ -19,15 +19,18 @@ from ajar.db import (
     infer_subsystem,
     lease_next_task,
     list_rows,
+    list_steers,
     log_event,
     maybe_auto_pulse,
     new_id,
     open_run_db,
     render_task_context,
+    rescope_claim,
     resolve_run_id,
     utc_now_iso,
 )
-from ajar.gates import check_all_gates, validate_dry_locus
+from ajar.gates import check_all_gates, check_guarded_primitive_dry_block, validate_dry_locus
+from ajar.graph import export_attack_flow_graph
 from ajar.oracles import query_oracle
 from ajar.redact import scrub_text
 from ajar.repomap import build_repomap
@@ -182,6 +185,33 @@ MCP_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "ajar_claim_rescope",
+        "description": "Re-scope a claim's locus, preconditions, or severity instead of discarding a real defect (`claim_mismatch` recovery).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "claim_id": {"type": "string"},
+                "worker_id": {"type": "string"},
+                "reason": {"type": "string"},
+                "title": {"type": "string"},
+                "locus": {"type": "string"},
+                "mechanism": {"type": "string"},
+                "severity": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
+            },
+            "required": ["claim_id", "worker_id", "reason"],
+        },
+    },
+    {
+        "name": "ajar_steer_list",
+        "description": "List active workspace Steers (threat-model scope boundaries and trusted invariants).",
+        "inputSchema": {"type": "object", "properties": {"active_only": {"type": "boolean", "default": True}}},
+    },
+    {
+        "name": "ajar_export_graph",
+        "description": "Export deterministic `ajar-platform-graph/1` component and attack-flow whiteboard JSON.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "ajar_finish",
         "description": "Check all 5 SQL closeout gates (`G1`–`G5`) and mark the run finished if green.",
         "inputSchema": {"type": "object", "properties": {}},
@@ -257,9 +287,14 @@ def dispatch_mcp_tool(
             )
             return {"leased": leased}
         if tool_name == "ajar_task_close":
+            from ajar import EXIT_GATE_BLOCKED, EXIT_USER_ERROR
+
             tid = str(args["task_id"])
             wid = str(args["worker_id"])
             outcome = str(args["outcome"])
+            cur_task = conn.execute("SELECT * FROM tasks WHERE task_id = ?", (tid,)).fetchone()
+            if cur_task is None:
+                raise AjarError(f"Unknown task_id: {tid}", EXIT_USER_ERROR)
             now_iso = utc_now_iso()
             import time as _t
 
@@ -268,7 +303,10 @@ def dispatch_mcp_tool(
                 creason = str(args.get("control_reason") or "")
                 ok, msg = validate_dry_locus(tpath, str(run["target_mode"] if run else "source"), cloc, creason)
                 if not ok:
-                    raise AjarError(msg)
+                    raise AjarError(msg, EXIT_GATE_BLOCKED)
+                ok_gp, msg_gp = check_guarded_primitive_dry_block(conn, task_row=cur_task, dry_locus=cloc)
+                if not ok_gp:
+                    raise AjarError(msg_gp, EXIT_GATE_BLOCKED)
                 conn.execute(
                     """
                     UPDATE tasks
@@ -378,7 +416,6 @@ def dispatch_mcp_tool(
                 """,
                 (wid, scrub_text(str(args["notes"])), args.get("control_locus"), now_iso, cid),
             )
-            # Orphaned Anomaly Survival: restore any anomaly tentatively consumed by this disproved claim!
             conn.execute(
                 """
                 UPDATE anomalies
@@ -414,6 +451,21 @@ def dispatch_mcp_tool(
             )
             log_event(conn, wid, "claim_survived_falsify", cid, {})
             return {"claim_id": cid, "status": "survived_falsify"}
+        if tool_name == "ajar_claim_rescope":
+            return rescope_claim(
+                conn,
+                claim_id=str(args["claim_id"]),
+                worker_id=str(args["worker_id"]),
+                reason=str(args["reason"]),
+                title=args.get("title"),
+                locus=args.get("locus"),
+                mechanism=args.get("mechanism"),
+                severity=args.get("severity"),
+            )
+        if tool_name == "ajar_steer_list":
+            return {"steers": list_steers(conn, active_only=bool(args.get("active_only", True)))}
+        if tool_name == "ajar_export_graph":
+            return export_attack_flow_graph(conn)
         if tool_name == "ajar_finish":
             gates = check_all_gates(conn, target_dir=tpath, auto_enqueue_chain=True)
             if gates["passed"]:

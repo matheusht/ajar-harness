@@ -19,11 +19,13 @@ from typing import Any, Sequence
 from ajar import EXIT_GATE_BLOCKED, EXIT_OK, EXIT_USER_ERROR, __version__
 from ajar.db import (
     AjarError,
+    add_steer,
     check_dead_end_repetition,
     compute_task_salience,
     infer_subsystem,
     lease_next_task,
     list_rows,
+    list_steers,
     log_event,
     maybe_auto_pulse,
     new_id,
@@ -31,18 +33,27 @@ from ajar.db import (
     open_run_db,
     record_repro_failure,
     render_task_context,
+    rescope_claim,
     resolve_run_id,
+    revoke_steer,
     run_dir_for,
     run_pulse,
     set_certified_binding,
     utc_now_iso,
 )
-from ajar.gates import check_all_gates, finding_attribution_for_claim, validate_dry_locus
+from ajar.gates import (
+    check_all_gates,
+    check_guarded_primitive_dry_block,
+    finding_attribution_for_claim,
+    validate_dry_locus,
+)
+from ajar.graph import export_attack_flow_graph
 from ajar.hooks import evaluate_claude_stop_hook, run_host_continuation_loop
 from ajar.mcp import serve_mcp_stdio
 from ajar.oracles import query_oracle
+from ajar.patch_verify import run_8arm_patch_verification
 from ajar.redact import scrub_text, scrubbed_subprocess_env
-from ajar.repomap import build_repomap
+from ajar.repomap import build_repomap, compute_quote_summary
 from ajar.report import build_report_data, render_markdown_report
 from ajar.repro_binary_live import run_binary_reproduction, run_live_reproduction
 from ajar.repro_source import run_source_reproduction, unshare_netns_available
@@ -90,6 +101,18 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return EXIT_OK if (py_ok and fts5_ok and bool(found["git"])) else EXIT_USER_ERROR
 
 
+def cmd_quote(args: argparse.Namespace) -> int:
+    tpath = pathlib.Path(args.target).expanduser().resolve()
+    if not tpath.exists():
+        raise AjarError(f"Target path does not exist: {tpath}", EXIT_USER_ERROR)
+    try:
+        summary = compute_quote_summary(tpath, diff_range=args.diff)
+    except ValueError as exc:
+        raise AjarError(str(exc), EXIT_USER_ERROR) from exc
+    _emit(summary, True)
+    return EXIT_OK
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     ws_mode = "in_place" if args.in_place else "envelope"
     info = init_run_workspace(
@@ -110,7 +133,10 @@ def cmd_init(args: argparse.Namespace) -> int:
         print(f"Initialized Ajar run: {info['run_id']}")
         print(f"  Workspace ({info['workspace_mode']}): {info['workspace_path']}")
         print(f"  Target ({info['target_mode']}):    {info['target_path']}")
-        print(f"  In-scope LoC:           {info['in_scope_loc']} (Code quote cap: ${info['code_quote_usd']:.2f})")
+        print(
+            f"  In-scope LoC:           {info['in_scope_loc']} "
+            f"(Code quote: ${info['code_quote_usd']:.2f}, COGS cap: ${info['cogs_cap_usd']:.2f} [{info['pricing_mode']}])"
+        )
         print(f"  Commitment SHA-256:     {info['commitment_hash']}")
         print(f"  Export for shell:       export AJAR_RUN_ID={info['run_id']}")
     return EXIT_OK
@@ -284,6 +310,7 @@ def cmd_task(args: argparse.Namespace) -> int:
             tid = new_id("task")
             now_iso = utc_now_iso()
             sub = args.subsystem or infer_subsystem(args.locus or "")
+            direction = getattr(args, "direction", "outside_in") or "outside_in"
             draft = {
                 "priority": args.priority,
                 "subsystem": sub,
@@ -294,15 +321,16 @@ def cmd_task(args: argparse.Namespace) -> int:
             conn.execute(
                 """
                 INSERT INTO tasks(
-                    task_id, parent_task_id, surface_id, kind, title, subsystem, locus,
+                    task_id, parent_task_id, surface_id, kind, direction, title, subsystem, locus,
                     priority, status, salience_score, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
                 """,
                 (
                     tid,
                     args.parent,
                     args.surface,
                     args.kind,
+                    direction,
                     scrub_text(args.title),
                     sub,
                     args.locus or "",
@@ -312,8 +340,8 @@ def cmd_task(args: argparse.Namespace) -> int:
                     now_iso,
                 ),
             )
-            log_event(conn, "worker", "task_added", tid, {"kind": args.kind, "salience_score": sal})
-            _emit({"task_id": tid, "salience_score": sal, "subsystem": sub}, True)
+            log_event(conn, "worker", "task_added", tid, {"kind": args.kind, "direction": direction, "salience_score": sal})
+            _emit({"task_id": tid, "direction": direction, "salience_score": sal, "subsystem": sub}, True)
             return EXIT_OK
 
         if args.task_cmd == "lease":
@@ -361,11 +389,17 @@ def cmd_task(args: argparse.Namespace) -> int:
             return EXIT_OK
 
         if args.task_cmd == "dry":
+            cur = conn.execute("SELECT * FROM tasks WHERE task_id = ?", (args.task_id,)).fetchone()
+            if cur is None:
+                raise AjarError(f"Unknown task_id: {args.task_id}", EXIT_USER_ERROR)
             ok, msg = validate_dry_locus(
                 tpath, str(run["target_mode"] if run else "source"), args.locus, args.control
             )
             if not ok:
                 raise AjarError(msg, EXIT_GATE_BLOCKED)
+            ok_gp, msg_gp = check_guarded_primitive_dry_block(conn, task_row=cur, dry_locus=args.locus)
+            if not ok_gp:
+                raise AjarError(msg_gp, EXIT_GATE_BLOCKED)
             now_iso = utc_now_iso()
             conn.execute(
                 """
@@ -488,26 +522,38 @@ def cmd_primitive(args: argparse.Namespace) -> int:
         if args.primitive_cmd == "add":
             pid = new_id("prim")
             sub = infer_subsystem(args.locus)
+            guarded_by = (getattr(args, "guarded_by", None) or "").strip()
+            guard_assumption = scrub_text(getattr(args, "guard_assumption", None) or "")
             conn.execute(
                 """
                 INSERT INTO primitives(
-                    primitive_id, subsystem, locus, kind, preconditions, postconditions, evidence_cmd, evidence_output, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    primitive_id, surface_id, subsystem, locus, kind, preconditions, postconditions,
+                    guarded_by_locus, guard_assumption, evidence_cmd, evidence_output, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     pid,
+                    getattr(args, "surface", None),
                     sub,
                     args.locus,
                     args.kind,
                     scrub_text(args.preconditions),
                     scrub_text(args.postconditions),
+                    guarded_by,
+                    guard_assumption,
                     scrub_text(args.evidence_cmd),
                     scrub_text(args.evidence_output or ""),
                     utc_now_iso(),
                 ),
             )
-            log_event(conn, "worker", "primitive_added", pid, {"locus": args.locus, "kind": args.kind})
-            _emit({"primitive_id": pid, "subsystem": sub}, True)
+            log_event(
+                conn,
+                "worker",
+                "primitive_added",
+                pid,
+                {"locus": args.locus, "kind": args.kind, "guarded_by_locus": guarded_by},
+            )
+            _emit({"primitive_id": pid, "subsystem": sub, "guarded_by_locus": guarded_by}, True)
             return EXIT_OK
 
         rows = list_rows(conn, "SELECT * FROM primitives ORDER BY created_at ASC")
@@ -598,6 +644,22 @@ def cmd_claim(args: argparse.Namespace) -> int:
                 )
             log_event(conn, args.worker, "claim_proposed", cid, {"locus": args.locus, "severity": args.severity})
             _emit({"claim_id": cid, "status": "proposed", "subsystem": sub}, True)
+            return EXIT_OK
+
+        if args.claim_cmd == "rescope":
+            res = rescope_claim(
+                conn,
+                claim_id=args.claim_id,
+                worker_id=args.worker,
+                reason=args.reason,
+                title=args.title,
+                locus=args.locus,
+                mechanism=args.mechanism,
+                severity=args.severity,
+                falsification_prediction=args.falsification_prediction,
+                falsification_test=args.falsification_test,
+            )
+            _emit(res, True)
             return EXIT_OK
 
         if args.claim_cmd == "falsify":
@@ -718,6 +780,8 @@ def cmd_claim(args: argparse.Namespace) -> int:
                     trials=args.trials,
                     timeout_sec=args.timeout,
                     warm_cross_kill_claims=siblings,
+                    claim_locus=str(clm["locus"]),
+                    shared_guard_locus=str(getattr(args, "shared_guard_locus", None) or ""),
                 )
             elif eff_mode == "binary":
                 bin_p = pathlib.Path(args.binary) if args.binary else tpath
@@ -911,14 +975,16 @@ def cmd_spend(args: argparse.Namespace) -> int:
     try:
         if args.spend_cmd == "add":
             eid = new_id("spd")
+            surf = (getattr(args, "surface", None) or "").strip()
             conn.execute(
                 """
-                INSERT INTO spend_ledger(entry_id, worker_id, phase, model, tokens_in, tokens_out, cost_usd, notes, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO spend_ledger(entry_id, worker_id, surface_id, phase, model, tokens_in, tokens_out, cost_usd, notes, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     eid,
                     args.worker,
+                    surf,
                     args.phase,
                     args.model or "",
                     int(args.tokens_in),
@@ -928,13 +994,97 @@ def cmd_spend(args: argparse.Namespace) -> int:
                     utc_now_iso(),
                 ),
             )
-            _emit({"entry_id": eid, "cost_usd": float(args.cost_usd)}, True)
+            _emit({"entry_id": eid, "surface_id": surf, "cost_usd": float(args.cost_usd)}, True)
             return EXIT_OK
         rows = list_rows(conn, "SELECT * FROM spend_ledger ORDER BY created_at ASC")
         _emit({"spend_entries": rows}, True)
         return EXIT_OK
     finally:
         conn.close()
+
+
+def cmd_steer(args: argparse.Namespace) -> int:
+    rid = resolve_run_id(args.run)
+    conn = open_run_db(rid)
+    try:
+        if args.steer_cmd == "add":
+            res = add_steer(
+                conn,
+                rule_text=args.rule,
+                scope=args.scope,
+                target_filter=args.filter or "",
+                author=args.author,
+                touch_kind=args.kind,
+            )
+            _emit(res, True)
+            return EXIT_OK
+        if args.steer_cmd == "revoke":
+            res = revoke_steer(
+                conn,
+                steer_id=args.steer_id,
+                reason=args.reason,
+                actor=args.actor,
+            )
+            _emit(res, True)
+            return EXIT_OK
+        rows = list_steers(conn, active_only=not bool(args.all))
+        _emit({"steers": rows}, True)
+        return EXIT_OK
+    finally:
+        conn.close()
+
+
+def cmd_patch(args: argparse.Namespace) -> int:
+    rid = resolve_run_id(args.run)
+    rdir = run_dir_for(rid)
+    conn = open_run_db(rid)
+    try:
+        if args.patch_cmd == "verify":
+            run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
+            tpath = pathlib.Path(run["target_path"])
+            oracle_dict = json.loads(args.oracle_json) if args.oracle_json else None
+            res = run_8arm_patch_verification(
+                conn,
+                run_dir=rdir,
+                target_dir=tpath,
+                finding_id=args.finding_id,
+                patch_path=pathlib.Path(args.patch),
+                suite_cmd=args.suite_cmd,
+                variant_cmds=args.variant_cmd or [],
+                caller_audit=args.caller_audit,
+                sibling_audit=args.sibling_audit,
+                oracle=oracle_dict,
+                shared_guard_locus=args.shared_guard_locus or "",
+                max_changed_lines=args.max_changed_lines,
+                timeout_sec=args.timeout,
+                worker_id=args.worker,
+            )
+            _emit(res, True)
+            return EXIT_OK if res["passed"] else EXIT_GATE_BLOCKED
+
+        rows = list_rows(conn, "SELECT * FROM patch_verifications ORDER BY created_at ASC")
+        _emit({"patch_verifications": rows}, True)
+        return EXIT_OK
+    finally:
+        conn.close()
+
+
+def cmd_export_graph(args: argparse.Namespace) -> int:
+    rid = resolve_run_id(args.run)
+    conn = open_run_db(rid)
+    try:
+        graph = export_attack_flow_graph(conn)
+    finally:
+        conn.close()
+
+    out_str = json.dumps(graph, indent=2, sort_keys=True)
+    if args.output:
+        out_p = pathlib.Path(args.output)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        out_p.write_text(out_str + "\n", encoding="utf-8")
+    else:
+        print(out_str)
+    return EXIT_OK
 
 
 def cmd_gate_check(args: argparse.Namespace) -> int:
@@ -1047,6 +1197,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         stopping_criterion=args.until,
         budget_usd=args.budget,
         workers=args.workers,
+        discover_passes=args.discover_passes,
         worker_cmd=args.worker_cmd,
         max_steps=args.max_steps,
     )
@@ -1057,7 +1208,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="ajar",
-        description="Ajar: find, disprove, reproduce, and patch software vulnerabilities.",
+        description="Ajar: verification-backed security engine for Code, Fixes, Security reviews, and Supply chain.",
     )
     p.add_argument("--version", action="version", version=f"ajar {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -1066,6 +1217,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_doc = sub.add_parser("doctor", help="Check local Python, SQLite FTS5, compilers, and sandbox isolation.")
     p_doc.add_argument("--json", action="store_true", default=True)
     p_doc.set_defaults(func=cmd_doctor)
+
+    # quote
+    p_qt = sub.add_parser("quote", help="Preview deterministic Code LOC quote and 35%% COGS cap before running.")
+    p_qt.add_argument("target", help="Target repository directory or file path.")
+    p_qt.add_argument("--diff", help="Optional git diff range (`base..head`) for PR/commit differential quoting.")
+    p_qt.add_argument("--json", action="store_true", default=True)
+    p_qt.set_defaults(func=cmd_quote)
 
     # init
     p_init = sub.add_parser("init", help="Initialize a new verification run in --envelope or --in-place mode.")
@@ -1076,7 +1234,8 @@ def build_parser() -> argparse.ArgumentParser:
     grp_ws.add_argument("--in-place", action="store_true", help="Write zero files into target directory.")
     p_init.add_argument("--goal", default="Identify, falsify, and reproduce high-severity software vulnerabilities.")
     p_init.add_argument("--until", choices=("exhaustive-high", "first-verified-high"), default="exhaustive-high")
-    p_init.add_argument("--budget", type=float, default=40.0)
+    p_init.add_argument("--budget", type=float, default=None, help="Explicit COGS cap override in USD (defaults to 0.35 * Code quote).")
+    p_init.add_argument("--cogs-cap", dest="budget", type=float, help="Alias for --budget explicit COGS cap override in USD.")
     p_init.add_argument("--allow-host", action="append", help="Allowed live target hostname.")
     p_init.add_argument("--allow-live-requests", action="store_true")
     p_init.add_argument("--allow-live-mutations", action="store_true")
@@ -1091,7 +1250,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_stat.set_defaults(func=cmd_status)
 
     # context
-    p_ctx = sub.add_parser("context", help="Render < 4 KB certified context frame for a task.")
+    p_ctx = sub.add_parser("context", help="Render prefix-stable < 4 KB certified context frame for a task.")
     p_ctx.add_argument("--task", required=True)
     p_ctx.add_argument("--run")
     p_ctx.add_argument("--json", action="store_true")
@@ -1164,6 +1323,12 @@ def build_parser() -> argparse.ArgumentParser:
     tsk_sub = p_tsk.add_subparsers(dest="task_cmd", required=True)
     pt_add = tsk_sub.add_parser("add")
     pt_add.add_argument("--kind", choices=("map", "investigate", "falsify", "reproduce", "instrument", "chain", "patch"), required=True)
+    pt_add.add_argument(
+        "--direction",
+        choices=("outside_in", "inside_out", "native_ffi", "peer_symmetry"),
+        default="outside_in",
+        help="Investigation direction (`outside_in`, `inside_out`, `native_ffi`, `peer_symmetry`).",
+    )
     pt_add.add_argument("--title", required=True)
     pt_add.add_argument("--surface")
     pt_add.add_argument("--parent")
@@ -1232,6 +1397,9 @@ def build_parser() -> argparse.ArgumentParser:
     pp_add.add_argument("--postconditions", required=True)
     pp_add.add_argument("--evidence-cmd", required=True)
     pp_add.add_argument("--evidence-output", default="")
+    pp_add.add_argument("--surface", help="Optional associated surface ID.")
+    pp_add.add_argument("--guarded-by", help="Upstream guard locus (`file:lines`) blocking standalone exploitation.")
+    pp_add.add_argument("--guard-assumption", default="", help="Invariant assumed by the upstream guard.")
     pp_add.add_argument("--run")
     pp_lst = pr_sub.add_parser("list")
     pp_lst.add_argument("--run")
@@ -1251,7 +1419,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_bd.set_defaults(func=cmd_binding)
 
     # claim
-    p_cl = sub.add_parser("claim", help="Manage vulnerability hypotheses (`propose`, `falsify`, `survive`, `reproduce`).")
+    p_cl = sub.add_parser("claim", help="Manage vulnerability hypotheses (`propose`, `rescope`, `falsify`, `survive`, `reproduce`).")
     cl_sub = p_cl.add_subparsers(dest="claim_cmd", required=True)
     pc_prop = cl_sub.add_parser("propose")
     pc_prop.add_argument("--worker", required=True)
@@ -1265,6 +1433,18 @@ def build_parser() -> argparse.ArgumentParser:
     pc_prop.add_argument("--consume-anomaly")
     pc_prop.add_argument("--seeded-by-human", action="store_true")
     pc_prop.add_argument("--run")
+
+    pc_rsc = cl_sub.add_parser("rescope")
+    pc_rsc.add_argument("claim_id")
+    pc_rsc.add_argument("--worker", required=True)
+    pc_rsc.add_argument("--reason", required=True)
+    pc_rsc.add_argument("--title")
+    pc_rsc.add_argument("--locus")
+    pc_rsc.add_argument("--mechanism")
+    pc_rsc.add_argument("--severity", choices=("critical", "high", "medium", "low"))
+    pc_rsc.add_argument("--falsification-prediction")
+    pc_rsc.add_argument("--falsification-test")
+    pc_rsc.add_argument("--run")
 
     pc_fal = cl_sub.add_parser("falsify")
     pc_fal.add_argument("claim_id")
@@ -1292,6 +1472,7 @@ def build_parser() -> argparse.ArgumentParser:
     pc_rep.add_argument("--poc-cmd", default="")
     pc_rep.add_argument("--control-cmd", default="")
     pc_rep.add_argument("--micropatch", help="Path to 1-5 line counterfactual unified diff (source mode).")
+    pc_rep.add_argument("--shared-guard-locus", default="", help="Optional shared upstream guard locus when micropatch fixes a shared chokepoint.")
     pc_rep.add_argument("--oracle-json", help="Optional JSON oracle rules (`expect_regex`, `expect_exit_code`).")
     pc_rep.add_argument("--determinism", choices=("deterministic", "probabilistic_race"), default="deterministic")
     pc_rep.add_argument("--trials", type=int, default=8)
@@ -1325,6 +1506,57 @@ def build_parser() -> argparse.ArgumentParser:
     pch_l.add_argument("--run")
     p_ch.set_defaults(func=cmd_chain)
 
+    # patch (8-Arm Production Fixes Gate)
+    p_ptc = sub.add_parser("patch", help="Verify production Fixes with the 8-Arm Remediation Gate (`ajar patch verify`).")
+    ptc_sub = p_ptc.add_subparsers(dest="patch_cmd", required=True)
+    ppt_v = ptc_sub.add_parser("verify")
+    ppt_v.add_argument("finding_id")
+    ppt_v.add_argument("--patch", required=True, help="Path to unified diff production patch.")
+    ppt_v.add_argument("--suite-cmd", required=True, help="Arm 5 full project test suite command.")
+    ppt_v.add_argument("--variant-cmd", action="append", required=True, help="Arm 6 bypass variant command (repeat >= 3 times).")
+    ppt_v.add_argument("--caller-audit", required=True, help="Arm 7 caller NULL/error-return safety audit note (>= 20 chars).")
+    ppt_v.add_argument("--sibling-audit", required=True, help="Arm 8 sibling-route / peer-hook symmetry audit note (>= 20 chars).")
+    ppt_v.add_argument("--oracle-json", help="Optional JSON oracle rules for PoC/variant checks.")
+    ppt_v.add_argument("--shared-guard-locus", default="", help="Optional shared guard locus when patching a common chokepoint.")
+    ppt_v.add_argument("--max-changed-lines", type=int, default=120)
+    ppt_v.add_argument("--timeout", type=int, default=90)
+    ppt_v.add_argument("--worker", default="worker")
+    ppt_v.add_argument("--run")
+    ppt_l = ptc_sub.add_parser("list")
+    ppt_l.add_argument("--run")
+    p_ptc.set_defaults(func=cmd_patch)
+
+    # steer
+    p_st = sub.add_parser("steer", help="Manage attributable workspace Steers (`DEC-0049` / `DEC-0061`).")
+    st_sub = p_st.add_subparsers(dest="steer_cmd", required=True)
+    pst_a = st_sub.add_parser("add")
+    pst_a.add_argument("--rule", required=True, help="Threat-model or scope rule text.")
+    pst_a.add_argument("--scope", choices=("global", "subsystem", "path"), default="global")
+    pst_a.add_argument("--filter", default="", help="Subsystem name or path prefix when scope != global.")
+    pst_a.add_argument("--author", default="operator")
+    pst_a.add_argument(
+        "--kind",
+        choices=("scope_authority", "research_steering"),
+        default="scope_authority",
+        help="`scope_authority` preserves autonomous attribution; `research_steering` marks human-guided.",
+    )
+    pst_a.add_argument("--run")
+    pst_l = st_sub.add_parser("list")
+    pst_l.add_argument("--all", action="store_true", help="Include revoked Steers.")
+    pst_l.add_argument("--run")
+    pst_r = st_sub.add_parser("revoke")
+    pst_r.add_argument("steer_id")
+    pst_r.add_argument("--reason", required=True)
+    pst_r.add_argument("--actor", default="operator")
+    pst_r.add_argument("--run")
+    p_st.set_defaults(func=cmd_steer)
+
+    # export-graph (Platform whiteboard feed)
+    p_eg = sub.add_parser("export-graph", help="Export deterministic Platform component & attack-flow JSON graph.")
+    p_eg.add_argument("--output", help="Optional output file path.")
+    p_eg.add_argument("--run")
+    p_eg.set_defaults(func=cmd_export_graph)
+
     # touch
     p_tc = sub.add_parser("touch", help="Record human touches for run attribution (`DEC-0061`/`0071`).")
     tc_sub = p_tc.add_subparsers(dest="touch_cmd", required=True)
@@ -1343,6 +1575,7 @@ def build_parser() -> argparse.ArgumentParser:
     psp_a = sp_sub.add_parser("add")
     psp_a.add_argument("--worker", required=True)
     psp_a.add_argument("--cost-usd", type=float, required=True)
+    psp_a.add_argument("--surface", default="", help="Optional surface ID for dry-surface breaker tracking.")
     psp_a.add_argument("--phase", choices=("explore", "verify"), default="explore")
     psp_a.add_argument("--model", default="")
     psp_a.add_argument("--tokens-in", type=int, default=0)
@@ -1403,8 +1636,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--mode", choices=("source", "binary", "live"), default="source")
     p_run.add_argument("--goal", default="Identify, falsify, and reproduce high-severity software vulnerabilities.")
     p_run.add_argument("--until", choices=("exhaustive-high", "first-verified-high"), default="exhaustive-high")
-    p_run.add_argument("--budget", type=float, default=40.0)
+    p_run.add_argument("--budget", type=float, default=None, help="Explicit COGS cap override in USD (defaults to 0.35 * Code quote).")
+    p_run.add_argument("--cogs-cap", dest="budget", type=float, help="Alias for --budget explicit COGS cap override in USD.")
     p_run.add_argument("--workers", type=int, default=2)
+    p_run.add_argument("--discover-passes", type=int, default=1, help="Keep-biased Best-of-N discovery passes across directions before funneling.")
     p_run.add_argument("--worker-cmd", help="Worker command executed per leased task.")
     p_run.add_argument("--max-steps", type=int, default=50)
     p_run.add_argument("--json", action="store_true", default=True)

@@ -1,110 +1,40 @@
 name: conformance
 
 on:
+  pull_request:
   push:
     branches: [main]
-  pull_request:
+
+permissions:
+  contents: read
 
 jobs:
-  check:
+  conformance:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          # Full history: tools/decision6_replay.py reads the frozen baseline commit
-          # (23fc4f6a) via `git show <sha>:path`, which a shallow clone can't reach.
-          fetch-depth: 0
+
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
-      - name: Install pinned conformance dependencies
-        run: python3 -m pip install --disable-pip-version-check -r requirements-ci.txt
-      - name: Offline engineering guidance, admission, accounting, inspection and preparation packets
+          python-version: "3.11"
+
+      - name: Install ajar and dev dependencies
+        run: python3 -m pip install -e ".[dev]"
+
+      - name: Check AGENTS.md line budget (<= 50 lines)
         run: |
-          python3 tools/check-conformance.py --engineering-guidance
-          python3 tools/engineering-guidance-test.py
-          python3 tools/study-report-test.py
-          python3 tools/dossier-inspector-test.py
-          python3 tools/q02-admission-self-test.py
-          python3 tools/q02_compare.py --self-test
-          python3 tools/recovery-packet-test.py
-          python3 tools/communication-packet-test.py
-      - name: Decision 0005 engagement-record schema gate (self-test)
-        run: python3 tools/run-engagement.py --self-test
-      - name: Decision 0006 frozen old/new gate replay
-        run: python3 tools/decision6_replay.py --self-test
-      - name: Decision 0006 fail-closed capability matrix
-        run: python3 tools/decision6_capabilities.py
-      - name: Completion-claim gate (hermetic-only synthetic test)
-        run: python3 tools/completion-claims-test.py
-      - name: Decision 0006 agent-neutral flow telemetry
-        run: python3 tools/flow_telemetry.py --self-test
-      - name: Decision 0005 migration dry-run and reviewed-apply gate (self-test)
-        run: python3 tools/migrate-decision5.py --self-test
-      - name: Decision 0005 bounded retrospective evaluator (self-test)
-        run: python3 tools/evaluate-retrospective.py --self-test
-      - name: Decision 0005 prospective A/B readiness freezer (self-test)
-        run: python3 tools/prepare-ab-study.py --self-test
-      - name: Structural conformance (cards, routes, casebooks, secrets, evidence contract, corpora)
-        run: python3 tools/check-conformance.py
-      - name: Campaign / candidate contract gate (self-test)
-        run: python3 tools/check-campaign.py --self-test
-      - name: Campaign input hasher (self-test)
-        run: python3 tools/hash-campaign-inputs.py --self-test
-      - name: GEPA shadow runner (self-test)
-        run: python3 tools/run-gepa-shadow.py --self-test
-      - name: GEPA Phase 8 adapter (self-test)
-        run: python3 tools/run-gepa-real.py --self-test
-      - name: GEPA Phase 9 candidate-applied evaluation (self-test)
-        run: python3 tools/apply-candidate-eval.py --self-test
-      - name: GEPA Phase 10 blind behavioral evaluator (self-test)
-        run: python3 tools/run-behavioral-eval.py --self-test
-      - name: GEPA Phase 10G researcher adapter contract (self-test)
-        run: python3 tools/researcher_adapter.py --self-test
-      - name: Keep/discard candidate policy (self-test)
-        run: python3 tools/score-candidate.py --self-test
-      - name: Replay & variance gate (self-test)
-        run: python3 tools/replay-candidate.py --self-test
-      - name: Promotion bundle renderer (self-test)
-        run: python3 tools/render-promotion-bundle.py --self-test
-      - name: Canonical experiment lifecycle entrypoint (self-test)
-        run: python3 tools/run-experiment-lifecycle.py --self-test
-      - name: DSPy spike — routing normalizer baseline (deterministic, self-test)
-        run: python3 experiments/dspy-routing-normalizer/normalize.py --self-test
-      # Frozen-input integrity is gated against the CURRENT canonical campaign, not historical
-      # revisions. Revision 4 freezes the current checker after queue/guidance changes; revisions
-      # 2 and 3 remain historical and superseded. The gepa-shadow campaigns (Phase 8 / 2026-06-26) are archived:
-      # their frozen_inputs pin
-      # Phase-8-era tool and gold hashes that later evaluator hardening (10F/10G/10H0) and gold rotation
-      # legitimately drifted — the drift detector working as designed. See each campaign's SUPERSEDED.md.
-      # Re-pinning historical revisions to silence CI is forbidden (it would rewrite superseded history).
-      - name: Canonical behavioral campaign frozen-input integrity
-        run: python3 tools/hash-campaign-inputs.py --check evals/behavioral/campaigns/behavioral-canonical-v4-2026-09-13/campaign-manifest.json
-      # The promotion bundle hash-pin / drift machinery is exercised by render-promotion-bundle --self-test
-      # (verify_drift: intact -> clean, tampered gold -> drift). There is no live promotion bundle to pin
-      # against until a real-model qualification produces one.
-      - name: Mechanical routing scorer (self-test)
-        run: python3 tools/score-routing.py --self-test
-      - name: False-discovery scorer (self-test)
-        run: python3 tools/score-false-discovery.py --self-test
-      - name: Hermetic no-model BOLA benchmark (self-test)
-        run: python3 tools/run-hermetic-bola.py --self-test
-      - name: Hermetic fake-model benchmarks (LLM05/06/07 + router, self-test)
-        run: python3 tools/run-hermetic-fakemodel.py --self-test
-      - name: Hermetic API-security benchmarks (Track D, self-test)
-        run: python3 tools/run-hermetic-api.py --self-test
-      - name: Evaluator qualification runner (self-test)
-        run: python3 tools/run-qualification.py --self-test
-      - name: E-track converters + sensors (self-tests)
+          lines=$(wc -l < AGENTS.md)
+          echo "AGENTS.md lines: $lines"
+          test "$lines" -le 50
+
+      - name: Lint with ruff
+        run: ruff check ajar tests
+
+      - name: Run unit, gate, redaction, and conformance suite
+        run: pytest -q
+
+      - name: Run archived historical record reader tests
         run: |
-          python3 tools/obfuscation-converter.py --self-test
-          python3 tools/stego-converter.py --self-test
-          python3 tools/covert-channel-converter.py --self-test
-          python3 tools/covert-channel-evidence.py --self-test
-          python3 tools/tollbooth-digest-adapter.py --self-test
-          python3 tools/casebook-retrieval-index.py --self-test
-          python3 tools/encoding-robustness-eval.py --self-test
-      - name: Payload-generator lane (PG-3A self-tests)
-        run: |
-          python3 tools/generate-payload-proposal.py --self-test
-          python3 tools/payload-proposal-hermetic-test.py --self-test
+          for t in tools/legacy/*-test.py; do
+            python3 "$t"
+          done

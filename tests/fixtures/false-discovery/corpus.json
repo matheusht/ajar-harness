@@ -1,0 +1,238 @@
+{
+  "corpus": "false-discovery",
+  "purpose": "Traps this harness met live, PLUS externally-triaged non-findings mined from REJECTED/DISPUTED CVE records (each such entry carries a 'provenance' field citing the CVE and its state; full corpus at skills/references/rejected-disputed-cve-corpus.md). A correct evaluator must NEVER reach 'confirmed' on any of these. Two gates: (1) pytest asserts this FIXTURE is well-formed (no entry's correct_verdict is 'confirmed') \u2014 a structural pre-gate; (2) tools/score-false-discovery.py scores an actual evaluator's verdicts over the corpus and computes the real invalid_accept_rate, which must be 0. naive_wrong_verdict records the tempting mistake so the scorer's self-test has a known-bad input.",
+  "verdict_vocabulary": [
+    "refuted",
+    "held",
+    "needs_review",
+    "deduped"
+  ],
+  "entries": [
+    {
+      "id": "trap-echoed-canary",
+      "trap_class": "echo_vs_provenance",
+      "observation": "a distinctive marker the operator themselves supplied appears in a later response",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "needs_review",
+      "missing_control": "provenance \u2014 the marker must originate server/victim-side, not be the operator's own input reflected back",
+      "why": "your own canary echoed to you proves reflection, not a leak across a boundary"
+    },
+    {
+      "id": "trap-public-share-as-idor",
+      "trap_class": "shared_object_vs_bola",
+      "observation": "a request returns an object that belongs to a different principal",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "refuted",
+      "missing_control": "the guarded sibling / a second principal \u2014 if the object is legitimately public or shared, a validating sibling route returns it too",
+      "why": "a legitimately readable (public/shared) object is not a broken-object-level-authz finding"
+    },
+    {
+      "id": "trap-inert-reflection-as-xss",
+      "trap_class": "reflection_vs_execution",
+      "observation": "a script-shaped payload appears in the rendered page source",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "refuted",
+      "missing_control": "an execution canary that fires only if the markup actually runs",
+      "why": "reflection into the DOM as escaped/inert text is not execution"
+    },
+    {
+      "id": "trap-title-rename-as-execution",
+      "trap_class": "app_side_effect_vs_execution",
+      "observation": "the page/tab title changes after submitting the payload",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "refuted",
+      "missing_control": "a genuine execution signal (a window flag the payload sets), distinguished from an app feature (the app renaming a chat to the first message)",
+      "why": "a benign application side effect can masquerade as code execution"
+    },
+    {
+      "id": "trap-phantom-csp-defense",
+      "trap_class": "over_credit_defense",
+      "observation": "an inline-handler positive control fails to fire, suggesting a CSP script restriction",
+      "naive_wrong_verdict": "held",
+      "correct_verdict": "refuted",
+      "missing_control": "read the actual CSP header \u2014 do not attribute the hold to a script-src policy that isn't present (the observed header was frame-ancestors only)",
+      "why": "skepticism applies to the DEFENSE too; never credit a control you did not directly observe. The refutation must rest on the directly-observed escaping, not an unproven CSP layer"
+    },
+    {
+      "id": "trap-missing-replay",
+      "trap_class": "single_shot_vs_replay",
+      "observation": "a signal fired once on the first attempt",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "needs_review",
+      "missing_control": "a fresh-session replay establishing determinism (and ruling out session-memory contamination)",
+      "why": "a one-shot result may be contamination or noise; confirmation requires reproduction"
+    },
+    {
+      "id": "trap-duplicate-surface-as-coverage",
+      "trap_class": "coverage_accounting",
+      "observation": "the same vulnerability is reachable through two endpoints/surfaces",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "deduped",
+      "missing_control": "dedup_key comparison (owasp|surface|signal-type|preconditions) \u2014 the second hit is the same finding, not additive coverage",
+      "why": "counting the same root cause twice inflates coverage and rewards evaluator-gaming"
+    },
+    {
+      "id": "trap-one-backend-refusal-as-router-hold",
+      "trap_class": "router_guard_differential",
+      "observation": "one model behind an auto/router selector refused the probe",
+      "naive_wrong_verdict": "held",
+      "correct_verdict": "needs_review",
+      "missing_control": "per-backend testing \u2014 a router inherits its WEAKEST backend's guard; one refusal is a single positive control, not a global hold",
+      "why": "an N-backend router is N entities with N guard strengths; one refusal does not clear the others"
+    },
+    {
+      "id": "trap-idor-public-value-not-cross",
+      "trap_class": "public_value_vs_cross_boundary_bola",
+      "observation": "an id-shaped value from another principal is accepted or reflected, but the object is public/shared or the selector is ignored",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "refuted",
+      "missing_control": "a planted victim-side canary crossing a non-public authorization boundary",
+      "why": "a public value, shareable handle, or ignored selector can activate BOLA routing, but it does not prove broken object-level authorization"
+    },
+    {
+      "id": "trap-mutation-200-without-effect",
+      "trap_class": "mutation_status_vs_foreign_effect",
+      "observation": "a state-changing request with another principal's selector returns 200 or 204",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "needs_review",
+      "missing_control": "an inert, reversible effect landing on the other controlled principal's canary object",
+      "why": "HTTP success on a mutating request is not BOLA unless the foreign canary object shows the unauthorized effect"
+    },
+    {
+      "id": "trap-jwt-signature-valid-not-authorized",
+      "trap_class": "jwt_signature_vs_claim_authorization",
+      "observation": "a JWT parses or has a valid signature for some issuer/key, but the target service denies the guarded privilege",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "refuted",
+      "missing_control": "a wrong-audience or wrong-algorithm token granting a distinctive canary privilege while the patched verifier denies",
+      "why": "cryptographic validity is not authorization for this verifier; audience, issuer, algorithm, tenant, and subject binding still matter"
+    },
+    {
+      "id": "trap-bopla-echoed-property",
+      "trap_class": "echoed_property_vs_effective_property_authz",
+      "observation": "a guarded property supplied in an update request is echoed in the immediate response",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "needs_review",
+      "missing_control": "server-side persistence, exposure, or authorization impact for a synthetic property canary",
+      "why": "echoed request JSON is not mass assignment; BOPLA needs effective unauthorized property exposure or state"
+    },
+    {
+      "id": "trap-ssrf-echo-not-fetch",
+      "trap_class": "url_echo_vs_server_side_fetch",
+      "observation": "a supplied URL appears in the response, job record, or logs, but no controlled canary receives a server-side request",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "refuted",
+      "missing_control": "a controlled external or hermetic stand-in canary hit proving the server actually fetched the destination",
+      "why": "reflecting or storing a URL is not SSRF; reachability requires a server-side fetch signal"
+    },
+    {
+      "id": "trap-graphql-introspection-only",
+      "trap_class": "graphql_schema_visibility_vs_object_authz",
+      "observation": "GraphQL introspection is enabled, or global ids can be decoded, but no unauthorized resolver returns a foreign canary",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "refuted",
+      "missing_control": "a chained resolver access that returns a synthetic foreign object canary while the guarded resolver denies",
+      "why": "introspection and id decoding may help recon, but confirmation needs unauthorized object/property access through a resolver"
+    },
+    {
+      "id": "trap-cve-2019-9193",
+      "trap_class": "privileged_actor_no_boundary",
+      "observation": "a database superuser executes OS commands through a documented, default-on feature (PostgreSQL COPY TO/FROM PROGRAM)",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "refuted",
+      "missing_control": "check the actor's required privilege against the capability supposedly gained \u2014 a superuser was already trusted to run server-side programs",
+      "why": "executing code as the DB OS user is the feature's intended, superuser-only behavior; no boundary is crossed",
+      "provenance": "CVE-2019-9193 (DISPUTED)"
+    },
+    {
+      "id": "trap-cve-2007-0830",
+      "trap_class": "admin_authoring_tool_as_xss",
+      "observation": "an authenticated administrator injects HTML/script through an admin-only customization field (vBulletin AdminCP managers)",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "refuted",
+      "missing_control": "check the sink's required role \u2014 the actor is the already-trusted admin the field is built for (NVD evaluatorImpact independently corroborates by-design)",
+      "why": "admins are intentionally granted HTML/script authoring; no privilege is gained",
+      "provenance": "CVE-2007-0830 (DISPUTED)"
+    },
+    {
+      "id": "trap-cve-2004-2339",
+      "trap_class": "admin_to_system_not_a_boundary",
+      "observation": "a local Administrator escalates to SYSTEM/kernel code execution",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "refuted",
+      "missing_control": "Administrator->SYSTEM is not a defended privilege boundary on Windows; verify a boundary the vendor actually defends is crossed",
+      "why": "the required precondition (already Administrator) equals the outcome's trust level",
+      "provenance": "CVE-2004-2339 (DISPUTED)"
+    },
+    {
+      "id": "trap-cve-2020-19909",
+      "trap_class": "real_bug_no_security_impact",
+      "observation": "a genuine integer overflow in a retry-delay value (curl --retry-delay)",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "refuted",
+      "missing_control": "a bug is not a finding unless it crosses a boundary someone defends; the only effect is a self-inflicted delay on the operator's own command line",
+      "why": "many parties confirm no direct security impact on the curl user",
+      "provenance": "CVE-2020-19909 (DISPUTED)"
+    },
+    {
+      "id": "trap-cve-2013-3245",
+      "trap_class": "crash_vs_code_execution",
+      "observation": "a crafted media file crashes the player; the report claims arbitrary code execution",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "needs_review",
+      "missing_control": "a crash proves DoS, not control of execution \u2014 the negative control must diverge THROUGH the code-execution mechanism, not merely differ",
+      "why": "the PoC crashes VLC but does not demonstrate the claimed RCE",
+      "provenance": "CVE-2013-3245 (DISPUTED)"
+    },
+    {
+      "id": "trap-cve-2005-1588",
+      "trap_class": "mechanism_absent_in_target",
+      "observation": "a SQL-injection PoC filed against a product that uses no SQL database at all (Quick.cart)",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "refuted",
+      "missing_control": "verify the claimed mechanism exists in the target before crediting the PoC; there is no SQL backend to inject into",
+      "why": "a PoC cannot prove a mechanism the target lacks",
+      "provenance": "CVE-2005-1588 (DISPUTED)"
+    },
+    {
+      "id": "trap-cve-2012-5613",
+      "trap_class": "precondition_caps_impact",
+      "observation": "a MySQL user with the FILE privilege gains admin-equivalent capability",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "needs_review",
+      "missing_control": "impact caps to the misconfiguration of granting FILE to users who should not have it; establish the non-default precondition before claiming unconditional privesc",
+      "why": "real, but only 'when configured to assign the FILE privilege to users who should not have administrative privileges'",
+      "provenance": "CVE-2012-5613 (DISPUTED)"
+    },
+    {
+      "id": "trap-cve-2023-32001",
+      "trap_class": "claim_has_no_defensible_boundary",
+      "observation": "a reported condition the maintainer withdrew because there is no safe measure or protection to add for it (curl)",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "refuted",
+      "missing_control": "ask where a naive verification would stop \u2014 a claim with no defensible boundary is the definite, articulable reward-hack shape, not a finding",
+      "why": "the CNA states it 'issued this CVE pre-maturely... there really is no safe measures around or protections for' the issue",
+      "provenance": "CVE-2023-32001 (REJECTED)"
+    },
+    {
+      "id": "trap-cve-2018-14496",
+      "trap_class": "filed_impact_not_even_a_crash",
+      "observation": "filed as remote memory-corruption RCE; the vendor states the issue produces zero observable effect, not even a crash (Vivotek FD8136)",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "refuted",
+      "missing_control": "require a real, traced observable effect \u2014 an exit code plus a printed marker is not proof of memory corruption",
+      "why": "an RCE claim with no observable effect has nothing behind it",
+      "provenance": "CVE-2018-14496 (DISPUTED)"
+    },
+    {
+      "id": "trap-cve-2023-5129",
+      "trap_class": "duplicate_id_as_distinct_finding",
+      "observation": "a CVE id that is a duplicate of another id for the same underlying issue (CVE-2023-5129 = CVE-2023-4863 libwebp)",
+      "naive_wrong_verdict": "confirmed",
+      "correct_verdict": "deduped",
+      "missing_control": "resolve ConsultIDs / duplicate-rejection before counting a hit as a distinct finding",
+      "why": "the record is REJECTED as 'Duplicate of CVE-2023-4863'; one issue, not two",
+      "provenance": "CVE-2023-5129 (REJECTED)"
+    }
+  ]
+}

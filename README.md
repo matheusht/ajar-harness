@@ -1,109 +1,103 @@
-# llm-redteam-harness
+# Ajar
 
-A **domain-neutral, portable** harness for **authorized** security research. A researcher works
-inside an explicit authority and evidence boundary; LLM application security is one supported
-domain whose retained cards are a domain pack, not the product boundary. The repository name is
-historical.
+Ajar is a verification-backed security engine for `Code`, `Fixes`, `Security reviews`, and `Supply chain`.
 
-> **Prime directive.** The product is **rigor, not findings**. A claim is confirmed only with an
-> execution observation, a relevant control, and a clean replay. A narrative, report match, or model
-> agreement cannot supply missing execution evidence.
+Every vulnerability claim must survive independent falsification and pass a deterministic **4-arm causal reproduction** (`ajar claim reproduce`) before Ajar reports it as a finding. All coordination state lives in an external SQLite WAL database (`~/.ajar/runs/<run_id>/run.db`), keeping target repositories clean.
 
-**Agent entrypoint:** [`AGENTS.md`](AGENTS.md) routes repository work, legacy queue/record work,
-lifecycle records, the candidate native route and qualification claims. `CLAUDE.md` is kept
-byte-identical to it.
+## Operating Modes
 
-## Current scope
+1. **Host Mode (zero separate API billing):** Drive Ajar from an interactive coding agent session (Claude Code, Codex CLI, OpenCode, or any MCP-compatible client) using the `ajar` CLI or `ajar mcp` STDIO server.
+   - `--envelope` (default): Creates an isolated directory (`~/.ajar/runs/<run_id>/workspace/`) containing `AGENTS.md`, `.mcp.json`, `.claude/settings.json`, and a read-only target snapshot (`target/`) so target-repo prompts cannot override verification rules.
+   - `--in-place`: Runs directly inside an existing checkout (writing zero files into the target repository) when container mounts, Bazel caches, or build paths depend on absolute paths.
+2. **Standalone Mode (`ajar run`):** Runs a headless multi-worker verification loop with an `80% / 20%` explore-vs-verify budget reserve and mandatory first-principles (`zero_skill`) worker quota.
 
-On `main`, the Decision 0005/0006 record kernel (legacy engagements) and the
-[research lifecycle](docs/research-lifecycle.md) layer (attempt start/finish, bounded negative
-results, evidence-bundle manifests) are implemented. New local source research has a candidate
-native route in this checkout. It is not qualified or adopted. #165 adoption, #171 integrated
-qualification and #172 unfamiliar-target study remain open. Treat it as candidate evidence, not a
-shipped procedure.
+## Quickstart
 
-## Scope fence (read first)
+```bash
+python3 -m pip install -e ".[dev]"
+ajar doctor
+```
 
-The fence is generic. Each route and domain supplies its own benign objective set and safe-signal
-cards.
+### Host Mode Run
 
-| Boundary | What | Gate |
-| --- | --- | --- |
-| ✅ **Authorized local research** | a benign objective set declared in the signed target-local scope, run only inside the declared local environment | signed scope **+** a benign `safe_signal` for every used card **+** the declared effect, containment and cleanup ceiling |
-| ⚠️ **Authorized impact-escalation** | a real PoC artifact to prove blast radius (e.g. a contained worm or exfiltration chain) | signed `scope.md` **+** fresh human confirmation **+** containment **+** a cleanup obligation recorded at creation |
-| ❌ **Never** | real-harm uplift as the product · a library of working harmful jailbreaks · HarmBench-style harm-elicitation as a metric · wholesale ingestion of harm corpora | — |
+```bash
+# 1. Initialize an isolated run against a local repository
+ajar init /path/to/target --mode source --until exhaustive-high --budget 40
 
-**Authorization is mandatory.** No filled and signed `scope.md` → the legacy loop refuses to run.
+# 2. Map high-centrality symbols and register attack surfaces
+ajar map --budget-tokens 1500
+ajar surface add --name "auth-token-exchange" --kind http --subsystem auth \
+  --locus "src/oauth.py:84" --priority critical \
+  --trust-boundary "unauthenticated client -> token issuer"
 
-LLM-domain examples are disclosed in [LLM domain scope](docs/agents/llm-domain-scope.md): benign
-system-prompt disclosure, refusal flip on a harmless target, indirect-injection canaries,
-excessive agency / unsafe rendering, and cross-user canary propagation. The never-boundary holds
-across domains.
+# 3. Enqueue, lease, investigate, falsify, and reproduce
+ajar task add --kind investigate --title "Check atomic single-use on auth_code" \
+  --surface <surface_id> --locus "src/oauth.py:84" --priority critical
+ajar task lease --worker w-explore-1 --kind investigate --recover
 
-## Route quickstart
+# 4. Check deterministic SQL gates G1-G5, seal the run, and emit markdown report
+ajar gate check
+ajar finish
+ajar report --format markdown --output report.md
+```
 
-| Work | Start at |
+### Standalone Mode Run
+
+```bash
+ajar run /path/to/target --mode source --until exhaustive-high --budget 40 --workers 3
+```
+
+## 4-Arm Causal Reproduction
+
+Ajar confirms a finding only when all four arms succeed:
+
+| Arm | Target State | Input | Expected Result |
+| --- | --- | --- | --- |
+| **Arm 1** | Unmodified target | Exploit PoC | Triggers target security assertion, sanitizer crash, or cross-principal canary leak |
+| **Arm 2** | Unmodified target | Benign control | Passes normal operation without firing the exploit assertion |
+| **Arm 3** | Minimal root-cause fix (`1–5` lines or runtime guard) | Exploit PoC | Stops the exploit assertion from firing |
+| **Arm 4** | Minimal root-cause fix (`1–5` lines or runtime guard) | Benign control | Passes normal operation without regression |
+
+## Core CLI Commands
+
+| Command | Purpose |
 | --- | --- |
-| Repository engineering, research, docs or planning | [`AGENTS.md`](AGENTS.md), then [the layout](#layout) and [decision index](docs/decisions/README.md) |
-| Existing queue/record engagement | [legacy queue and record entry](docs/agents/legacy-local-research.md) |
-| Attempts, bounded negatives, evidence bundles | [research lifecycle](docs/research-lifecycle.md) |
-| Candidate native source research | [native local research](docs/agents/native-local-research.md) and [status](docs/wiki/native-research-status.md); adoption and qualification remain open |
-| Capability, readiness or qualification claim | [engineering wiki](docs/wiki/index.md), then its source evidence |
+| `ajar init <target>` | Create `~/.ajar/runs/<run_id>/run.db`, mirror/worktree slots, and FTS5 indexes |
+| `ajar status` / `ajar pulse` | Inspect run metrics, spend, active leases, stale bindings, and unchained primitives |
+| `ajar map` | Rank repository symbols with Personalized PageRank within a token budget |
+| `ajar ref query --kind intent\|reachability\|precedent <q>` | Search FTS5 indexes over docs/tests, symbol callers, and precedent corpora |
+| `ajar surface add\|list` / `ajar driver add\|list` | Register attack surfaces and executable harness drivers |
+| `ajar task add\|lease\|done\|dry\|block\|list` | Manage prioritized work items with TTL leases and `zero_skill` quotas |
+| `ajar anomaly add\|explain\|list` | Persist unexpected behaviors independently of specific hypotheses |
+| `ajar primitive add\|list` / `ajar binding set\|list` | Record composable capabilities and line-hashed verified code facts |
+| `ajar claim propose\|falsify\|survive\|reproduce\|list` | Drive claims through falsification and 4-arm reproduction |
+| `ajar chain propose\|list` | Verify multi-stage exploit chains end-to-end |
+| `ajar gate check` / `ajar finish` / `ajar report` | Enforce SQL gates `G1–G5`, seal `CLOSEOUT_RECEIPT`, and render reports |
+| `ajar mcp` / `ajar hook claude-stop` / `ajar loop codex\|omp` | Host Mode MCP server and session-persistence adapters |
 
-## Layout
+## Repository Layout
 
+```text
+AGENTS.md                 <= 50-line ASD-STE100 agent instructions
+ajar/                     Zero-LLM Python engine (SQLite WAL, gates, 4-arm repro, PageRank, FTS5, MCP)
+skills/
+  ajar-*/                 7 core workflow skills (map, investigate, falsify, reproduce, chain, patch, report)
+  domains/                5 contrastive domain packs (evm-solidity, consensus-vm, rust-systems, web-api, auth-crypto)
+  references/             8 curated CVE, exploit-chain, contest-ruling, fix-diff, and false-positive corpora
+benchmarks/
+  foundry/                3 offline Solidity vulnerable + patched-control twin benchmarks
+  hermetic/               8 deterministic web/API target specifications
+  polyglot/               4 executable C, Go, Rust, and Python live/binary/source QA targets
+docs/
+  architecture.md         Dual-mode engine, schema, state machines, and closeout gate specification
+  decisions/              Architecture Decision Records (0017 active; 0001-0013 superseded)
+  engineering/AGENTS.md   Contributor and CI verification guide
+tests/                    Unit, gate, redaction, trap, and conformance test suite
+tools/legacy/             Read-only historical readers for archived engagements/
 ```
-skills/         PLANE 1 — methodology (read-only): vulns/ · techniques/ · oracles/ · patterns/
-engine/         PLANE 2 — orchestration: loop · persistence · routing · roster · gates · lifecycle
-schemas/        the contracts: attempt · finding · pattern · technique-card · lifecycle records
-fixtures/       sanitized oracle-calibration + routing-activation ground truth
-casebooks/      PLANE 1 — scrubbed prior-engagement memory (routing + false-positive discipline)
-engagements/    PLANE 3 — _TEMPLATE copied OUT into each target's own project repo (append-only)
-tools/          record kernel, research lifecycle, work queue, conformance
-docs/           architecture + decisions + agents + research + wiki
-```
 
-**Plane rule:** Plane 1 is read-only knowledge; Plane 3 is write-only memory. The portable harness
-(Plane 1+2) travels; each engagement's Plane 3 records live with its target.
+## Authorization and Redaction
 
-## Conformance
-
-```sh
-python3 tools/check-conformance.py     # stdlib only; exit 0 = clean
-```
-
-Structural gate: front matter, pattern `activation` tiers, vuln `safe_signal`, `routes_to`
-resolution plus `stub:` quoting, casebook pattern-refs, and a casebook secret scan. A green run is
-required before a pattern/vuln/casebook change is promoted (also enforced in CI). It is structural,
-not a full schema validator, and it does not prove a research result.
-
-## Naming & anonymization
-
-- **Casebooks are strictly anonymized** — no client or marketing name beyond an abstract
-  `target_class`, no live ids/tokens/URLs. Enforced by the schema rule and the conformance scan.
-- **Plane-1 methodology files** may keep an operator-internal engagement label as *provenance*,
-  but never a secret. Keep internal labels internal; repository visibility is not a redaction
-  control.
-- **Before external sharing**, replace engagement labels with abstract handles. Until then they
-  stay internal.
-
-## Links
-
-- [Decision index](docs/decisions/README.md) — accepted and superseded architecture decisions.
-- [Engineering wiki](docs/wiki/index.md) — maintained engineering synthesis and its dated state.
-- [Architecture](docs/architecture.md) and [harness flow](docs/harness-flow.md).
-- [Benchmark results and comparison](docs/research/benchmark-results-and-comparison.md) — earlier
-  calibrations, not a fresh execution result or authorization.
-- [Docker work-queue contract](docs/agents/docker-work-queue.md) and
-  [session-end backstop](docs/agents/session-end-backstop.md).
-- [LLM domain scope](docs/agents/llm-domain-scope.md) and
-  [legacy queue and record entry](docs/agents/legacy-local-research.md).
-
-## Status
-
-Dated pointer, 2026-10-23: the [engineering wiki](docs/wiki/index.md) holds the maintained
-engineering synthesis and its dated delivery state; recheck the source commit and issue state
-before acting. The wiki's own status is an observation, not a live tracker. The candidate native
-route is present in this checkout; #165 adoption, #171 integrated qualification and #172
-unfamiliar-target study remain open. It must not be described as qualified or adopted. Earlier
-benchmark records retain their original scope.
+1. Run `--mode live` only against targets explicitly authorized in `scope_rules` (`--allow-live-requests` and `--allow-host`).
+2. Never store credentials, tokens, session cookies, private keys, or signed URLs in any database row, artifact, or commit.
+3. Obtain explicit operator approval before external disclosure, vendor contact, or publication.

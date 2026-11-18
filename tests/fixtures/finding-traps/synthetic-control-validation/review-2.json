@@ -1,0 +1,30 @@
+{
+ "schema_version": 1,
+ "review_id": "review-TRAP-2",
+ "engagement_id": "fixture-trap",
+ "review_type": "claim_control_validation",
+ "proposed_finding_id": "F-TRAP-2",
+ "recorded_at": "2026-08-09T18:00:00Z",
+ "input_refs": [
+  "attempt-2"
+ ],
+ "input_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+ "evidence_refs": [
+  "artifact-2"
+ ],
+ "conflicting_evidence": [],
+ "independence": {
+  "reviewer_id": "reviewer-external-canonical",
+  "reviewer_model": "independent-reviewer",
+  "reviewer_run_id": "run-2",
+  "reviewer_session_id": "session-2",
+  "originating_run_id": "attempt-2",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": "Refute the bounded mechanism."
+ },
+ "verdict": "supported",
+ "rationale": "Primary trace, matched negative control, and fresh replay establish the bounded claim.",
+ "corrections": [],
+ "required_next_actions": []
+}

@@ -604,6 +604,11 @@ def cmd_claim(args: argparse.Namespace) -> int:
             clm = conn.execute("SELECT * FROM claims WHERE claim_id = ?", (args.claim_id,)).fetchone()
             if clm is None:
                 raise AjarError(f"Unknown claim_id: {args.claim_id}", EXIT_USER_ERROR)
+            if clm["status"] == "reproduced":
+                raise AjarError(
+                    f"Truth-axis monotonicity gate: verified reproduced claim {args.claim_id} cannot be downgraded to falsified.",
+                    EXIT_GATE_BLOCKED,
+                )
             now_iso = utc_now_iso()
             conn.execute(
                 """
@@ -632,6 +637,11 @@ def cmd_claim(args: argparse.Namespace) -> int:
             clm = conn.execute("SELECT * FROM claims WHERE claim_id = ?", (args.claim_id,)).fetchone()
             if clm is None:
                 raise AjarError(f"Unknown claim_id: {args.claim_id}", EXIT_USER_ERROR)
+            if clm["status"] == "reproduced":
+                raise AjarError(
+                    f"Truth-axis monotonicity gate: verified reproduced claim {args.claim_id} cannot be downgraded.",
+                    EXIT_GATE_BLOCKED,
+                )
             if clm["proposer_worker_id"] == args.worker:
                 raise AjarError(
                     f"Fresh-falsifier separation gate: proposer {args.worker!r} cannot validate its own claim. "
@@ -648,6 +658,14 @@ def cmd_claim(args: argparse.Namespace) -> int:
             return EXIT_OK
 
         if args.claim_cmd == "block":
+            clm = conn.execute("SELECT * FROM claims WHERE claim_id = ?", (args.claim_id,)).fetchone()
+            if clm is None:
+                raise AjarError(f"Unknown claim_id: {args.claim_id}", EXIT_USER_ERROR)
+            if clm["status"] == "reproduced":
+                raise AjarError(
+                    f"Truth-axis monotonicity gate: verified reproduced claim {args.claim_id} cannot be downgraded to blocked.",
+                    EXIT_GATE_BLOCKED,
+                )
             now_iso = utc_now_iso()
             conn.execute(
                 "UPDATE claims SET status = 'blocked', blocker_reason = ?, updated_at = ? WHERE claim_id = ?",

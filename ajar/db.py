@@ -340,7 +340,7 @@ def get_ajar_home(explicit_home: pathlib.Path | str | None = None) -> pathlib.Pa
 
 
 def run_dir_for(run_id: str, ajar_home: pathlib.Path | str | None = None) -> pathlib.Path:
-    if not re.fullmatch(r"[A-Za-z0-9_.-]{3,80}", run_id):
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{2,79}", run_id):
         raise AjarError(f"Invalid run_id {run_id!r}.", EXIT_USER_ERROR)
     return get_ajar_home(ajar_home) / "runs" / run_id
 

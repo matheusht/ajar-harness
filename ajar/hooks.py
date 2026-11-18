@@ -6,7 +6,9 @@ with a 3-check zero-progress circuit breaker so stuck sessions never loop foreve
 
 from __future__ import annotations
 
+import os
 import pathlib
+import shlex
 import subprocess
 from typing import Any
 
@@ -103,8 +105,8 @@ def run_host_continuation_loop(
     last_event_id = 0
 
     default_templates: dict[str, str] = {
-        "codex": 'codex exec "{prompt}"',
-        "omp": 'omp run "{prompt}"',
+        "codex": "codex exec {prompt}",
+        "omp": "omp run {prompt}",
     }
     template = cmd_template or default_templates.get(host_kind, "")
     if not template:
@@ -129,10 +131,16 @@ def run_host_continuation_loop(
             conn.close()
 
         rounds_run = round_idx
-        safe_prompt = blocker_prompt.replace('"', "'")
-        rendered_cmd = template.format(prompt=safe_prompt, run_id=run_id) if "{prompt}" in template else template
-        env = dict(**__import__("os").environ)
+        safe_prompt = shlex.quote(blocker_prompt)
+        normalized_tpl = template.replace('"{prompt}"', "{prompt}").replace("'{prompt}'", "{prompt}")
+        rendered_cmd = (
+            normalized_tpl.format(prompt=safe_prompt, run_id=shlex.quote(run_id))
+            if "{prompt}" in normalized_tpl or "{run_id}" in normalized_tpl
+            else normalized_tpl
+        )
+        env = dict(os.environ)
         env["AJAR_RUN_ID"] = run_id
+        env["AJAR_HOST_PROMPT"] = blocker_prompt
         subprocess.run(["bash", "-c", rendered_cmd], cwd=ws_path, env=env, check=False)
 
         conn2 = open_run_db(run_id, ajar_home=ajar_home)

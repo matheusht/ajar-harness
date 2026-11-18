@@ -227,6 +227,83 @@ class TestMcpHooksRunner(unittest.TestCase):
         finally:
             conn2.close()
 
+    def test_dogfood_regressions_host_quoting_mcp_bounds_and_claim_monotonicity(self) -> None:
+        from ajar.db import AjarError, new_id, run_dir_for
+        from ajar.hooks import run_host_continuation_loop
+        from ajar.mcp import dispatch_mcp_tool
+
+        # 1. Leading-hyphen run_id flag injection rejected
+        for bad_rid in ("-rf", "--help", "..."):
+            with self.assertRaises(AjarError):
+                run_dir_for(bad_rid, self.ajar_home)
+
+        init_run_workspace(
+            target=str(self.src_target),
+            target_mode="source",
+            workspace_mode="in_place",
+            run_id="run-dogfood-reg",
+            ajar_home=self.ajar_home,
+        )
+
+        # 2. Host continuation loop neutralizes $(...) and backticks in surface names
+        marker = self.tmp_path / "should_never_exist"
+        conn = open_run_db("run-dogfood-reg", ajar_home=self.ajar_home)
+        try:
+            now = utc_now_iso()
+            conn.execute(
+                "INSERT INTO surfaces(surface_id, name, kind, subsystem, locus, priority, created_at) VALUES (?, ?, 'http', 'vault.py', 'vault.py:1', 'high', ?)",
+                (new_id("s"), f"Route $(touch {marker}) `touch {marker}`", now),
+            )
+            conn.execute(
+                """
+                INSERT INTO claims(
+                    claim_id, proposer_worker_id, falsifier_worker_id, title, subsystem, locus,
+                    mechanism, mechanism_key, severity, falsification_prediction, falsification_test,
+                    status, created_at, updated_at
+                ) VALUES ('clm-repro-1', 'w0', 'f0', 'Verified bug', 'vault.py', 'vault.py:1', 'm', 'm', 'high', 'pred123456', 'pytest', 'reproduced', ?, ?)
+                """,
+                (now, now),
+            )
+        finally:
+            conn.close()
+
+        run_host_continuation_loop(
+            host_kind="custom",
+            run_id="run-dogfood-reg",
+            cmd_template='echo "{prompt}" >/dev/null',
+            max_rounds=1,
+            ajar_home=self.ajar_home,
+        )
+        self.assertFalse(marker.exists(), "Host loop must never evaluate shell substitutions inside blocker prompt")
+
+        # 3. Terminal reproduced claim cannot be downgraded via MCP
+        with self.assertRaises(AjarError):
+            dispatch_mcp_tool(
+                "run-dogfood-reg",
+                "ajar_claim_falsify",
+                {"claim_id": "clm-repro-1", "worker_id": "f1", "notes": "Attempted downgrade"},
+                ajar_home=self.ajar_home,
+            )
+
+        # 4. Malformed / negative / oversized Content-Length headers do not crash or hang MCP server
+        bad_stream = (
+            b"Content-Length: not-an-int\r\n\r\n"
+            b"Content-Length: -1\r\n\r\n"
+            b"Content-Length: 99999999\r\n\r\n"
+            + json.dumps({"jsonrpc": "2.0", "id": 99, "method": "ping", "params": {}}).encode("utf-8")
+            + b"\n"
+        )
+        out_buf = io.BytesIO()
+        serve_mcp_stdio(
+            explicit_run_id="run-dogfood-reg",
+            stdin=io.BytesIO(bad_stream),
+            stdout=out_buf,
+            ajar_home=self.ajar_home,
+        )
+        out_text = out_buf.getvalue().decode("utf-8")
+        self.assertIn("Invalid Content-Length: -1", out_text)
+        self.assertIn('"id":99', out_text)
+
 
 if __name__ == "__main__":
     unittest.main()

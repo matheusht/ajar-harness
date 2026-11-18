@@ -130,6 +130,9 @@ def _write_envelope_host_configs(workspace_dir: pathlib.Path, run_id: str, ajar_
 
     claude_dir = workspace_dir / ".claude"
     claude_dir.mkdir(parents=True, exist_ok=True)
+    import shlex
+
+    hook_bin_prefix = ajar_bin if ajar_bin == "python3 -m ajar" else shlex.quote(ajar_bin)
     claude_cfg = {
         "hooks": {
             "Stop": [
@@ -137,7 +140,7 @@ def _write_envelope_host_configs(workspace_dir: pathlib.Path, run_id: str, ajar_
                     "hooks": [
                         {
                             "type": "command",
-                            "command": f"{ajar_bin} hook claude-stop --run {run_id}",
+                            "command": f"{hook_bin_prefix} hook claude-stop --run {shlex.quote(run_id)}",
                         }
                     ]
                 }

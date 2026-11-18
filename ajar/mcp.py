@@ -308,8 +308,16 @@ def dispatch_mcp_tool(
             log_event(conn, "mcp", "anomaly_added", aid, {"locus": loc})
             return {"anomaly_id": aid, "status": "unexplained"}
         if tool_name == "ajar_claim_propose":
+            from ajar import EXIT_GATE_BLOCKED
             from ajar.db import normalize_mechanism_key
 
+            fpred = str(args.get("falsification_prediction") or "").strip()
+            ftest = str(args.get("falsification_test") or "").strip()
+            if len(fpred) < 10 or len(ftest) < 5:
+                raise AjarError(
+                    "DEC-0128 gate: falsification_prediction and falsification_test are required before proposing a claim.",
+                    EXIT_GATE_BLOCKED,
+                )
             loc = str(args["locus"])
             mech = str(args["mechanism"])
             anom_id = args.get("consume_anomaly_id")
@@ -333,8 +341,8 @@ def dispatch_mcp_tool(
                     scrub_text(mech),
                     normalize_mechanism_key(mech),
                     str(args.get("severity", "high")),
-                    scrub_text(str(args["falsification_prediction"])),
-                    scrub_text(str(args["falsification_test"])),
+                    scrub_text(fpred),
+                    scrub_text(ftest),
                     now_iso,
                     now_iso,
                 ),
@@ -347,8 +355,18 @@ def dispatch_mcp_tool(
             log_event(conn, wid, "claim_proposed", cid, {"locus": loc})
             return {"claim_id": cid, "status": "proposed"}
         if tool_name == "ajar_claim_falsify":
+            from ajar import EXIT_GATE_BLOCKED
+
             cid = str(args["claim_id"])
             wid = str(args["worker_id"])
+            clm = conn.execute("SELECT status FROM claims WHERE claim_id = ?", (cid,)).fetchone()
+            if clm is None:
+                raise AjarError(f"Unknown claim_id {cid}")
+            if clm["status"] == "reproduced":
+                raise AjarError(
+                    f"Truth-axis monotonicity gate: verified reproduced claim {cid} cannot be downgraded to falsified.",
+                    EXIT_GATE_BLOCKED,
+                )
             now_iso = utc_now_iso()
             conn.execute(
                 """
@@ -372,13 +390,23 @@ def dispatch_mcp_tool(
             log_event(conn, wid, "claim_falsified", cid, {})
             return {"claim_id": cid, "status": "falsified"}
         if tool_name == "ajar_claim_survive":
+            from ajar import EXIT_GATE_BLOCKED
+
             cid = str(args["claim_id"])
             wid = str(args["worker_id"])
-            clm = conn.execute("SELECT proposer_worker_id FROM claims WHERE claim_id = ?", (cid,)).fetchone()
+            clm = conn.execute("SELECT proposer_worker_id, status FROM claims WHERE claim_id = ?", (cid,)).fetchone()
             if clm is None:
                 raise AjarError(f"Unknown claim_id {cid}")
+            if clm["status"] == "reproduced":
+                raise AjarError(
+                    f"Truth-axis monotonicity gate: verified reproduced claim {cid} cannot be downgraded.",
+                    EXIT_GATE_BLOCKED,
+                )
             if clm["proposer_worker_id"] == wid:
-                raise AjarError("Fresh-falsifier rule: proposer_worker_id cannot mark its own claim survived.")
+                raise AjarError(
+                    "Fresh-falsifier rule: proposer_worker_id cannot mark its own claim survived.",
+                    EXIT_GATE_BLOCKED,
+                )
             now_iso = utc_now_iso()
             conn.execute(
                 "UPDATE claims SET status = 'survived_falsify', falsifier_worker_id = ?, falsify_notes = ?, updated_at = ? WHERE claim_id = ?",
@@ -456,6 +484,9 @@ def handle_jsonrpc_message(
     }
 
 
+MAX_MCP_MESSAGE_BYTES = 4 * 1024 * 1024
+
+
 def serve_mcp_stdio(
     *,
     explicit_run_id: str | None = None,
@@ -478,18 +509,33 @@ def serve_mcp_stdio(
         use_framing = False
         if stripped.lower().startswith(b"content-length:"):
             use_framing = True
-            length = int(stripped.split(b":", 1)[1].strip())
+            try:
+                length = int(stripped.split(b":", 1)[1].strip())
+            except ValueError:
+                continue
             while True:
                 hdr = inp.readline()
                 if not hdr or hdr in (b"\r\n", b"\n"):
                     break
+            if length < 0 or length > MAX_MCP_MESSAGE_BYTES:
+                err_resp = {
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {"code": -32600, "message": f"Invalid Content-Length: {length}"},
+                }
+                encoded_err = json.dumps(err_resp, separators=(",", ":")).encode("utf-8")
+                out.write(f"Content-Length: {len(encoded_err)}\r\n\r\n".encode("ascii") + encoded_err)
+                out.flush()
+                continue
             body = inp.read(length)
         else:
+            if len(stripped) > MAX_MCP_MESSAGE_BYTES:
+                continue
             body = stripped
 
         try:
             msg = json.loads(body.decode("utf-8"))
-        except json.JSONDecodeError:
+        except (UnicodeDecodeError, json.JSONDecodeError):
             continue
 
         resp = handle_jsonrpc_message(msg, run_id=run_id, ajar_home=ajar_home)

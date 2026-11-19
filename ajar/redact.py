@@ -119,6 +119,7 @@ SAFE_SUBPROCESS_ENV_KEYS: frozenset[str] = frozenset(
         "SHELL",
         "CARGO_HOME",
         "RUSTUP_HOME",
+        "RUSTUP_TOOLCHAIN",
         "GOPATH",
         "GOMODCACHE",
         "GOROOT",
@@ -174,6 +175,57 @@ def scrub_text(text: str, extra_literals: tuple[str, ...] = ()) -> str:
     )
 
 
+def _preserve_rust_toolchain_env(
+    src: Mapping[str, str],
+    clean: dict[str, str],
+    isolated_home: pathlib.Path | None,
+) -> None:
+    """Keep `rustup`/`cargo` working offline when `HOME` is isolated, without exposing `credentials.toml`."""
+    caller_home = src.get("HOME", "").strip()
+    if "RUSTUP_HOME" not in clean:
+        candidates: list[pathlib.Path] = []
+        if caller_home:
+            candidates.append(pathlib.Path(caller_home) / ".rustup")
+        candidates.extend([pathlib.Path("/usr/local/rustup"), pathlib.Path("/usr/share/rust/.rustup")])
+        for cand in candidates:
+            if not cand.is_dir():
+                continue
+            settings = cand / "settings.toml"
+            tdir = cand / "toolchains"
+            has_tchain = tdir.is_dir() and any(d.is_dir() for d in tdir.iterdir())
+            has_default = settings.is_file() and "default_toolchain" in settings.read_text(
+                encoding="utf-8", errors="ignore"
+            )
+            if has_tchain or has_default:
+                clean["RUSTUP_HOME"] = str(cand)
+                break
+
+    if "RUSTUP_TOOLCHAIN" not in clean and "RUSTUP_HOME" in clean:
+        rhome = pathlib.Path(clean["RUSTUP_HOME"])
+        settings = rhome / "settings.toml"
+        has_default = settings.is_file() and "default_toolchain" in settings.read_text(encoding="utf-8", errors="ignore")
+        tdir = rhome / "toolchains"
+        if not has_default and tdir.is_dir():
+            tchains = sorted(d.name for d in tdir.iterdir() if d.is_dir())
+            if tchains:
+                stable = [n for n in tchains if n.startswith("stable")]
+                clean["RUSTUP_TOOLCHAIN"] = stable[0] if stable else tchains[0]
+
+    if isolated_home is not None and "CARGO_HOME" not in clean and caller_home:
+        src_cargo = pathlib.Path(caller_home) / ".cargo"
+        if src_cargo.is_dir():
+            iso_cargo = isolated_home / ".cargo"
+            iso_cargo.mkdir(parents=True, exist_ok=True)
+            for sub in ("bin", "registry", "git"):
+                target_sub = src_cargo / sub
+                link_sub = iso_cargo / sub
+                if target_sub.exists() and not link_sub.exists():
+                    try:
+                        link_sub.symlink_to(target_sub)
+                    except OSError:
+                        pass
+
+
 def scrubbed_subprocess_env(
     *,
     base_env: Mapping[str, str] | None = None,
@@ -190,13 +242,16 @@ def scrubbed_subprocess_env(
     clean.setdefault("LANG", "C.UTF-8")
     clean["PAGER"] = "cat"
     clean["GIT_TERMINAL_PROMPT"] = "0"
+    iso_home: pathlib.Path | None = None
     if tmp_dir is not None:
-        t = str(pathlib.Path(tmp_dir).resolve())
+        iso_home = pathlib.Path(tmp_dir).resolve()
+        t = str(iso_home)
         clean["TMPDIR"] = t
         clean["HOME"] = t
         clean["XDG_CACHE_HOME"] = os.path.join(t, ".cache")
         clean["XDG_CONFIG_HOME"] = os.path.join(t, ".config")
         clean["XDG_DATA_HOME"] = os.path.join(t, ".local", "share")
+    _preserve_rust_toolchain_env(src, clean, iso_home)
     if overrides:
         for key, value in overrides.items():
             clean[key] = value

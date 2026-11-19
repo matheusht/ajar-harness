@@ -389,6 +389,36 @@ def check_all_gates(
                     )
                     break
 
+    from ajar.swarm import (
+        ENV_BLOCKER_KINDS,
+        POLICY_REFUSAL_BLOCK_RE,
+        ZERO_ATTEMPT_EXEMPT_ENV_BLOCKERS,
+    )
+
+    blocked_claims = conn.execute("SELECT * FROM claims WHERE status = 'blocked' ORDER BY created_at ASC").fetchall()
+    zero_attempt_blocked = 0
+    for bc in blocked_claims:
+        cid = str(bc["claim_id"])
+        breason = str(bc["blocker_reason"] or "")
+        env_b = str(bc["env_blocker"] or "").strip() if "env_blocker" in bc.keys() else ""
+        if POLICY_REFUSAL_BLOCK_RE.search(breason):
+            g4_issues.append(
+                f"Claim {cid} blocked via policy/refusal deferral ({breason[:90]!r}); re-dispatch via `ajar swarm fallback`."
+            )
+        if env_b not in ENV_BLOCKER_KINDS:
+            g4_issues.append(
+                f"Claim {cid} missing concrete --env-blocker ({', '.join(ENV_BLOCKER_KINDS)})."
+            )
+        fails = int(bc["failed_repro_count"] or 0)
+        inst = int(bc["instrumented_since_fail"] or 0)
+        if target_mode == "source" and fails == 0 and inst == 0 and env_b not in ZERO_ATTEMPT_EXEMPT_ENV_BLOCKERS:
+            zero_attempt_blocked += 1
+
+    if zero_attempt_blocked >= 3:
+        g4_issues.append(
+            f"Bulk zero-attempt claim blocking detected: {zero_attempt_blocked} source claims marked `blocked` with 0 reproduction attempts."
+        )
+
     gates["G4_zero_skill_and_dry_rigor"] = {"passed": len(g4_issues) == 0, "issues": g4_issues}
     all_blockers.extend(f"[G4] {m}" for m in g4_issues)
 

@@ -69,4 +69,9 @@ Before proposing or closing out chains, apply three critiques:
      --severity critical
    ```
 
+3. **Stage-Split Swarm Dispatch & Runtime Execution Integrity:**
+   - Keep multi-step discovery/invariant mapping separate from Stage-5 execution: dispatch a dedicated Stage-5 worker with `ajar swarm packet --stage chain` (`--wire-profile direct` by default; `ajar swarm fallback <dispatch_id>` if filter-blocked).
+   - `--poc-cmd` and `--control-cmd` must execute the compiled target binary or dual-mode `StageContext` helpers against real runtime state. `ajar chain propose` rejects `<conceptual_placeholder>` inputs and external scripts that read or `grep` patched source files instead of running the target.
+
 Elevate chain severity above its individual links only when the end-to-end PoC passes per-step causal ablation and achieves an unauthorized `C`/`I`/`A` impact that no single step reaches alone.
+

@@ -413,4 +413,10 @@ def init_run_workspace(
     }
     if diff_sync_summary is not None:
         result["diff_sync"] = diff_sync_summary
+
+    from ajar.swarm import sync_run_to_shared_mirror
+
+    mirror_info = sync_run_to_shared_mirror(rid, ajar_home=ajar_home)
+    if mirror_info is not None:
+        result["shared_mirror_dir"] = mirror_info["mirror_dir"]
     return result

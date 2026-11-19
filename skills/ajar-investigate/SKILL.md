@@ -72,7 +72,7 @@ Never mark a task `dry` the moment you spot an upstream check if an inner sink o
 
 ## 4. Propose Falsifiable Claims
 
-Trace reachability from an untrusted entrypoint to the sink and state a concrete disconfirmation test:
+Trace reachability from an untrusted entrypoint to the sink and state a concrete disconfirmation test. Express `--title`, `--mechanism`, and `--falsification-test` strictly as structural code transitions and boundary violations (for example, `prepare_symlink_changes skips SYMLINK_IN_RESULT when patch->old_mode == 0, allowing writes through a renamed intra-repo symlink`), never speculative post-exploitation `.git/hooks/*` persistence scripts, reverse-shell commands, or raw shellcode literals (`ajar claim propose` deterministically rejects weaponized prose tails):
 
 ```bash
 ajar claim propose \

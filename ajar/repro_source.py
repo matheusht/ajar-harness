@@ -395,6 +395,7 @@ def _run_shell_in_slot(
         "AJAR_HELPERS_DIR": str(eff_helpers),
         "CARGO_TARGET_DIR": str(cache_dir / "cargo-target"),
         "GOCACHE": str(cache_dir / "go-cache"),
+        "CCACHE_DIR": str(cache_dir / "ccache"),
         "PYTHONPYCACHEPREFIX": str(cache_dir / "pycache"),
         "PYTHONNOUSERSITE": "1",
         "PYTHONPATH": f"{slot_dir}{os.pathsep}{eff_helpers}",
@@ -538,6 +539,183 @@ def classify_release_ub_divergence(
     return "consistent"
 
 
+SYNTHETIC_C_OBJECT_STUB_RE = re.compile(
+    r"\b(?:gcc|clang|cc|g\+\+|clang\+\+)\b[^\n;|&]*(?:\b\S+\.(?:c|cc|cpp|cxx)\b[^\n;|&]*\b\S+\.(?:o|lo|a)\b|\b\S+\.(?:o|lo|a)\b[^\n;|&]*\b\S+\.(?:c|cc|cpp|cxx)\b)",
+    re.IGNORECASE,
+)
+LIBRARY_SURFACE_KINDS: frozenset[str] = frozenset(
+    {"library", "library_api", "sdk", "ffi", "ffi_boundary", "internal_fn"}
+)
+PRESERVED_BUILD_GLOBS: tuple[str, ...] = (
+    "*.o",
+    "*.lo",
+    "*.a",
+    "*.la",
+    "*.d",
+    ".deps/",
+    "CMakeCache.txt",
+    "CMakeFiles/",
+    "config.status",
+    "config.mak.autogen",
+    "config.mak.uname",
+)
+
+
+def resolve_local_build_cache_dir(run_dir: pathlib.Path | str, slot_name: str = "slot-0") -> pathlib.Path:
+    """Place heavy compiler caches (`CARGO_TARGET_DIR`, `GOCACHE`, `CCACHE_DIR`) on local SSD `/tmp`."""
+    raw_root = os.environ.get("AJAR_BUILD_CACHE_ROOT", "").strip()
+    cache_root = pathlib.Path(raw_root).expanduser() if raw_root else (pathlib.Path(tempfile.gettempdir()) / "ajar-build-cache")
+    cdir = cache_root / pathlib.Path(run_dir).name / slot_name
+    cdir.mkdir(parents=True, exist_ok=True)
+    return cdir
+
+
+def _clean_slot_preserving_objects(slot_dir: pathlib.Path, *, check: bool = True) -> None:
+    """Clean untracked PoC/scratch artifacts while preserving compiled C/C++ `.o`/`.a` objects."""
+    cmd = ["git", "-C", str(slot_dir), "clean", "-fdx"]
+    for pat in PRESERVED_BUILD_GLOBS:
+        cmd.extend(["-e", pat])
+    subprocess.run(cmd, capture_output=True, env=scrubbed_subprocess_env(), check=check)
+
+
+def validate_entrypoint_fidelity(poc_cmd: str, *, surface_kind: str = "") -> tuple[bool, str]:
+    """Reject synthetic C/C++ `main()` stubs linked directly against internal `.o`/`lib*.a` objects on CLI/daemon claims."""
+    sk = surface_kind.strip().lower()
+    if sk in LIBRARY_SURFACE_KINDS or any(tok in sk for tok in ("lib", "sdk", "ffi")):
+        return (True, "ok")
+    if SYNTHETIC_C_OBJECT_STUB_RE.search(poc_cmd or ""):
+        return (
+            False,
+            "entrypoint_fidelity_violation: PoC compiles a standalone C/C++ stub linked directly against internal `.o`/`.a` "
+            "objects on a non-library surface. Exercise the real target binary/CLI entrypoint (`make` + `./<binary>`), "
+            "or register an explicit `library_api` / `ffi_boundary` surface when auditing a library.",
+        )
+    return (True, "ok")
+
+
+COMPILED_SOURCE_EXTS: frozenset[str] = frozenset(
+    {".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".rs", ".go", ".sol", ".zig", ".java", ".kt", ".swift"}
+)
+PLACEHOLDER_TOKEN_RE = re.compile(
+    r"<\s*(?:conceptual_placeholder|placeholder_payload|todo_payload|redacted_payload)\s*>",
+    re.IGNORECASE,
+)
+SCRIPT_PATH_TOKEN_RE = re.compile(r"(?:^|[\s'\"=])((?:/|\./|\.\./|[A-Za-z0-9_.-]+/)[^\s'\";|&]+\.(?:py|sh|bash))(?:$|[\s'\"])")
+READ_MODE_OPEN_RE = re.compile(
+    r"\bopen\s*\([^)\n]*(?:,\s*['\"]r[bt+]*['\"]|,\s*encoding\s*=|\))",
+    re.IGNORECASE,
+)
+COMPILER_TOKEN_RE = re.compile(r"\b(?:gcc|clang|cc|g\+\+|clang\+\+|rustc)\b")
+
+
+def _extract_referenced_script_texts(
+    poc_cmd: str,
+    search_roots: tuple[pathlib.Path, ...] = (),
+    *,
+    exclude_root: pathlib.Path | None = None,
+) -> list[tuple[str, str]]:
+    found: list[tuple[str, str]] = []
+    seen: set[pathlib.Path] = set()
+    excl_resolved = exclude_root.resolve() if exclude_root is not None and exclude_root.exists() else None
+    for m in SCRIPT_PATH_TOKEN_RE.finditer(poc_cmd or ""):
+        raw = m.group(1).strip()
+        candidates = [pathlib.Path(raw)]
+        if not pathlib.Path(raw).is_absolute():
+            for root in search_roots:
+                candidates.append(root / raw)
+        for cand in candidates:
+            try:
+                resolved = cand.resolve()
+            except OSError:
+                continue
+            if resolved in seen or not resolved.is_file():
+                continue
+            if excl_resolved is not None:
+                try:
+                    resolved.relative_to(excl_resolved)
+                    continue
+                except ValueError:
+                    pass
+            seen.add(resolved)
+            try:
+                txt = resolved.read_text(encoding="utf-8", errors="ignore")[:131072]
+                found.append((str(resolved), txt))
+            except OSError:
+                continue
+    return found
+
+
+def validate_no_static_source_cheat(
+    poc_cmd: str,
+    touched_files: list[str] | tuple[str, ...],
+    *,
+    search_roots: tuple[pathlib.Path, ...] = (),
+    target_dir: pathlib.Path | None = None,
+) -> tuple[bool, str]:
+    """Reject placeholder PoCs or worker scripts that read/grep patched source files instead of executing the target."""
+    cmd_text = poc_cmd or ""
+    if PLACEHOLDER_TOKEN_RE.search(cmd_text):
+        return (
+            False,
+            "static_source_cheat: PoC command contains a non-executable `<conceptual_placeholder>` token. "
+            "Execute a concrete input against the target inside the isolated `slot-<k>` sandbox.",
+        )
+
+    clean_touched = [tf.strip().lstrip("./") for tf in touched_files if tf and tf.strip()]
+    basenames = [pathlib.PurePosixPath(tf).name for tf in clean_touched if pathlib.PurePosixPath(tf).name]
+
+    for bname in basenames:
+        grep_re = re.compile(
+            rf"\b(?:grep|egrep|fgrep|rg)\b[^\n;|&]*\b{re.escape(bname)}\b",
+            re.IGNORECASE,
+        )
+        if grep_re.search(cmd_text):
+            return (
+                False,
+                f"static_source_cheat: PoC greps patched source file {bname!r} instead of executing the target.",
+            )
+
+    scripts = [
+        ("inline_poc_cmd", cmd_text),
+        *_extract_referenced_script_texts(cmd_text, search_roots, exclude_root=target_dir),
+    ]
+    compiled_basenames = [
+        pathlib.PurePosixPath(tf).name
+        for tf in clean_touched
+        if pathlib.PurePosixPath(tf).suffix.lower() in COMPILED_SOURCE_EXTS
+    ]
+
+    for label, text in scripts:
+        if PLACEHOLDER_TOKEN_RE.search(text):
+            return (
+                False,
+                f"static_source_cheat: verifier script {label} contains `<conceptual_placeholder>` instead of a concrete input.",
+            )
+        if not compiled_basenames:
+            continue
+        reads_text_files = (
+            ".read_text(" in text
+            or ".read_bytes(" in text
+            or bool(READ_MODE_OPEN_RE.search(text))
+        )
+        if not reads_text_files:
+            continue
+        for cb in compiled_basenames:
+            if cb not in text:
+                continue
+            # Allow scripts that only pass `src/foo.c` into a compiler argv without reading source text.
+            non_compiler_mentions = [
+                ln for ln in text.splitlines() if cb in ln and not COMPILER_TOKEN_RE.search(ln)
+            ]
+            if non_compiler_mentions and (".read_text(" in text or ".read_bytes(" in text or not COMPILER_TOKEN_RE.search(text)):
+                return (
+                    False,
+                    f"static_source_cheat: verifier {label} reads patched source file {cb!r} directly to fake Arm 1 vs Arm 3. "
+                    "Execute the compiled binary or test harness on concrete runtime inputs.",
+                )
+    return (True, "ok")
+
+
 def _acquire_slot(repro_dir: pathlib.Path, max_slots: int = 8) -> tuple[int, Any]:
     repro_dir.mkdir(parents=True, exist_ok=True)
     for idx in range(max_slots):
@@ -559,7 +737,13 @@ def _prepare_slot_worktree(mirror_dir: pathlib.Path, slot_dir: pathlib.Path) -> 
     if not (slot_dir / ".git").exists():
         shutil.rmtree(slot_dir, ignore_errors=True)
         subprocess.run(
-            ["git", "clone", "--shared", str(mirror_dir), str(slot_dir)],
+            ["git", "-C", str(mirror_dir), "config", "safe.directory", "*"],
+            capture_output=True,
+            env=env,
+            check=False,
+        )
+        subprocess.run(
+            ["git", "-c", "safe.directory=*", "clone", "--shared", str(mirror_dir), str(slot_dir)],
             capture_output=True,
             text=True,
             env=env,
@@ -567,7 +751,7 @@ def _prepare_slot_worktree(mirror_dir: pathlib.Path, slot_dir: pathlib.Path) -> 
         )
     else:
         subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, env=env, check=True)
-        subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, env=env, check=True)
+        _clean_slot_preserving_objects(slot_dir, check=True)
     _neutralize_python_pth_escapes(slot_dir)
 
 
@@ -589,8 +773,26 @@ def run_source_reproduction(
     max_changed_lines: int = 16,
     release_cmd: str = "",
     release_control_cmd: str = "",
+    surface_kind: str = "",
 ) -> dict[str, Any]:
     """Execute 4-arm counterfactual source reproduction (+ optional Arm 5A/5B Release UB Differential)."""
+    ep_ok, ep_msg = validate_entrypoint_fidelity(poc_cmd, surface_kind=surface_kind)
+    if not ep_ok:
+        return {
+            "passed": False,
+            "reason": ep_msg,
+            "observation_hash": hashlib.sha256(ep_msg.encode("utf-8")).hexdigest()[:16],
+            "micropatch_diff": "",
+            "arm1_clean_poc": {"arm_passed": False},
+            "arm2_clean_control": {"arm_passed": False},
+            "arm3_patch_poc": {"arm_passed": False},
+            "arm4_patch_control": {"arm_passed": False},
+            "arm5a_release_poc": {},
+            "arm5b_release_control": {},
+            "ub_divergence_class": "",
+            "cross_killed_claim_ids": [],
+        }
+
     if not micropatch_path.is_file():
         return {
             "passed": False,
@@ -631,6 +833,28 @@ def run_source_reproduction(
             "cross_killed_claim_ids": [],
         }
 
+    cheat_ok, cheat_msg = validate_no_static_source_cheat(
+        poc_cmd,
+        touched_files,
+        search_roots=(run_dir,),
+        target_dir=target_dir,
+    )
+    if not cheat_ok:
+        return {
+            "passed": False,
+            "reason": cheat_msg,
+            "observation_hash": hashlib.sha256(cheat_msg.encode("utf-8")).hexdigest()[:16],
+            "micropatch_diff": scrub_text(diff_text[:4000]),
+            "arm1_clean_poc": {"arm_passed": False},
+            "arm2_clean_control": {"arm_passed": False},
+            "arm3_patch_poc": {"arm_passed": False},
+            "arm4_patch_control": {"arm_passed": False},
+            "arm5a_release_poc": {},
+            "arm5b_release_control": {},
+            "ub_divergence_class": "",
+            "cross_killed_claim_ids": [],
+        }
+
     from ajar.repro_compose import ensure_helpers_runtime
 
     helpers_dir = ensure_helpers_runtime(run_dir)
@@ -638,8 +862,7 @@ def run_source_reproduction(
     repro_dir = run_dir / "repro"
     slot_idx, lock_fh = _acquire_slot(repro_dir)
     slot_dir = repro_dir / f"slot-{slot_idx}"
-    cache_dir = repro_dir / f"cache-{slot_idx}"
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = resolve_local_build_cache_dir(run_dir, f"cache-{slot_idx}")
     watermark_file = cache_dir / "watermark_ns"
 
     n_trials = max(4, int(trials)) if determinism == "probabilistic_race" else 1
@@ -679,7 +902,7 @@ def run_source_reproduction(
 
         # Reset working tree between Arm 1 and Arm 2 in case PoC wrote scratch files.
         subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
-        subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, check=True)
+        _clean_slot_preserving_objects(slot_dir, check=True)
 
         # Arm 2: Clean baseline + benign control -> MUST pass cleanly with 0 defect hits.
         arm2 = _run_trials(
@@ -710,7 +933,7 @@ def run_source_reproduction(
 
         # Apply counterfactual micro-patch and advance monotonic mtime watermark (+2s).
         subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
-        subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, check=True)
+        _clean_slot_preserving_objects(slot_dir, check=True)
         apply_proc = subprocess.run(
             ["git", "-C", str(slot_dir), "apply", "--whitespace=nowarn", str(micropatch_path.resolve())],
             capture_output=True,
@@ -824,7 +1047,7 @@ def run_source_reproduction(
         ub_divergence_class = ""
         if release_cmd.strip():
             subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
-            subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, check=True)
+            _clean_slot_preserving_objects(slot_dir, check=True)
             _bump_files_mtime(slot_dir, touched_files, watermark_file)
 
             arm5a = _run_trials(
@@ -837,7 +1060,7 @@ def run_source_reproduction(
                 helpers_dir=helpers_dir,
             )
             subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
-            subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, check=True)
+            _clean_slot_preserving_objects(slot_dir, check=True)
 
             eff_rel_ctrl = release_control_cmd.strip() or control_cmd
             arm5b = _run_trials(
@@ -894,7 +1117,7 @@ def run_source_reproduction(
     finally:
         if (slot_dir / ".git").exists():
             subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
-            subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, check=False)
+            _clean_slot_preserving_objects(slot_dir, check=False)
             _bump_files_mtime(slot_dir, touched_files, watermark_file)
         fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
         lock_fh.close()

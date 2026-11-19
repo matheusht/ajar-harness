@@ -638,3 +638,24 @@ def test_real_git_wave1a_shared_ledger_reopen_dry_copy(tmp_path: pathlib.Path) -
     assert pkt["wire_profile"] == "direct"
     assert len(pkt["item_ids"]) == 3
     assert pkt["line_count"] <= 45
+
+
+def test_scrubbed_env_preserves_rustup_without_leaking_cargo_credentials(tmp_path: pathlib.Path) -> None:
+    """Ensure isolated reproduction `HOME` resolves `rustup` toolchains and offline `.cargo/registry` without `credentials.toml`."""
+    from ajar.redact import scrubbed_subprocess_env
+
+    fake_home = tmp_path / "runner_home"
+    (fake_home / ".rustup" / "toolchains" / "stable-x86_64-unknown-linux-gnu").mkdir(parents=True)
+    (fake_home / ".cargo" / "registry").mkdir(parents=True)
+    (fake_home / ".cargo" / "credentials.toml").write_text('[registry]\ntoken = "secret"\n', encoding="utf-8")
+
+    iso_tmp = tmp_path / "slot_tmp"
+    iso_tmp.mkdir()
+    env = scrubbed_subprocess_env(base_env={"HOME": str(fake_home), "PATH": "/usr/bin:/bin"}, tmp_dir=iso_tmp)
+
+    assert env["HOME"] == str(iso_tmp.resolve())
+    assert env["RUSTUP_HOME"] == str(fake_home / ".rustup")
+    assert env["RUSTUP_TOOLCHAIN"] == "stable-x86_64-unknown-linux-gnu"
+    assert (iso_tmp / ".cargo" / "registry").is_symlink()
+    assert not (iso_tmp / ".cargo" / "credentials.toml").exists()
+

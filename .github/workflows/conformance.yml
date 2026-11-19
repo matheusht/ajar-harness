@@ -18,6 +18,9 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install binary verification debugger (gdb)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gdb
+
       - name: Install ajar and dev dependencies
         run: python3 -m pip install -e ".[dev]"
 

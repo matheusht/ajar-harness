@@ -20,6 +20,7 @@ from ajar import EXIT_GATE_BLOCKED, EXIT_OK, EXIT_USER_ERROR, __version__
 from ajar.db import (
     AjarError,
     add_steer,
+    add_threat_assumption,
     check_dead_end_repetition,
     checkpoint_task,
     compute_task_salience,
@@ -41,6 +42,8 @@ from ajar.db import (
     run_dir_for,
     run_pulse,
     set_certified_binding,
+    transition_threat_assumption,
+    upsert_threat_model,
     utc_now_iso,
 )
 from ajar.epistemic_hooks import (
@@ -216,10 +219,16 @@ def cmd_status(args: argparse.Namespace) -> int:
         run = dict(conn.execute("SELECT * FROM runs LIMIT 1").fetchone())
         tpath = pathlib.Path(run["target_path"])
         gates = check_all_gates(conn, target_dir=tpath, auto_enqueue_chain=False)
+        tm_row = conn.execute("SELECT revision FROM threat_models LIMIT 1").fetchone()
         payload = {
             "run": run,
             "has_campaign_brief": bpath.is_file(),
             "brief_path": str(bpath) if bpath.is_file() else "",
+            "has_threat_model": tm_row is not None,
+            "threat_model_revision": int(tm_row["revision"]) if tm_row is not None else 0,
+            "violated_threat_assumptions": conn.execute(
+                "SELECT COUNT(*) AS c FROM threat_assumptions WHERE status = 'violated'"
+            ).fetchone()["c"],
             "surfaces_count": conn.execute("SELECT COUNT(*) AS c FROM surfaces").fetchone()["c"],
             "tasks_by_status": {
                 r["status"]: int(r["c"])
@@ -243,6 +252,80 @@ def cmd_status(args: argparse.Namespace) -> int:
     finally:
         conn.close()
     _emit(payload, True)
+    return EXIT_OK
+
+
+def cmd_threat_model(args: argparse.Namespace) -> int:
+    rid = resolve_run_id(args.run)
+    conn = open_run_db(rid)
+    try:
+        subcmd = args.tm_cmd
+        if subcmd == "set":
+            principals = [x.strip() for x in (args.principals or "").split(",") if x.strip()]
+            assets = [x.strip() for x in (args.assets or "").split(",") if x.strip()]
+            tiers = [x.strip() for x in (args.consumer_tiers or "").split(",") if x.strip()]
+            res = upsert_threat_model(
+                conn,
+                principals=principals,
+                assets=assets,
+                consumer_tiers=tiers,
+                summary=args.summary or "",
+            )
+            _emit(res, True)
+        elif subcmd == "show":
+            tm = conn.execute("SELECT * FROM threat_models LIMIT 1").fetchone()
+            assumptions = list_rows(conn, "SELECT * FROM threat_assumptions ORDER BY created_at ASC")
+            counts = {
+                "total": len(assumptions),
+                "assumed": sum(1 for a in assumptions if a["status"] == "assumed"),
+                "verified_holds": sum(1 for a in assumptions if a["status"] == "verified_holds"),
+                "violated": sum(1 for a in assumptions if a["status"] == "violated"),
+            }
+            _emit(
+                {
+                    "run_id": rid,
+                    "threat_model": dict(tm) if tm else None,
+                    "counts": counts,
+                    "assumptions": assumptions,
+                },
+                True,
+            )
+        elif subcmd == "assumption-add":
+            tags = [x.strip() for x in (args.invalidated_by_tags or "").split(",") if x.strip()]
+            res = add_threat_assumption(
+                conn,
+                subsystem=args.subsystem or "",
+                assumption_text=args.assumption,
+                trust_boundary=args.trust_boundary or "",
+                check_locus=args.check_locus or "",
+                invalidated_by_tags=tags,
+                dependent_surface_id=args.dependent_surface or "",
+                escalate_priority=args.escalate_priority,
+            )
+            _emit(res, True)
+        elif subcmd == "assumption-list":
+            rows = list_rows(conn, "SELECT * FROM threat_assumptions ORDER BY created_at ASC")
+            _emit({"assumptions": rows}, True)
+        elif subcmd == "verify":
+            res = transition_threat_assumption(
+                conn,
+                args.assumption_id,
+                new_status="verified_holds",
+                evidence_ref=args.locus or "",
+                notes=args.notes or "",
+            )
+            _emit(res, True)
+        elif subcmd == "invalidate":
+            res = transition_threat_assumption(
+                conn,
+                args.assumption_id,
+                new_status="violated",
+                evidence_ref=args.evidence or "",
+                notes=args.notes or "",
+            )
+            _emit(res, True)
+    finally:
+        conn.close()
     return EXIT_OK
 
 
@@ -1715,6 +1798,46 @@ def build_parser() -> argparse.ArgumentParser:
     p_ps.add_argument("--limit", type=int, default=10)
     p_ps.add_argument("--run")
     p_ps.set_defaults(func=cmd_ref_query, kind="precedent")
+
+    # threat-model
+    p_tm = sub.add_parser("threat-model", help="Synthesize initial Threat Model and track adaptive trust assumptions.")
+    tm_sub = p_tm.add_subparsers(dest="tm_cmd", required=True)
+    ptm_set = tm_sub.add_parser("set", help="Set or revise attacker principals, crown-jewel assets, and consumer tiers.")
+    ptm_set.add_argument("--principals", required=True, help="Comma-separated untrusted/semi-trusted attacker principals.")
+    ptm_set.add_argument("--assets", required=True, help="Comma-separated protected assets or impact classes.")
+    ptm_set.add_argument("--consumer-tiers", default="", help="Comma-separated downstream caller tiers (`CLI,Gitaly,guest-VM`).")
+    ptm_set.add_argument("--summary", default="", help="Concise architectural threat-model summary.")
+    ptm_set.add_argument("--json", action="store_true")
+    ptm_set.add_argument("--run")
+    ptm_show = tm_sub.add_parser("show", help="Inspect current Threat Model revision and trust assumptions.")
+    ptm_show.add_argument("--json", action="store_true")
+    ptm_show.add_argument("--run")
+    ptm_add = tm_sub.add_parser("assumption-add", help="Register a falsifiable architectural trust assumption.")
+    ptm_add.add_argument("--subsystem", default="")
+    ptm_add.add_argument("--trust-boundary", default="")
+    ptm_add.add_argument("--assumption", required=True)
+    ptm_add.add_argument("--check-locus", default="")
+    ptm_add.add_argument("--invalidated-by-tags", default="", help="Comma-separated capability tags (`ns:name`) that auto-violate this assumption.")
+    ptm_add.add_argument("--dependent-surface", default="", help="Surface ID whose priority escalates if this assumption breaks.")
+    ptm_add.add_argument("--escalate-priority", choices=("critical", "high"), default="critical")
+    ptm_add.add_argument("--json", action="store_true")
+    ptm_add.add_argument("--run")
+    ptm_lst = tm_sub.add_parser("assumption-list")
+    ptm_lst.add_argument("--json", action="store_true")
+    ptm_lst.add_argument("--run")
+    ptm_ver = tm_sub.add_parser("verify", help="Mark an assumption verified in code (`verified_holds`).")
+    ptm_ver.add_argument("assumption_id")
+    ptm_ver.add_argument("--locus", required=True)
+    ptm_ver.add_argument("--notes", default="")
+    ptm_ver.add_argument("--json", action="store_true")
+    ptm_ver.add_argument("--run")
+    ptm_inv = tm_sub.add_parser("invalidate", help="Violate a broken assumption and adaptively re-score surfaces/tasks.")
+    ptm_inv.add_argument("assumption_id")
+    ptm_inv.add_argument("--evidence", required=True, help="Primitive ID, Finding ID, or file:line proving the assumption failed.")
+    ptm_inv.add_argument("--notes", default="")
+    ptm_inv.add_argument("--json", action="store_true")
+    ptm_inv.add_argument("--run")
+    p_tm.set_defaults(func=cmd_threat_model)
 
     # surface
     p_surf = sub.add_parser("surface", help="Manage target entrypoints and trust-boundary surfaces.")

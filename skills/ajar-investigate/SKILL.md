@@ -56,6 +56,11 @@ Discovery is **keep-biased**: capture real behavioral signals first and let `aja
      --guard-assumption "<optional invariant assumed by upstream guard>" \
      --evidence-cmd "<verification command>"
    ```
+4. Update explicit campaign threat-model assumptions when code inspection proves or breaks them (assumptions with `--invalidated-by-tags` or `--check-locus` also auto-violate when matching primitives or findings land):
+   ```bash
+   ajar threat-model verify <assumption_id> --locus "<file:line>" --notes "<verified boundary guard>"
+   ajar threat-model invalidate <assumption_id> --evidence "<prim_id|finding_id|file:line>" --notes "<how boundary breaks>"
+   ```
 
 ## 3. Anti-Premature-`dry` Rule for Guarded Sinks
 

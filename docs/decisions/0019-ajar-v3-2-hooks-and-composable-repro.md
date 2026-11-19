@@ -36,6 +36,9 @@ We upgrade Ajar to `v3.2.1` while preserving the zero-LLM deterministic SQLite W
    - Persist flexible Lead Orchestrator strategy in `~/.ajar/runs/<run_id>/brief.md` (`ajar init --brief-file`, `ajar brief`) outside worker task prefixes, and support `--uncapped` (`pricing_mode=uncapped_research`) for open-ended deep research runs.
    - Support `ajar init --diff <base..head> [--parent-run <id>]` to carry forward `kept` findings/guards, verify `closed` fixes on `HEAD`, and re-open `invalidated_guard` `dry` tasks when edited hunks touch a cited guard locus.
    - Add `ajar task checkpoint`, `ajar claim instrument` (`slot-inst`), `ajar claim falsify --config-gate`, `[UNTRUSTED_TARGET_DOC]` FTS5 provenance tags, and `detect_soliloquy_transcript`.
+6. **Initial + Adaptive Threat Modeling (`ajar threat-model`, `threat_models` / `threat_assumptions`):**
+   - Synthesize structured campaign threat models (`principals`, `assets`, `consumer_tiers`) and falsifiable boundary assumptions (`invalidated_by_tags`, `check_locus`, `dependent_surface_id`, `escalate_priority`) during `ajar map`.
+   - Automatically flip matching `assumed` boundaries to `violated` when a primitive provides `invalidated_by_tags` or a confirmed finding hits `check_locus`, incrementing `threat_models.revision`, upgrading exposed downstream surface priority, unblocking parked tasks (`+30` salience), and injecting a `<= 2`-line `Adaptive Threat-Model Shift` notice into `Task Delta` without altering the KV-cached `Certified Run Prefix`.
 
 ## Consequences
 

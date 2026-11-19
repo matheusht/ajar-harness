@@ -80,6 +80,8 @@ def build_report_data(
         "commitment_hash": run.get("commitment_hash", ""),
         "created_at": run.get("created_at", ""),
         "finished_at": run.get("finished_at"),
+        "threat_model": dict(tm_row) if (tm_row := conn.execute("SELECT * FROM threat_models LIMIT 1").fetchone()) else None,
+        "threat_assumptions": list_rows(conn, "SELECT * FROM threat_assumptions ORDER BY created_at ASC"),
         "findings": findings,
         "verified_chains": chains,
         "patch_verifications": patch_verifications,
@@ -130,10 +132,20 @@ def render_markdown_report(
         f"- **Measured Compute Spend:** `${econ['total_spend_usd']:.4f}` (`${econ['cost_usd_per_kloc']:.4f} / 1K LoC`)",
         f"- **Autonomy Checks:** `research_independence_pass={econ['research_independence_pass']}`, "
         f"`product_operability_pass={econ['product_operability_pass']}`",
-        "",
-        "## 1. Confirmed Findings",
-        "",
     ]
+    if data.get("threat_model"):
+        tm = data["threat_model"]
+        viol_n = sum(1 for ta in data.get("threat_assumptions", []) if ta["status"] == "violated")
+        lines.append(
+            f"- **Adaptive Threat Model (`rev {tm['revision']}`):** `{len(data.get('threat_assumptions', []))}` assumptions tracked (`{viol_n}` violated)"
+        )
+    lines.extend(
+        [
+            "",
+            "## 1. Confirmed Findings",
+            "",
+        ]
+    )
 
     findings = data["findings"]
     if not findings:

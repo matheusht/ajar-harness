@@ -29,6 +29,21 @@ Use this skill to build the initial component and attack-surface map, record ope
    ```bash
    ajar steer add --scope global --kind scope_authority --rule "<explicit scope or threat-model boundary>"
    ```
+5. Synthesize the **Adaptive Threat Model** before registering surfaces: define attacker principals, protected assets, downstream consumer tiers, and falsifiable architectural assumptions (`assumption-add`). Whenever a worker later records a capability tag matching `--invalidated-by-tags`, confirms a bug at `--check-locus`, or runs `ajar threat-model invalidate`, `ajar` automatically bumps the threat-model revision, upgrades `--dependent-surface` priority, and unblocks parked tasks (`+30` salience):
+   ```bash
+   ajar threat-model set \
+     --principals "<untrusted caller, remote peer, tenant user>" \
+     --assets "<RCE, cross-tenant data, state-root soundness>" \
+     --consumer-tiers "<CLI, server daemon, CI runner>" \
+     --summary "<1-2 sentence trust-boundary architecture>"
+   ajar threat-model assumption-add \
+     --subsystem "<module>" \
+     --trust-boundary "<external -> internal>" \
+     --assumption "<what architecture assumes holds>" \
+     --check-locus "<file:line>" \
+     --invalidated-by-tags "<ns:tag>" \
+     --dependent-surface "<optional_surface_id>"
+   ```
 
 ## 2. Surface Ranking Rules
 

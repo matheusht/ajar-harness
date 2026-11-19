@@ -138,38 +138,33 @@ def _run_binary_once(
     env = scrubbed_subprocess_env()
     if use_gdb and shutil.which("gdb") is not None:
         with tempfile.TemporaryDirectory(prefix="ajar-gdb-") as gtmp:
-            script_lines = [
-                "set pagination off",
-                "set confirm off",
-            ]
+            guard_lines: list[str] = []
             if gdb_guard:
                 target_sym = str(gdb_guard.get("symbol_or_offset") or "")
                 cond = str(gdb_guard.get("condition") or "")
                 ret_val = str(gdb_guard.get("return_value", "-1"))
                 brk = f"break {target_sym} if {cond}" if cond else f"break {target_sym}"
-                script_lines.extend(
-                    [
-                        brk,
-                        "commands",
-                        "silent",
-                        "print \"AJAR_GUARD_FIRED\"",
-                        f"return {ret_val}",
-                        "continue",
-                        "end",
-                    ]
-                )
-            run_line = "run " + " ".join(json.dumps(a) for a in args)
-            if stdin_path is not None:
-                run_line += f" < {json.dumps(str(stdin_path))}"
-            script_lines.extend(
-                [
-                    run_line,
-                    "info proc mappings",
-                    "bt 12",
-                    "printf \"AJAR_PC=%p\\n\", $pc",
-                    "quit",
+                guard_lines = [
+                    brk,
+                    "commands",
+                    "silent",
+                    'print "AJAR_GUARD_FIRED"',
+                    f"return {ret_val}",
+                    "continue",
+                    "end",
                 ]
-            )
+            run_args = " ".join(json.dumps(a) for a in args)
+            stdin_redir = f" < {json.dumps(str(stdin_path))}" if stdin_path is not None else ""
+            script_lines = [
+                "set pagination off",
+                "set confirm off",
+                *guard_lines,
+                f"run {run_args}{stdin_redir}",
+                "info proc mappings",
+                "bt 12",
+                'printf "AJAR_PC=%p\\n", $pc',
+                "quit",
+            ]
             gdb_script = pathlib.Path(gtmp) / "cmd.gdb"
             gdb_script.write_text("\n".join(script_lines) + "\n", encoding="utf-8")
             proc = subprocess.run(
@@ -181,6 +176,51 @@ def _run_binary_once(
                 check=False,
             )
             out = scrub_text(proc.stdout + "\n" + proc.stderr)
+            ld_linux = pathlib.Path("/lib64/ld-linux-x86-64.so.2")
+            if "_dl_debug_initialize" in out and ld_linux.is_file():
+                # gVisor/container ptrace AT_BASE fallback: launch via ld-linux and relocate DWARF symbols at set_tid_address.
+                bin_real_js = json.dumps(str(binary_path.resolve()))
+                fb_lines = [
+                    "set pagination off",
+                    "set confirm off",
+                    f"exec-file {ld_linux}",
+                    "catch syscall set_tid_address",
+                    f"run {bin_real_js} {run_args}{stdin_redir}",
+                    "python",
+                    "import gdb, re",
+                    f"target_bin = {bin_real_js}",
+                    'maps = gdb.execute("info proc mappings", to_string=True)',
+                    "base = None",
+                    "for line in maps.splitlines():",
+                    "    if target_bin in line:",
+                    '        m = re.match(r"^\\s*(0x[0-9a-fA-F]+)", line)',
+                    "        if m:",
+                    "            addr = int(m.group(1), 16)",
+                    "            if base is None or addr < base:",
+                    "                base = addr",
+                    "if base is not None:",
+                    '    gdb.execute(f"add-symbol-file {target_bin} -o {hex(base)}")',
+                    "end",
+                    "delete breakpoints",
+                    *guard_lines,
+                    "continue",
+                    "info proc mappings",
+                    "bt 12",
+                    'printf "AJAR_PC=%p\\n", $pc',
+                    "quit",
+                ]
+                fb_script = pathlib.Path(gtmp) / "cmd_ld.gdb"
+                fb_script.write_text("\n".join(fb_lines) + "\n", encoding="utf-8")
+                proc = subprocess.run(
+                    ["gdb", "-batch", "-nx", "-x", str(fb_script)],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    timeout=timeout_sec,
+                    check=False,
+                )
+                out = scrub_text(proc.stdout + "\n" + proc.stderr)
+
             sig_name, norm_offset = _parse_gdb_normalized_offset(out, binary_path)
             exited_normally = bool(re.search(r"exited normally", out))
             exited_code_m = re.search(r"exited with code\s+(\d+)", out)

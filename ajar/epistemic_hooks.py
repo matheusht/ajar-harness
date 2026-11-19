@@ -525,11 +525,23 @@ def on_primitive_added(
     requires_tags: Sequence[str] = (),
     spawn_guard_task: bool = True,
 ) -> list[dict[str, Any]]:
-    """Evaluate `H1_GUARD_SYMMETRY` and `H4_TYPED_STATE_BRIDGE` when a primitive is recorded."""
-    from ajar.db import compute_task_salience, infer_subsystem, new_id, utc_now_iso
+    """Evaluate `H1_GUARD_SYMMETRY`, `H4_TYPED_STATE_BRIDGE`, and Adaptive Threat-Model assumptions when a primitive is recorded."""
+    from ajar.db import (
+        compute_task_salience,
+        evaluate_adaptive_threat_assumptions,
+        infer_subsystem,
+        new_id,
+        utc_now_iso,
+    )
 
     fired: list[dict[str, Any]] = []
     now_iso = utc_now_iso()
+    if provides_tags:
+        evaluate_adaptive_threat_assumptions(
+            conn,
+            evidence_ref=primitive_id,
+            provided_tags=provides_tags,
+        )
 
     # H1: Guarded inner primitive -> register guard-symmetry hook and optional inside-out guard task.
     gloc = guarded_by_locus.strip()
@@ -809,14 +821,15 @@ def on_finding_confirmed(
     finding_id: str,
     claim_row: sqlite3.Row | dict[str, Any],
 ) -> dict[str, Any] | None:
-    """Evaluate `H5_POST_CONFIRM_ESCALATION` when a `low`/`medium` finding passes 4-arm reproduction."""
-    from ajar.db import new_id, utc_now_iso
+    """Evaluate Adaptive Threat-Model assumptions and `H5_POST_CONFIRM_ESCALATION` when a finding passes reproduction."""
+    from ajar.db import evaluate_adaptive_threat_assumptions, new_id, utc_now_iso
 
     sev = str(claim_row["severity"] or "").lower()
     cid = str(claim_row["claim_id"])
     loc = str(claim_row["locus"] or "")
     sub = str(claim_row["subsystem"] or "")
     consume_hooks_for_locus(conn, locus=loc, source_entity_id=cid, hook_code="H6_RELEASE_UB_DIFF")
+    evaluate_adaptive_threat_assumptions(conn, evidence_ref=finding_id, confirmed_locus=loc)
 
     if sev not in ("low", "medium"):
         return None

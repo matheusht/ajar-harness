@@ -218,6 +218,31 @@ def export_attack_flow_graph(conn: sqlite3.Connection) -> dict[str, Any]:
         conn,
         "SELECT helper_id, primitive_id, module_name, callable_name, provides_tags_json, verified FROM primitive_helpers ORDER BY created_at ASC",
     )
+    tm_row = conn.execute("SELECT * FROM threat_models LIMIT 1").fetchone()
+    threat_model = dict(tm_row) if tm_row else None
+    threat_assumptions = list_rows(conn, "SELECT * FROM threat_assumptions ORDER BY created_at ASC")
+    for ta in threat_assumptions:
+        aid = str(ta["assumption_id"])
+        nodes.append(
+            {
+                "id": aid,
+                "node_type": "threat_assumption",
+                "label": ta["assumption_text"][:80],
+                "subsystem": ta["subsystem"],
+                "trust_boundary": ta["trust_boundary"],
+                "status": ta["status"],
+                "evidence_ref": ta["evidence_ref"],
+            }
+        )
+        if ta.get("dependent_surface_id"):
+            edges.append(
+                {
+                    "src": aid,
+                    "dst": str(ta["dependent_surface_id"]),
+                    "edge_type": "assumes_boundary_for",
+                    "label": ta["status"],
+                }
+            )
     cov_row = conn.execute(
         "SELECT COUNT(*) AS spans, COUNT(DISTINCT rel_path) AS files FROM coverage_spans"
     ).fetchone()
@@ -229,6 +254,8 @@ def export_attack_flow_graph(conn: sqlite3.Connection) -> dict[str, Any]:
         "target_mode": run.get("target_mode", "source"),
         "diff_range": run.get("diff_range", ""),
         "commitment_hash": run.get("commitment_hash", ""),
+        "threat_model": threat_model,
+        "threat_assumptions": threat_assumptions,
         "nodes": nodes,
         "edges": edges,
         "active_steers": steers,
@@ -246,6 +273,8 @@ def export_attack_flow_graph(conn: sqlite3.Connection) -> dict[str, Any]:
             "verified_chains": sum(1 for c in chains if c["verified"]),
             "active_steers": len(steers),
             "epistemic_hooks_total": len(epistemic_hooks),
+            "threat_assumptions_total": len(threat_assumptions),
+            "threat_assumptions_violated": sum(1 for ta in threat_assumptions if ta["status"] == "violated"),
             "coverage_spans_total": int(cov_row["spans"] or 0),
             "coverage_files_total": int(cov_row["files"] or 0),
         },

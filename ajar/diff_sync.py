@@ -9,7 +9,7 @@ Synchronizes a child PR run against `<base>..<head>` (and an optional `--parent-
 3. Carries forward prior `certified_bindings` and `dry` controls untouched by `<diff_range>`;
    any touched guard (`dry_control_locus`, `blocker_check_locus`, or changed `file_sha256`) is
    classified `invalidated_guard` and enqueues a high-salience (`reopened_boost = 25`) audit task.
-4. Enqueues focused `new` slice tasks (`slice_loc <= 3500`) on modified/added files in `<diff_range>`
+4. Enqueues focused `new` slice tasks (`slice_loc <= 15000`) on modified/added files in `<diff_range>`
    and evaluates deterministic epistemic hooks (`H2`, `H3`, `H7`, `H8`) on changed code.
 """
 
@@ -481,7 +481,7 @@ def sync_pr_differential_state(
         finally:
             parent_conn.close()
 
-    # 4. Enqueue focused `new` PR slice tasks (`<= 3500` LoC) for modified/added source files.
+    # 4. Enqueue focused `new` PR slice tasks (`<= 15000` LoC) for modified/added source files.
     for rel_path, hunks in sorted(changed_hunks.items()):
         fpath = target_dir / rel_path
         if not fpath.is_file() or fpath.suffix.lower() not in SOURCE_EXTENSIONS:
@@ -512,7 +512,7 @@ def sync_pr_differential_state(
                     f"Audit PR diff hunks in {rel_path} ({hunk_desc})",
                     sub,
                     locus,
-                    min(3500, loc_count),
+                    min(15000, loc_count),
                     f"PR diff {norm_spec} modified {rel_path} ({hunk_desc}).",
                     now_iso,
                     now_iso,

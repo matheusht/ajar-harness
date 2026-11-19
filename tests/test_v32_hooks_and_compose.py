@@ -1117,6 +1117,342 @@ class TestV32HooksAndComposableRepro(unittest.TestCase):
         )
         self.assertFalse(flagged_real)
 
+    def test_uncapped_campaign_brief_and_cohesive_15k_slice_cap(self) -> None:
+        repo = self.tmp_path / "large_c_repo"
+        repo.mkdir(parents=True, exist_ok=True)
+        # Write a 5,200-line cohesive C state machine (previously split at 3,500 LoC!)
+        c_lines = ["int merge_step(int x) { return x + 1; }"] + [f"// state line {i}" for i in range(5198)] + ["int merge_finish(int x) { return merge_step(x); }"]
+        (repo / "merge_ort.c").write_text("\n".join(c_lines) + "\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.email", "test@ajar.local"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.name", "Ajar Test"], cwd=repo, check=True)
+        subprocess.run(["git", "add", "."], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "initial 5200-line C file"], cwd=repo, check=True)
+
+        brief_md = self.tmp_path / "campaign_brief.md"
+        brief_md.write_text(
+            "# Lead Orchestrator Campaign Brief\n"
+            "## Critical-Class Catalog\n"
+            "- C1: Untrusted repository RCE or out-of-worktree write.\n"
+            "- C5: Unattended server/CI queue exploitation.\n",
+            encoding="utf-8",
+        )
+
+        rc_init, info = _run_cli(
+            [
+                "init",
+                str(repo),
+                "--in-place",
+                "--uncapped",
+                "--brief-file",
+                str(brief_md),
+                "--goal",
+                "Find and reproduce untrusted repo RCE or arbitrary write.",
+                "--run-id",
+                "run-uncapped",
+                "--json",
+            ],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_init, EXIT_OK)
+        self.assertEqual(info["pricing_mode"], "uncapped_research")  # type: ignore[index]
+        self.assertEqual(float(info["budget_usd"]), 0.0)  # type: ignore[arg-type,index]
+        self.assertTrue(str(info["brief_path"]).endswith("brief.md"))  # type: ignore[index]
+
+        # Default `ajar map` keeps 5,200-line `merge_ort.c` intact as 1 cohesive slice (`slice_cap=15000`)
+        rc_map, mp = _run_cli(["map", "--run", "run-uncapped", "--json"], self.ajar_home)
+        self.assertEqual(rc_map, EXIT_OK)
+        self.assertEqual(int(mp["slice_cap"]), 15000)  # type: ignore[arg-type,index]
+        self.assertEqual(int(mp["slice_count"]), 1)  # type: ignore[arg-type,index]
+        self.assertEqual(mp["call_slices"][0]["seed_locus"], "merge_ort.c:1")  # type: ignore[index]
+
+        # `ajar brief` returns the full Lead Orchestrator brief, while worker `ajar context` stays unbloated
+        rc_brf, brf = _run_cli(["brief", "--run", "run-uncapped", "--json"], self.ajar_home)
+        self.assertEqual(rc_brf, EXIT_OK)
+        self.assertTrue(brf["has_campaign_brief"])  # type: ignore[index]
+        self.assertIn("Critical-Class Catalog", str(brf["brief_markdown"]))  # type: ignore[index]
+
+        rc_surf, surf = _run_cli(
+            [
+                "surface",
+                "add",
+                "--run",
+                "run-uncapped",
+                "--name",
+                "merge_ort",
+                "--kind",
+                "parser",
+                "--subsystem",
+                "merge",
+                "--locus",
+                "merge_ort.c:1",
+                "--priority",
+                "high",
+                "--trust-boundary",
+                "untrusted tree -> merge state",
+            ],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_surf, EXIT_OK)
+        sid = str(surf["surface_id"])  # type: ignore[index]
+        rc_tsk, tsk = _run_cli(
+            [
+                "task",
+                "add",
+                "--run",
+                "run-uncapped",
+                "--kind",
+                "investigate",
+                "--title",
+                "Audit merge_ort state machine",
+                "--surface",
+                sid,
+                "--locus",
+                "merge_ort.c:1",
+            ],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_tsk, EXIT_OK)
+        tid = str(tsk["task_id"])  # type: ignore[index]
+
+        rc_ctx, ctx = _run_cli(["context", "--task", tid, "--run", "run-uncapped", "--json"], self.ajar_home)
+        self.assertEqual(rc_ctx, EXIT_OK)
+        self.assertNotIn("Critical-Class Catalog", str(ctx["rendered"]))  # type: ignore[index]
+
+        # Record $250.00 explore spend on uncapped run -> zero budget throttling and gross_margin_floor_pass=True
+        rc_sp, _ = _run_cli(
+            [
+                "spend",
+                "add",
+                "--run",
+                "run-uncapped",
+                "--worker",
+                "w1",
+                "--phase",
+                "explore",
+                "--surface",
+                sid,
+                "--cost-usd",
+                "250.0",
+            ],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_sp, EXIT_OK)
+        rc_stat, stat = _run_cli(["status", "--run", "run-uncapped"], self.ajar_home)
+        self.assertEqual(rc_stat, EXIT_OK)
+        self.assertTrue(stat["has_campaign_brief"])  # type: ignore[index]
+        self.assertTrue(stat["economics"]["gross_margin_floor_pass"])  # type: ignore[index]
+
+    def test_adaptive_threat_model_auto_violation_and_surface_escalation(self) -> None:
+        repo = self.tmp_path / "tm_repo"
+        repo.mkdir(parents=True, exist_ok=True)
+        (repo / "apply.c").write_text("int check_path(const char *p) { return 0; }\n", encoding="utf-8")
+        (repo / "hooks.c").write_text("int run_hook(const char *h) { return 0; }\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.email", "test@ajar.local"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.name", "Ajar Test"], cwd=repo, check=True)
+        subprocess.run(["git", "add", "."], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "init tm repo"], cwd=repo, check=True)
+
+        rc_init, _ = _run_cli(
+            [
+                "init",
+                str(repo),
+                "--in-place",
+                "--uncapped",
+                "--goal",
+                "Prove clone or apply boundary escape to code execution.",
+                "--run-id",
+                "run-tm",
+                "--json",
+            ],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_init, EXIT_OK)
+
+        # 1. Campaign-start Threat Model synthesis (`rev 1`)
+        rc_tm, tm_out = _run_cli(
+            [
+                "threat-model",
+                "set",
+                "--run",
+                "run-tm",
+                "--principals",
+                "untrusted remote repo, malicious submodule",
+                "--assets",
+                "host worktree outside repo, .git/hooks execution",
+                "--consumer-tiers",
+                "developer CLI clone, CI runner",
+                "--summary",
+                "Untrusted trees/patches must never write inside .git/ or execute hooks.",
+            ],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_tm, EXIT_OK)
+        self.assertEqual(int(tm_out["revision"]), 1)  # type: ignore[arg-type,index]
+
+        # 2. Register upstream `apply` surface and downstream `hooks` surface (`medium` while boundary holds)
+        _, surf_up = _run_cli(
+            [
+                "surface",
+                "add",
+                "--run",
+                "run-tm",
+                "--name",
+                "apply_path_gate",
+                "--kind",
+                "parser",
+                "--subsystem",
+                "apply",
+                "--locus",
+                "apply.c:1",
+                "--priority",
+                "high",
+                "--trust-boundary",
+                "untrusted patch -> verify_path",
+            ],
+            self.ajar_home,
+        )
+        _, surf_down = _run_cli(
+            [
+                "surface",
+                "add",
+                "--run",
+                "run-tm",
+                "--name",
+                "git_hooks_exec",
+                "--kind",
+                "dispatcher",
+                "--subsystem",
+                "hooks",
+                "--locus",
+                "hooks.c:1",
+                "--priority",
+                "medium",
+                "--trust-boundary",
+                "assumed local-only .git/hooks -> execve",
+            ],
+            self.ajar_home,
+        )
+        sid_up = str(surf_up["surface_id"])  # type: ignore[index]
+        sid_down = str(surf_down["surface_id"])  # type: ignore[index]
+
+        # Park a downstream hook-execution task until `.git/` write protection breaks
+        _, tsk_down = _run_cli(
+            [
+                "task",
+                "add",
+                "--run",
+                "run-tm",
+                "--kind",
+                "investigate",
+                "--title",
+                "Trace hook execution post-.git write",
+                "--surface",
+                sid_down,
+                "--locus",
+                "hooks.c:1",
+            ],
+            self.ajar_home,
+        )
+        tid_down = str(tsk_down["task_id"])  # type: ignore[index]
+        _, ctx_before = _run_cli(["context", "--task", tid_down, "--run", "run-tm", "--json"], self.ajar_home)
+        prefix_before = str(ctx_before["certified_prefix"])  # type: ignore[index]
+
+        _run_cli(["task", "lease", "--run", "run-tm", "--worker", "w1", "--kind", "investigate"], self.ajar_home)
+        _run_cli(
+            [
+                "task",
+                "block",
+                tid_down,
+                "--run",
+                "run-tm",
+                "--worker",
+                "w1",
+                "--predicate",
+                "Requires primitive writing inside .git/",
+                "--check-locus",
+                "apply.c:1",
+            ],
+            self.ajar_home,
+        )
+
+        # Register falsifiable threat assumption linking `fs:dotgit_escape` -> `sid_down` (`critical`)
+        rc_add_a, assump = _run_cli(
+            [
+                "threat-model",
+                "assumption-add",
+                "--run",
+                "run-tm",
+                "--subsystem",
+                "hooks",
+                "--trust-boundary",
+                ".git/hooks local-only boundary",
+                "--assumption",
+                "verify_path blocks any patch or tree entry targeting .git/",
+                "--check-locus",
+                "apply.c:1",
+                "--invalidated-by-tags",
+                "fs:dotgit_escape",
+                "--dependent-surface",
+                sid_down,
+                "--escalate-priority",
+                "critical",
+            ],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_add_a, EXIT_OK)
+        aid = str(assump["assumption_id"])  # type: ignore[index]
+
+        # 3. Upstream worker discovers a `.git` case-folding/symlink write primitive -> auto-violates assumption!
+        rc_prim, _ = _run_cli(
+            [
+                "primitive",
+                "add",
+                "--run",
+                "run-tm",
+                "--surface",
+                sid_up,
+                "--locus",
+                "apply.c:1",
+                "--kind",
+                "arbitrary_dotgit_write",
+                "--preconditions",
+                "crafted symlink + rename patch",
+                "--postconditions",
+                "writes attacker payload inside .git/hooks/",
+                "--provides-tags",
+                "fs:dotgit_escape",
+                "--evidence-cmd",
+                "true",
+            ],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_prim, EXIT_OK)
+
+        # Verify: revision bumped to 2, assumption is `violated`, `sid_down` upgraded `medium -> critical`,
+        # parked task `tid_down` auto-unblocked to `open`, and `Certified Run Prefix` remained 100% byte-identical!
+        _, tm_show = _run_cli(["threat-model", "show", "--run", "run-tm", "--json"], self.ajar_home)
+        self.assertEqual(int(tm_show["threat_model"]["revision"]), 2)  # type: ignore[arg-type,index]
+        self.assertEqual(int(tm_show["counts"]["violated"]), 1)  # type: ignore[arg-type,index]
+        self.assertEqual(tm_show["assumptions"][0]["assumption_id"], aid)  # type: ignore[index]
+        self.assertEqual(tm_show["assumptions"][0]["status"], "violated")  # type: ignore[index]
+
+        _, surfs_after = _run_cli(["surface", "list", "--run", "run-tm"], self.ajar_home)
+        down_row = [s for s in surfs_after["surfaces"] if s["surface_id"] == sid_down][0]  # type: ignore[index]
+        self.assertEqual(down_row["priority"], "critical")
+
+        _, ctx_after = _run_cli(["context", "--task", tid_down, "--run", "run-tm", "--json"], self.ajar_home)
+        self.assertEqual(str(ctx_after["certified_prefix"]), prefix_before)  # type: ignore[index]
+        self.assertIn("Adaptive Threat-Model Shift", str(ctx_after["task_delta"]))  # type: ignore[index]
+
+        _, st = _run_cli(["status", "--run", "run-tm"], self.ajar_home)
+        self.assertEqual(int(st["threat_model_revision"]), 2)  # type: ignore[arg-type,index]
+        self.assertEqual(int(st["violated_threat_assumptions"]), 1)  # type: ignore[arg-type,index]
+
+        _, g_out = _run_cli(["export-graph", "--run", "run-tm"], self.ajar_home)
+        self.assertEqual(int(g_out["summary"]["threat_assumptions_violated"]), 1)  # type: ignore[arg-type,index]
+
 
 if __name__ == "__main__":
     unittest.main()

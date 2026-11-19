@@ -9,14 +9,15 @@ Use this skill to build the initial component and attack-surface map, record ope
 
 ## 1. Inputs, Quote, and Orientation
 
-1. Preview deterministic `Code` LOC scope and the `35%` COGS cap when sizing a repository or PR diff (and carry forward prior verified state on PR runs via `--parent-run`):
+1. Preview deterministic `Code` LOC scope and the `35%` COGS cap when sizing a repository or PR diff (persist a Lead Orchestrator campaign brief via `--brief-file`, disable caps on open-ended research via `--uncapped`, and carry forward prior verified state on PR runs via `--parent-run`):
    ```bash
    ajar quote <target_dir> [--diff <base..head>]
-   ajar init <target_dir> [--diff <base..head>] [--parent-run <baseline_run_id>]
+   ajar init <target_dir> [--diff <base..head>] [--brief-file <brief.md>] [--uncapped] [--parent-run <baseline_run_id>]
+   ajar brief
    ```
-2. Inspect the Personalized PageRank symbol graph and `<= 3,500` LoC call slices within a bounded token budget:
+2. Inspect the Personalized PageRank symbol graph and cohesive subsystem call cones (`--slice-cap 15000` soft focus target; workers may still inspect any caller or callee across the repository):
    ```bash
-   ajar map --budget-tokens 1500 --slice-cap 3500
+   ajar map --budget-tokens 1500 --slice-cap 15000
    ajar map --focus-file <rel_path> --focus-symbol <symbol> --budget-tokens 1500
    ```
 3. Query local documentation, comments, ADRs, and test intent before labeling behavior anomalous (target docs carry `[UNTRUSTED_TARGET_DOC: verify in code]` so prose claims are always verified in code):
@@ -27,6 +28,21 @@ Use this skill to build the initial component and attack-surface map, record ope
 4. Record explicit operator threat-model or scope boundaries as attributable `Steers` (`scope_authority` preserves autonomous finding attribution; `research_steering` marks human-guided hypotheses):
    ```bash
    ajar steer add --scope global --kind scope_authority --rule "<explicit scope or threat-model boundary>"
+   ```
+5. Synthesize the **Adaptive Threat Model** before registering surfaces: define attacker principals, protected assets, downstream consumer tiers, and falsifiable architectural assumptions (`assumption-add`). Whenever a worker later records a capability tag matching `--invalidated-by-tags`, confirms a bug at `--check-locus`, or runs `ajar threat-model invalidate`, `ajar` automatically bumps the threat-model revision, upgrades `--dependent-surface` priority, and unblocks parked tasks (`+30` salience):
+   ```bash
+   ajar threat-model set \
+     --principals "<untrusted caller, remote peer, tenant user>" \
+     --assets "<RCE, cross-tenant data, state-root soundness>" \
+     --consumer-tiers "<CLI, server daemon, CI runner>" \
+     --summary "<1-2 sentence trust-boundary architecture>"
+   ajar threat-model assumption-add \
+     --subsystem "<module>" \
+     --trust-boundary "<external -> internal>" \
+     --assumption "<what architecture assumes holds>" \
+     --check-locus "<file:line>" \
+     --invalidated-by-tags "<ns:tag>" \
+     --dependent-surface "<optional_surface_id>"
    ```
 
 ## 2. Surface Ranking Rules

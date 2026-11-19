@@ -94,3 +94,21 @@ ajar claim instrument <claim_id> \
 ```
 
 `slot-inst` captures runtime output into `anomalies`, resets the worktree cleanly, and unlocks `survived_falsify` so you can retry `reproduce` with verified state.
+
+## 5. Swarm Worker Packets, Fallback Ladder, & Execution Integrity
+
+1. **Just-Enough-Context Swarm Dispatch (`ajar swarm packet`):**
+   - Lead orchestrators generate stripped `"Swarm Worker"` assignment packets (`--wire-profile direct`, `<= 45` lines, `(claim_id, severity, locus)` tuples with zero parent reasoning or hype prose):
+     ```bash
+     ajar swarm packet --stage reproduce --limit 3 --worker w-repro-1
+     ```
+   - Step down the `--wire-profile` fallback ladder (`direct -> swarm_patch_first -> regression_tdd`, automatically halving multi-claim batches `[4] -> [2, 2] -> [1, 1]`) **only** when a worker subagent is filter-blocked or goes idle with `0` tool calls:
+     ```bash
+     ajar swarm fallback <dispatch_id> --reason filter_blocked
+     ```
+2. **Entrypoint Fidelity & Runtime Execution Anti-Cheat:**
+   - On `cli` / daemon / server surfaces, `--poc-cmd` and `--control-cmd` must build and invoke the real target binary or entrypoint (`./git ...`, `cargo test ...`), never link a synthetic `stub.c` harness directly against internal `.o` object files (permitted only when `surfaces.kind = 'library_api'`).
+   - Never substitute `<conceptual_placeholder>` tokens or inspect patched `.c`/`.rs`/`.go`/`.sol` source text via `grep`, `rg`, or `.read_text()` inside `--poc-cmd`; `ajar claim reproduce` deterministically rejects static source-inspection cheats.
+3. **Strict `--env-blocker` Gate (`ajar claim block`):**
+   - `ajar claim block <claim_id> --worker <id> --env-blocker <missing_hardware|external_service|privileged_kernel|license_or_key|host_os_mismatch> --reason "<exact command error>"` is strictly reserved for concrete missing infrastructure. Voluntary policy/safety refusals are rejected by both `ajar claim block` and closeout gate `G4`.
+

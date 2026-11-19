@@ -81,6 +81,19 @@ from ajar.repro_compose import (
 )
 from ajar.repro_source import run_source_reproduction, unshare_netns_available
 from ajar.runner import run_autonomous_schedule
+from ajar.swarm import (
+    ENV_BLOCKER_KINDS,
+    VALID_FALLBACK_REASONS,
+    VALID_SWARM_STAGES,
+    WIRE_PROFILE_LADDER,
+    build_swarm_packet,
+    complete_swarm_dispatch,
+    escalate_swarm_fallback,
+    reopen_run,
+    sync_run_to_shared_mirror,
+    validate_claim_block_request,
+    validate_structural_claim_prose,
+)
 from ajar.workspace import init_run_workspace
 
 
@@ -928,6 +941,11 @@ def cmd_claim(args: argparse.Namespace) -> int:
                     "DEC-0128 gate: --falsification-prediction and --falsification-test are required before proposing a claim.",
                     EXIT_GATE_BLOCKED,
                 )
+            ok_prose, prose_msg = validate_structural_claim_prose(
+                args.title, args.mechanism, args.falsification_prediction
+            )
+            if not ok_prose:
+                raise AjarError(prose_msg, EXIT_GATE_BLOCKED)
             check_dead_end_repetition(
                 conn,
                 locus=args.locus,
@@ -989,6 +1007,11 @@ def cmd_claim(args: argparse.Namespace) -> int:
             return EXIT_OK
 
         if args.claim_cmd == "rescope":
+            ok_prose, prose_msg = validate_structural_claim_prose(
+                args.title, args.mechanism, args.falsification_prediction
+            )
+            if not ok_prose:
+                raise AjarError(prose_msg, EXIT_GATE_BLOCKED)
             res = rescope_claim(
                 conn,
                 claim_id=args.claim_id,
@@ -1135,13 +1158,28 @@ def cmd_claim(args: argparse.Namespace) -> int:
                     f"Truth-axis monotonicity gate: verified reproduced claim {args.claim_id} cannot be downgraded to blocked.",
                     EXIT_GATE_BLOCKED,
                 )
+            env_b = (getattr(args, "env_blocker", None) or "").strip()
+            ok_blk, blk_msg = validate_claim_block_request(
+                clm,
+                reason=args.reason,
+                env_blocker=env_b,
+                target_mode=tmode,
+            )
+            if not ok_blk:
+                raise AjarError(blk_msg, EXIT_GATE_BLOCKED)
             now_iso = utc_now_iso()
             conn.execute(
-                "UPDATE claims SET status = 'blocked', blocker_reason = ?, updated_at = ? WHERE claim_id = ?",
-                (scrub_text(args.reason), now_iso, args.claim_id),
+                "UPDATE claims SET status = 'blocked', blocker_reason = ?, env_blocker = ?, updated_at = ? WHERE claim_id = ?",
+                (scrub_text(args.reason), env_b, now_iso, args.claim_id),
             )
-            log_event(conn, args.worker, "claim_blocked", args.claim_id, {"reason": args.reason})
-            _emit({"claim_id": args.claim_id, "status": "blocked"}, True)
+            log_event(
+                conn,
+                args.worker,
+                "claim_blocked",
+                args.claim_id,
+                {"env_blocker": env_b, "reason": args.reason},
+            )
+            _emit({"claim_id": args.claim_id, "status": "blocked", "env_blocker": env_b}, True)
             return EXIT_OK
 
         if args.claim_cmd == "reproduce":
@@ -1170,6 +1208,14 @@ def cmd_claim(args: argparse.Namespace) -> int:
                     raise AjarError("Source reproduction requires --micropatch <patch_file>.", EXIT_USER_ERROR)
                 rel_cmd = (getattr(args, "release_cmd", None) or "").strip()
                 rel_ctrl_cmd = (getattr(args, "release_control_cmd", None) or "").strip()
+                surf_kind = ""
+                if clm["surface_id"]:
+                    srow = conn.execute(
+                        "SELECT kind FROM surfaces WHERE surface_id = ?",
+                        (clm["surface_id"],),
+                    ).fetchone()
+                    if srow is not None:
+                        surf_kind = str(srow["kind"] or "")
                 h6_active = conn.execute(
                     """
                     SELECT hook_id FROM epistemic_hooks
@@ -1211,6 +1257,7 @@ def cmd_claim(args: argparse.Namespace) -> int:
                     shared_guard_locus=str(getattr(args, "shared_guard_locus", None) or ""),
                     release_cmd=rel_cmd,
                     release_control_cmd=rel_ctrl_cmd,
+                    surface_kind=surf_kind,
                 )
             elif eff_mode == "binary":
                 bin_p = pathlib.Path(args.binary) if args.binary else tpath
@@ -1286,6 +1333,14 @@ def cmd_claim(args: argparse.Namespace) -> int:
             )
             conn.execute(
                 """
+                UPDATE tasks
+                SET status = 'done', worker_id = ?, lease_expires_at = NULL, updated_at = ?
+                WHERE parent_claim_id = ? AND kind = 'reproduce' AND status IN ('open', 'leased')
+                """,
+                (args.worker, now_iso, args.claim_id),
+            )
+            conn.execute(
+                """
                 INSERT OR REPLACE INTO findings(
                     finding_id, claim_id, title, severity, locus, root_cause, poc_cmd, control_cmd,
                     micropatch_path, micropatch_diff, arm1_clean_poc_json, arm2_clean_ctrl_json,
@@ -1336,6 +1391,8 @@ def cmd_claim(args: argparse.Namespace) -> int:
                 fid,
                 {"claim_id": args.claim_id, "attribution": attr, "ub_divergence_class": ub_div},
             )
+            conn.commit()
+            sync_run_to_shared_mirror(rid)
             out_payload: dict[str, Any] = {"finding_id": fid, "attribution": attr, "reproduction": res}
             if esc is not None:
                 out_payload["post_confirm_escalation"] = esc
@@ -1626,6 +1683,9 @@ def cmd_finish(args: argparse.Namespace) -> int:
     (art_dir / "report.json").write_text(json.dumps(js, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     res["report_markdown_path"] = str(art_dir / "report.md")
     res["report_json_path"] = str(art_dir / "report.json")
+    mirror_info = sync_run_to_shared_mirror(rid)
+    if mirror_info is not None:
+        res["shared_mirror_dir"] = mirror_info["mirror_dir"]
     _emit(res, True)
     return EXIT_OK
 
@@ -1701,6 +1761,62 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
     _emit(res, True)
     return EXIT_OK if res["gates_passed"] else EXIT_GATE_BLOCKED
+
+
+def cmd_swarm(args: argparse.Namespace) -> int:
+    rid = resolve_run_id(args.run)
+    conn = open_run_db(rid)
+    try:
+        if args.swarm_cmd == "packet":
+            raw_items = [s.strip() for s in (args.items or "").split(",") if s.strip()]
+            res = build_swarm_packet(
+                conn,
+                stage=args.stage,
+                wire_profile=args.wire_profile,
+                item_ids=raw_items,
+                limit=args.limit,
+                worker_id=args.worker or "",
+            )
+            if args.json:
+                _emit(res, True)
+            else:
+                print(res["packet_markdown"], end="")
+            return EXIT_OK
+
+        if args.swarm_cmd == "fallback":
+            res = escalate_swarm_fallback(
+                conn,
+                target=args.target,
+                reason=args.reason,
+                notes=args.notes or "",
+            )
+            _emit(res, True)
+            return EXIT_OK
+
+        if args.swarm_cmd == "complete":
+            res = complete_swarm_dispatch(
+                conn,
+                target=args.target,
+                notes=args.notes or "",
+            )
+            _emit(res, True)
+            return EXIT_OK
+
+        rows = list_rows(conn, "SELECT * FROM swarm_dispatches ORDER BY created_at ASC")
+        _emit({"swarm_dispatches": rows}, True)
+        return EXIT_OK
+    finally:
+        conn.close()
+
+
+def cmd_reopen(args: argparse.Namespace) -> int:
+    res = reopen_run(
+        args.run_id,
+        unblock_zero_attempt_claims=not bool(args.keep_blocked),
+        shared_root=args.from_shared,
+    )
+    _emit(res, True)
+    return EXIT_OK
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -2060,6 +2176,12 @@ def build_parser() -> argparse.ArgumentParser:
     pc_blk = cl_sub.add_parser("block")
     pc_blk.add_argument("claim_id")
     pc_blk.add_argument("--worker", required=True)
+    pc_blk.add_argument(
+        "--env-blocker",
+        choices=ENV_BLOCKER_KINDS,
+        default="",
+        help="Concrete environmental blocker kind (safety-policy/refusal deferrals are rejected).",
+    )
     pc_blk.add_argument("--reason", required=True)
     pc_blk.add_argument("--run")
 
@@ -2259,6 +2381,52 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--max-steps", type=int, default=50)
     p_run.add_argument("--json", action="store_true", default=True)
     p_run.set_defaults(func=cmd_run)
+
+    # swarm (Stage-split stripped packet dispatcher + wire-profile fallback ladder)
+    p_swm = sub.add_parser(
+        "swarm",
+        help="Generate stripped Swarm Worker packets and step down `--wire-profile` fallback tiers.",
+    )
+    swm_sub = p_swm.add_subparsers(dest="swarm_cmd", required=True)
+    psw_p = swm_sub.add_parser("packet", help="Emit a stripped Just-Enough-Context worker assignment packet.")
+    psw_p.add_argument("--stage", choices=VALID_SWARM_STAGES, required=True)
+    psw_p.add_argument(
+        "--wire-profile",
+        choices=("auto", *WIRE_PROFILE_LADDER),
+        default="auto",
+        help="Wire framing tier (`auto` defaults to `direct` Swarm Worker and honors prior fallback escalations).",
+    )
+    psw_p.add_argument("--items", default="", help="Optional comma-separated task/claim/primitive IDs.")
+    psw_p.add_argument("--limit", type=int, default=4, help="Max items per packet (`regression_tdd` forces 1, `swarm_patch_first` <= 2).")
+    psw_p.add_argument("--worker", default="", help="Explicit worker ID override.")
+    psw_p.add_argument("--json", action="store_true", help="Emit JSON metadata + packet_markdown instead of raw Markdown.")
+    psw_p.add_argument("--run")
+
+    psw_f = swm_sub.add_parser("fallback", help="Record a stalled/filter-blocked worker and emit stepped-down fallback packet(s).")
+    psw_f.add_argument("target", help="Dispatch ID (`dsp-...`) or worker ID (`w-...`) that stalled or refused.")
+    psw_f.add_argument("--reason", choices=VALID_FALLBACK_REASONS, default="idle_no_return")
+    psw_f.add_argument("--notes", default="")
+    psw_f.add_argument("--run")
+
+    psw_c = swm_sub.add_parser("complete", help="Mark a swarm dispatch completed.")
+    psw_c.add_argument("target", help="Dispatch ID (`dsp-...`) or worker ID (`w-...`).")
+    psw_c.add_argument("--notes", default="")
+    psw_c.add_argument("--run")
+
+    psw_s = swm_sub.add_parser("status", help="List swarm dispatches and wire-profile escalations.")
+    psw_s.add_argument("--run")
+    p_swm.set_defaults(func=cmd_swarm)
+
+    # reopen (Hydrate from shared mirror and unblock zero-attempt blocked claims)
+    p_reo = sub.add_parser(
+        "reopen",
+        help="Hydrate a run from shared storage and reopen zero-attempt policy-blocked claims.",
+    )
+    p_reo.add_argument("run_id", help="Run ID to hydrate and reopen (for example `git-wave1a`).")
+    p_reo.add_argument("--keep-blocked", action="store_true", help="Keep zero-attempt blocked claims untouched.")
+    p_reo.add_argument("--from-shared", default=None, help="Explicit shared mirror directory override.")
+    p_reo.add_argument("--json", action="store_true", default=True)
+    p_reo.set_defaults(func=cmd_reopen)
 
     return p
 

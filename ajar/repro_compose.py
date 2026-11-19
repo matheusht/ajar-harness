@@ -32,11 +32,14 @@ from ajar.redact import scrub_text, scrubbed_subprocess_env
 from ajar.repro_source import (
     _acquire_slot,
     _bump_files_mtime,
+    _clean_slot_preserving_objects,
     _evaluate_defect_fired,
     _neutralize_python_pth_escapes,
     _prepare_slot_worktree,
     _run_shell_in_slot,
     init_source_mirror,
+    resolve_local_build_cache_dir,
+    validate_no_static_source_cheat,
 )
 
 STAGE_CONTEXT_INIT_PY = '''"""Auto-provisioned Ajar Composable State Builder runtime (`StageContext`)."""
@@ -77,6 +80,10 @@ class StageContext:
             ablated_primitives=ablated,
             state=seed,
         )
+
+    @property
+    def is_active_probe(self) -> bool:
+        return self.mode in ("exploit_path", "active_probe")
 
     def is_ablated(self, primitive_id: str) -> bool:
         return self.mode == "benign_control" or primitive_id in self.ablated_primitives
@@ -301,8 +308,7 @@ def promote_primitive_helper(
     repro_dir = run_dir / "repro"
     slot_idx, lock_fh = _acquire_slot(repro_dir)
     slot_dir = repro_dir / f"slot-{slot_idx}"
-    cache_dir = repro_dir / f"cache-{slot_idx}"
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = resolve_local_build_cache_dir(run_dir, f"cache-{slot_idx}")
 
     check_fn = "verify_self" if has_verify_self else callable_name.strip()
     default_driver = (
@@ -324,7 +330,7 @@ def promote_primitive_helper(
             extra_env={"AJAR_REPRO_MODE": "exploit_path", "AJAR_ABLATE_STEPS": ""},
         )
         subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
-        subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, check=False)
+        _clean_slot_preserving_objects(slot_dir, check=False)
 
         ctrl_res = _run_shell_in_slot(
             eff_cmd,
@@ -340,7 +346,7 @@ def promote_primitive_helper(
     finally:
         if (slot_dir / ".git").exists():
             subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
-            subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, check=False)
+            _clean_slot_preserving_objects(slot_dir, check=False)
         fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
         lock_fh.close()
 
@@ -494,20 +500,39 @@ def run_chain_reproduction(
         raise AjarError("Chain --steps requires at least one primitive, anomaly, or finding ID.", EXIT_USER_ERROR)
 
     prim_rows: dict[str, sqlite3.Row] = {}
+    chain_touched_files: list[str] = []
     for sid in clean_steps:
         prow = conn.execute("SELECT * FROM primitives WHERE primitive_id = ?", (sid,)).fetchone()
         if prow is not None:
             prim_rows[sid] = prow
+            ploc = str(prow["locus"] or "").split(":", 1)[0].strip()
+            if ploc and ploc not in chain_touched_files:
+                chain_touched_files.append(ploc)
+
+    patch_map = dict(step_micropatches or {})
+    for pfile in patch_map.values():
+        for ln in pfile.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if ln.startswith("+++ ") and ln[4:].strip() != "/dev/null":
+                tf = re.sub(r"^b/", "", ln[4:].split("\t", 1)[0].strip())
+                if tf and tf not in chain_touched_files:
+                    chain_touched_files.append(tf)
+
+    cheat_ok, cheat_msg = validate_no_static_source_cheat(
+        poc_cmd,
+        chain_touched_files,
+        search_roots=(run_dir,),
+        target_dir=target_dir,
+    )
+    if not cheat_ok:
+        raise AjarError(cheat_msg, EXIT_GATE_BLOCKED)
 
     helpers_dir = ensure_helpers_runtime(run_dir)
     mirror_dir = init_source_mirror(run_dir, target_dir)
     repro_dir = run_dir / "repro"
     slot_idx, lock_fh = _acquire_slot(repro_dir)
     slot_dir = repro_dir / f"slot-{slot_idx}"
-    cache_dir = repro_dir / f"cache-{slot_idx}"
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = resolve_local_build_cache_dir(run_dir, f"cache-{slot_idx}")
     watermark_file = cache_dir / "watermark_ns"
-    patch_map = dict(step_micropatches or {})
 
     ablation_matrix: list[dict[str, Any]] = []
 
@@ -529,7 +554,7 @@ def run_chain_reproduction(
         full_res["defect_fired"] = full_fired
 
         subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
-        subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, check=True)
+        _clean_slot_preserving_objects(slot_dir, check=True)
 
         # 2. Benign Control Arm (`benign_control`) -> oracle MUST NOT fire and must exit 0.
         ctrl_res = _run_shell_in_slot(
@@ -547,7 +572,7 @@ def run_chain_reproduction(
         ctrl_res["control_passed"] = ctrl_passed
 
         subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
-        subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, check=True)
+        _clean_slot_preserving_objects(slot_dir, check=True)
 
         ablation_passed = True
         ablation_failure_reason = ""
@@ -618,7 +643,7 @@ def run_chain_reproduction(
                         }
                     )
                     subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
-                    subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, check=True)
+                    _clean_slot_preserving_objects(slot_dir, check=True)
                     if touched_step_files:
                         _bump_files_mtime(slot_dir, touched_step_files, watermark_file)
 
@@ -632,7 +657,7 @@ def run_chain_reproduction(
     finally:
         if (slot_dir / ".git").exists():
             subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
-            subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, check=False)
+            _clean_slot_preserving_objects(slot_dir, check=False)
         fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
         lock_fh.close()
 
@@ -738,8 +763,7 @@ def run_claim_instrumentation(
     lock_fh = open(repro_dir / "slot-inst.lock", "a+", encoding="utf-8")
     fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
     slot_dir = repro_dir / "slot-inst"
-    cache_dir = repro_dir / "cache-inst"
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = resolve_local_build_cache_dir(run_dir, "cache-inst")
     watermark_file = cache_dir / "watermark_ns"
     touched: list[str] = []
 
@@ -773,7 +797,7 @@ def run_claim_instrumentation(
     finally:
         if (slot_dir / ".git").exists():
             subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
-            subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, check=False)
+            _clean_slot_preserving_objects(slot_dir, check=False)
             if touched:
                 _bump_files_mtime(slot_dir, touched, watermark_file)
         fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)

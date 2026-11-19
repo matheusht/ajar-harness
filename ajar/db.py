@@ -282,6 +282,7 @@ CREATE TABLE IF NOT EXISTS claims (
     remediation_state TEXT NOT NULL DEFAULT 'unpatched'
         CHECK(remediation_state IN ('unpatched', 'micropatched', 'maintainer_patched')),
     duplicate_of_claim_id TEXT,
+    env_blocker TEXT NOT NULL DEFAULT '',
     blocker_reason TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -458,12 +459,26 @@ CREATE TABLE IF NOT EXISTS threat_assumptions (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS swarm_dispatches (
+    dispatch_id TEXT PRIMARY KEY,
+    worker_id TEXT NOT NULL,
+    stage TEXT NOT NULL CHECK(stage IN ('investigate', 'falsify', 'reproduce', 'chain')),
+    wire_profile TEXT NOT NULL CHECK(wire_profile IN ('direct', 'swarm_patch_first', 'regression_tdd')),
+    item_ids_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'dispatched'
+        CHECK(status IN ('dispatched', 'completed', 'filter_blocked', 'idle_no_return', 'refused')),
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_tasks_status_salience ON tasks(status, salience_score DESC);
 CREATE INDEX IF NOT EXISTS idx_claims_locus_mech ON claims(locus, mechanism_key);
 CREATE INDEX IF NOT EXISTS idx_anomalies_status ON anomalies(status, subsystem);
 CREATE INDEX IF NOT EXISTS idx_hooks_status_sub ON epistemic_hooks(status, subsystem);
 CREATE INDEX IF NOT EXISTS idx_cov_rel_path ON coverage_spans(rel_path, start_line, end_line);
 CREATE INDEX IF NOT EXISTS idx_tm_assumptions_status ON threat_assumptions(status, subsystem);
+CREATE INDEX IF NOT EXISTS idx_swarm_dispatches_stage ON swarm_dispatches(stage, status, created_at DESC);
 """
 
 
@@ -840,6 +855,34 @@ def _ensure_v32_schema(conn: sqlite3.Connection) -> None:
         conn.execute("PRAGMA foreign_keys=ON")
 
 
+def _ensure_v322_schema(conn: sqlite3.Connection) -> None:
+    """Idempotently migrate v3.2/v3.2.1 SQLite databases to include v3.2.2 columns and tables."""
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    if not tables:
+        return
+    if "claims" in tables:
+        existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(claims)").fetchall()}
+        if "env_blocker" not in existing_cols:
+            conn.execute("ALTER TABLE claims ADD COLUMN env_blocker TEXT NOT NULL DEFAULT ''")
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS swarm_dispatches (
+            dispatch_id TEXT PRIMARY KEY,
+            worker_id TEXT NOT NULL,
+            stage TEXT NOT NULL CHECK(stage IN ('investigate', 'falsify', 'reproduce', 'chain')),
+            wire_profile TEXT NOT NULL CHECK(wire_profile IN ('direct', 'swarm_patch_first', 'regression_tdd')),
+            item_ids_json TEXT NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL DEFAULT 'dispatched'
+                CHECK(status IN ('dispatched', 'completed', 'filter_blocked', 'idle_no_return', 'refused')),
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_swarm_dispatches_stage ON swarm_dispatches(stage, status, created_at DESC);
+        """
+    )
+
+
 def open_run_db(
     run_id_or_path: str | pathlib.Path,
     *,
@@ -873,6 +916,7 @@ def open_run_db(
     else:
         _ensure_v31_schema(conn)
         _ensure_v32_schema(conn)
+        _ensure_v322_schema(conn)
     return conn
 
 

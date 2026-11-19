@@ -9,8 +9,9 @@ Use this skill to build the initial component and attack-surface map, record ope
 
 ## 1. Inputs, Quote, and Orientation
 
-1. Preview deterministic `Code` LOC scope and the `35%` COGS cap when sizing a repository or PR diff (persist a Lead Orchestrator campaign brief via `--brief-file`, disable caps on open-ended research via `--uncapped`, and carry forward prior verified state on PR runs via `--parent-run`):
+1. Verify canonical target liveness (`archived == false`, active production branch, fresh `HEAD`, and sibling `--peer` checkouts if coupled), preview `Code` LOC scope, and initialize the run:
    ```bash
+   ajar doctor --target <target_dir> [--subdir <rel_path>] [--peer <sibling_repo>]
    ajar quote <target_dir> [--diff <base..head>]
    ajar init <target_dir> [--diff <base..head>] [--brief-file <brief.md>] [--uncapped] [--parent-run <baseline_run_id>]
    ajar brief
@@ -29,12 +30,12 @@ Use this skill to build the initial component and attack-surface map, record ope
    ```bash
    ajar steer add --scope global --kind scope_authority --rule "<explicit scope or threat-model boundary>"
    ```
-5. Synthesize the **Adaptive Threat Model** before registering surfaces: define attacker principals, protected assets, downstream consumer tiers, and falsifiable architectural assumptions (`assumption-add`). Whenever a worker later records a capability tag matching `--invalidated-by-tags`, confirms a bug at `--check-locus`, or runs `ajar threat-model invalidate`, `ajar` automatically bumps the threat-model revision, upgrades `--dependent-surface` priority, and unblocks parked tasks (`+30` salience):
+5. Synthesize the **Adaptive Threat Model** before registering surfaces: explicitly separate **unprivileged external principals** from **permissioned operators, governance owners, or local admins** (never lump trusted operators and untrusted callers into one string), and register falsifiable architectural assumptions (`assumption-add`):
    ```bash
    ajar threat-model set \
-     --principals "<untrusted caller, remote peer, tenant user>" \
-     --assets "<RCE, cross-tenant data, state-root soundness>" \
-     --consumer-tiers "<CLI, server daemon, CI runner>" \
+     --principals "<unprivileged_external: remote peer/tx sender; permissioned_operator: admin/sequencer/owner>" \
+     --assets "<RCE, cross-tenant data, unauthorized fund transfer, state-root soundness>" \
+     --consumer-tiers "<CLI, server daemon, on-chain verifier>" \
      --summary "<1-2 sentence trust-boundary architecture>"
    ajar threat-model assumption-add \
      --subsystem "<module>" \
@@ -47,12 +48,12 @@ Use this skill to build the initial component and attack-surface map, record ope
 
 ## 2. Surface Ranking Rules
 
-Assign each surface one priority level based on trust boundary and state impact:
+Assign each surface one priority level based on **live production activation**, **unprivileged reachability**, and **state impact** (never assign `critical` to devnet/test-only binaries, unactivated future flags, or operator-gated paths unless authorized by a `scope_authority` steer):
 
-- `critical`: Unauthenticated network parsers, RPC/HTTP/GraphQL/gRPC entrypoints, cross-chain packet/proof handlers, VM state-transition hooks, or multi-tenant asset/token custody functions.
+- `critical`: Active production unauthenticated network parsers, RPC/HTTP/GraphQL/gRPC entrypoints, cross-chain packet/proof handlers, VM state-transition hooks, or multi-tenant asset/token custody functions reachable by unprivileged external callers.
 - `high`: Authenticated cross-tenant APIs, privilege-boundary transitions, signature/JWT/OAuth verifiers, deserializers, webhook fetchers, FFI/unsafe boundaries, or sandbox/plugin execution hosts.
 - `medium`: Authenticated single-tenant mutations, background workers with indirect external input, or rate/accounting helpers.
-- `low`: Local CLI flags, operator-only maintenance scripts, or read-only diagnostics with no secret exposure.
+- `low`: Local CLI flags, permissioned operator/admin maintenance paths, or read-only diagnostics with no secret exposure.
 
 ## 3. Bi-Directional Task Seeding (`--direction`)
 

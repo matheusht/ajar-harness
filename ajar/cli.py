@@ -94,6 +94,7 @@ from ajar.swarm import (
     validate_claim_block_request,
     validate_structural_claim_prose,
 )
+from ajar.target_check import compute_disk_free_gib, evaluate_target_readiness
 from ajar.workspace import init_run_workspace
 
 
@@ -122,7 +123,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     found = {t: shutil.which(t) for t in tools}
     fts5_ok = _check_sqlite_fts5()
     py_ok = sys.version_info >= (3, 11)
-    report = {
+    report: dict[str, Any] = {
         "ajar_version": __version__,
         "python_version": sys.version.split()[0],
         "python_ok": py_ok,
@@ -130,11 +131,27 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         "sqlite_fts5_ok": fts5_ok,
         "unshare_netns_available": unshare_netns_available(),
         "isolation_mode": "unshare_netns" if unshare_netns_available() else "loopback_socket_guard_pgid_reaper",
+        "disk": compute_disk_free_gib(),
         "toolchains": {k: bool(v) for k, v in found.items()},
         "toolchain_paths": {k: v for k, v in found.items() if v},
     }
+    base_ok = py_ok and fts5_ok and bool(found["git"])
+    if getattr(args, "target", None):
+        tc = evaluate_target_readiness(
+            args.target,
+            subdir=getattr(args, "subdir", "") or "",
+            ref=getattr(args, "ref", "") or "",
+            peers=getattr(args, "peer", None) or (),
+            max_age_days=int(getattr(args, "max_age_days", 90)),
+            check_remote=not bool(getattr(args, "no_remote", False)),
+        )
+        report["target_check"] = tc
+        _emit(report, bool(args.json))
+        if not base_ok:
+            return EXIT_USER_ERROR
+        return EXIT_OK if tc["passed"] else EXIT_GATE_BLOCKED
     _emit(report, bool(args.json))
-    return EXIT_OK if (py_ok and fts5_ok and bool(found["git"])) else EXIT_USER_ERROR
+    return EXIT_OK if base_ok else EXIT_USER_ERROR
 
 
 def cmd_quote(args: argparse.Namespace) -> int:
@@ -163,6 +180,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         allowed_hosts=args.allow_host or [],
         allow_live_requests=bool(args.allow_live_requests),
         allow_live_mutations=bool(args.allow_live_mutations),
+        allow_historical_target=bool(getattr(args, "allow_historical_target", False)),
         run_id=args.run_id,
         diff_range=args.diff,
         parent_run_id=args.parent_run,
@@ -1828,7 +1846,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     # doctor
-    p_doc = sub.add_parser("doctor", help="Check local Python, SQLite FTS5, compilers, and sandbox isolation.")
+    p_doc = sub.add_parser("doctor", help="Check local toolchains, sandbox, disk headroom, and optional target liveness.")
+    p_doc.add_argument("--target", help="Optional local path, `owner/repo` slug, or git URL to verify freshness and scope readiness.")
+    p_doc.add_argument("--subdir", default="", help="Optional in-scope subdirectory inside `--target` monorepo.")
+    p_doc.add_argument("--ref", default="", help="Optional remote branch, tag, or commit SHA to verify instead of default_branch.")
+    p_doc.add_argument("--peer", action="append", help="Optional sibling reference/contract checkout path to verify.")
+    p_doc.add_argument("--max-age-days", type=int, default=90, help="Maximum allowed git HEAD age in days (default: 90).")
+    p_doc.add_argument("--no-remote", action="store_true", help="Skip live remote `gh api` / `git ls-remote` upstream checks.")
     p_doc.add_argument("--json", action="store_true", default=True)
     p_doc.set_defaults(func=cmd_doctor)
 
@@ -1857,6 +1881,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument("--allow-host", action="append", help="Allowed live target hostname.")
     p_init.add_argument("--allow-live-requests", action="store_true")
     p_init.add_argument("--allow-live-mutations", action="store_true")
+    p_init.add_argument("--allow-historical-target", action="store_true", help="Allow initializing on archived or >90-day-old historical snapshots.")
     p_init.add_argument("--run-id", help="Optional explicit run identifier.")
     p_init.add_argument("--json", action="store_true")
     p_init.set_defaults(func=cmd_init)

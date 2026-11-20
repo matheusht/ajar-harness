@@ -141,6 +141,7 @@ class TestConformance(unittest.TestCase):
             REPO_ROOT / "docs" / "decisions" / "0018-ajar-v3-1-bug-brain-and-platform-economics.md",
             REPO_ROOT / "docs" / "decisions" / "0019-ajar-v3-2-hooks-and-composable-repro.md",
             REPO_ROOT / "docs" / "decisions" / "0020-ajar-v3-2-2-swarm-wire-profiles-and-reopen.md",
+            REPO_ROOT / "docs" / "decisions" / "0021-ajar-v3-2-3-exogenous-target-checks-and-retro-routing.md",
             REPO_ROOT / "docs" / "engineering" / "AGENTS.md",
         ]
         md_files.extend(sorted((REPO_ROOT / "skills").rglob("*.md")))

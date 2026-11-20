@@ -16,9 +16,9 @@ ajar context --task <task_id>
 
 Never pass the same `--worker` identifier stored in `proposer_worker_id` on the target claim.
 
-## 2. Execute the Four Disconfirmation Checks
+## 2. Execute the Five Disconfirmation Checks
 
-Run the claim's declared `falsification_test`, check `Active Workspace Steers`, and test all four failure modes documented in `skills/references/false-positive-controls-corpus.md` and `skills/references/rejected-disputed-cve-corpus.md`:
+Run the claim's declared `falsification_test`, check `Active Workspace Steers`, and test all five failure modes documented in `skills/references/false-positive-controls-corpus.md` and `skills/references/rejected-disputed-cve-corpus.md`:
 
 1. **Upstream Guard Check (`reachability`):**
    ```bash
@@ -37,6 +37,9 @@ Run the claim's declared `falsification_test`, check `Active Workspace Steers`, 
    Reject claims that rely on echoed input without cross-boundary provenance, HTTP `200` on mutations without state change, valid JWT signatures with rejected claims, or inert text reflection inside escaped DOM sinks.
 4. **State Invariant Check:**
    Confirm whether constructor constraints, decimal offsets, lock ordering, or saturating/checked arithmetic make the alleged bad state unreachable.
+5. **External Entrypoint, Principal Ceiling, and Peer/Consumer Check:**
+   - If reaching `locus` requires a permissioned operator, governance owner, or trusted backend key without an unprivileged outer bypass, `falsify` (when excluded by active `Steers`) or `rescope` below `critical`/`high`.
+   - When auditing a coupled component (protocol client, VM guest, bridge verifier), inspect sibling reference implementations and downstream consumer contracts to confirm the behavior actually diverges end-to-end and is not neutralized by outer caller/contract checks.
 
 ## 3. Record the Ruling (`falsify`, `rescope`, or `survive`)
 

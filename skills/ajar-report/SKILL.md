@@ -43,8 +43,9 @@ Calibrate every finding's severity against primary external benchmarks and enume
   ```
 - Score strictly by **proven preconditions, enumerated sample scope (`N`), and proven impact**:
   - Require `AV:L` / `UI:R` when exploitation requires local file open or user click (`ZDI-26-355` / `CVE-2026-27220`).
-  - Cap severity when non-default administrative misconfiguration is a prerequisite (`CVE-2012-5613`).
+  - Cap severity when non-default administrative misconfiguration or a permissioned operator role is a prerequisite (`CVE-2012-5613`).
   - Never score a crash or out-of-bounds read as RCE unless control-flow or write primitive execution is reproduced (`CVE-2013-3245`).
+  - Separate **(a) Unprivileged Live Entrypoint Findings** (reproduced end-to-end against active production configurations) from **(b) Operator-Gated, Config-Gated, Component-Isolated, or Pre-Activation Findings** in executive tables so raw finding counts never overstate external exploitability or bounty eligibility.
 
 ## 3. Direct Technical Writing Rules
 

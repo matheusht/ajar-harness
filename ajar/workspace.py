@@ -18,7 +18,7 @@ import shutil
 import stat
 from typing import Any
 
-from ajar import EXIT_USER_ERROR
+from ajar import EXIT_GATE_BLOCKED, EXIT_USER_ERROR
 from ajar.db import (
     AjarError,
     compute_commitment_hash,
@@ -33,9 +33,10 @@ from ajar.oracles import index_target_oracles
 from ajar.redact import scrub_text
 from ajar.repomap import build_repomap, compute_cogs_cap_usd, count_in_scope_loc
 from ajar.repro_source import init_source_mirror
+from ajar.target_check import inspect_local_target_freshness
 
 UNTRUSTED_TARGET_AGENT_CONFIGS: frozenset[str] = frozenset(
-    {".claude", ".mcp.json", ".cursor", ".codex"}
+    {".claude", ".mcp.json", ".cursor", ".codex", "CLAUDE.md", "AGENTS.md"}
 )
 
 
@@ -174,6 +175,7 @@ def init_run_workspace(
     allowed_hosts: list[str] | None = None,
     allow_live_requests: bool = False,
     allow_live_mutations: bool = False,
+    allow_historical_target: bool = False,
     diff_range: str | None = None,
     parent_run_id: str | None = None,
     run_id: str | None = None,
@@ -221,6 +223,14 @@ def init_run_workspace(
         if target_mode == "binary" and not src_path.is_file():
             raise AjarError(f"--mode binary requires an executable file, got: {src_path}", EXIT_USER_ERROR)
         src_git_dir = src_path if src_path.is_dir() else src_path.parent
+
+        if target_mode == "source" and not allow_historical_target and not (diff_range and diff_range.strip()):
+            fresh = inspect_local_target_freshness(src_path)
+            if not fresh["passed"]:
+                raise AjarError(
+                    "target_freshness_gate: " + "; ".join(fresh["blockers"]),
+                    EXIT_GATE_BLOCKED,
+                )
 
         if workspace_mode == "envelope":
             workspace_dir = rdir / "workspace"

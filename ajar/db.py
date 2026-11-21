@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from typing import Any, Sequence
 
 from ajar import EXIT_GATE_BLOCKED, EXIT_USER_ERROR
+from ajar.domain.models import AjarError
 from ajar.domain.transitions import assert_valid_primitive_transition
 from ajar.redact import scrub_text
 from ajar.store.tx import CURRENT_SCHEMA_VERSION, immediate_tx
@@ -572,15 +573,6 @@ CREATE INDEX IF NOT EXISTS idx_cov_rel_path ON coverage_spans(rel_path, start_li
 CREATE INDEX IF NOT EXISTS idx_tm_assumptions_status ON threat_assumptions(status, subsystem);
 CREATE INDEX IF NOT EXISTS idx_swarm_dispatches_stage ON swarm_dispatches(stage, status, created_at DESC);
 """
-
-
-class AjarError(Exception):
-    """Structured error carrying an explicit CLI exit code."""
-
-    def __init__(self, message: str, exit_code: int = EXIT_USER_ERROR, details: dict[str, Any] | None = None):
-        super().__init__(message)
-        self.exit_code = exit_code
-        self.details = details or {}
 
 
 def utc_now_iso() -> str:
@@ -1322,13 +1314,14 @@ def open_run_db(
     if not create and not db_path.is_file():
         raise AjarError(f"Run database does not exist: {db_path}", EXIT_USER_ERROR)
 
+    existed_nonempty = db_path.is_file() and db_path.stat().st_size > 0
     conn = sqlite3.connect(str(db_path), timeout=30.0, isolation_level=None)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA synchronous=NORMAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.execute("PRAGMA busy_timeout=30000;")
-    if create:
+    if create and not existed_nonempty:
         conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA synchronous=NORMAL;")
         conn.executescript(SCHEMA_SQL)
         conn.execute(f"PRAGMA user_version={CURRENT_SCHEMA_VERSION};")
     else:
@@ -1336,7 +1329,8 @@ def open_run_db(
         schema_ver = int(ver_row[0]) if ver_row is not None else 0
         if schema_ver < CURRENT_SCHEMA_VERSION:
             conn.execute("PRAGMA journal_mode=WAL;")
-            conn.execute("PRAGMA synchronous=NORMAL;")
+            if create:
+                conn.executescript(SCHEMA_SQL)
             _ensure_v31_schema(conn)
             _ensure_v32_schema(conn)
             _ensure_v322_schema(conn)

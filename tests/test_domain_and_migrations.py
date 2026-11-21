@@ -146,6 +146,12 @@ class TestDomainAndMigrations(unittest.TestCase):
             self.assertIn(enum_vals, by_col["status"], f"Status enum {enum_cls.__name__} missing from SCHEMA_SQL")
         self.assertIn({e.value for e in DoorDirection}, by_col["direction"])
 
+        from ajar.domain import AjarError, HookCode
+        from ajar.epistemic_hooks import HOOK_CODES
+
+        self.assertTrue(issubclass(InvalidTransitionError, AjarError))
+        self.assertEqual(tuple(h.value for h in HookCode), HOOK_CODES)
+
     def test_warm_open_run_db_uses_pragma_user_version_fast_path(self) -> None:
         res = init_run_workspace(
             target=str(self.target),

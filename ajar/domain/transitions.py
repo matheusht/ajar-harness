@@ -205,7 +205,11 @@ def assert_valid_claim_transition(
     allow_reopen_blocked: bool = False,
 ) -> ClaimStatus:
     cur, dst = ClaimStatus(current), ClaimStatus(target)
-    if allow_reopen_blocked and cur == ClaimStatus.BLOCKED and dst == ClaimStatus.SURVIVED_FALSIFY:
+    if (
+        allow_reopen_blocked
+        and cur == ClaimStatus.BLOCKED
+        and dst in (ClaimStatus.PROPOSED, ClaimStatus.SURVIVED_FALSIFY)
+    ):
         return dst
     if dst not in ALLOWED_CLAIM_TRANSITIONS[cur]:
         raise InvalidTransitionError(

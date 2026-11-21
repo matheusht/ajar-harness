@@ -45,7 +45,7 @@ from ajar.domain.enums import (
     WireProfile,
     WorkspaceMode,
 )
-from ajar.domain.models import ArmResult, ClaimAxes, InvalidTransitionError
+from ajar.domain.models import AjarError, ArmResult, ClaimAxes, InvalidTransitionError
 from ajar.domain.transitions import (
     ALLOWED_ANOMALY_TRANSITIONS,
     ALLOWED_ASSUMPTION_TRANSITIONS,
@@ -76,6 +76,7 @@ __all__ = [
     "ALLOWED_PRIMITIVE_TRANSITIONS",
     "ALLOWED_RUN_TRANSITIONS",
     "ALLOWED_TASK_TRANSITIONS",
+    "AjarError",
     "AnomalyStatus",
     "ArmResult",
     "AssumptionStatus",

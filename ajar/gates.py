@@ -250,8 +250,8 @@ def check_all_gates(
 ) -> dict[str, Any]:
     """Evaluate gates `G1` through `G5` and return structured pass/blocker details.
 
-    When `auto_enqueue_chain=False` (or `reconcile=False`), this function is strictly read-only
-    and performs zero database mutations.
+    When `auto_enqueue_chain=False` and `reconcile` is not explicitly `True`, this function
+    is strictly read-only and performs zero database mutations.
     """
     from ajar.chain_planner import reconcile_door_bridge_tasks
 

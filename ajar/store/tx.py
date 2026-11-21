@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import itertools
 import sqlite3
 from collections.abc import Iterator
 
@@ -11,7 +12,7 @@ from ajar.domain.models import InvalidTransitionError
 
 CURRENT_SCHEMA_VERSION: int = 330
 
-_SAVEPOINT_COUNTER: int = 0
+_SAVEPOINT_SEQ = itertools.count(1)
 
 
 @contextlib.contextmanager
@@ -20,29 +21,31 @@ def immediate_tx(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
 
     Safely nests via SQLite `SAVEPOINT` when the caller already opened a transaction.
     """
-    global _SAVEPOINT_COUNTER
     if conn.in_transaction:
-        _SAVEPOINT_COUNTER += 1
-        sp = f"ajar_sp_{_SAVEPOINT_COUNTER}"
+        sp = f"ajar_sp_{next(_SAVEPOINT_SEQ)}"
         conn.execute(f"SAVEPOINT {sp};")
         try:
             yield conn
         except BaseException:
-            conn.execute(f"ROLLBACK TO SAVEPOINT {sp};")
-            conn.execute(f"RELEASE SAVEPOINT {sp};")
+            if conn.in_transaction:
+                conn.execute(f"ROLLBACK TO SAVEPOINT {sp};")
+                conn.execute(f"RELEASE SAVEPOINT {sp};")
             raise
         else:
-            conn.execute(f"RELEASE SAVEPOINT {sp};")
+            if conn.in_transaction:
+                conn.execute(f"RELEASE SAVEPOINT {sp};")
         return
 
     conn.execute("BEGIN IMMEDIATE;")
     try:
         yield conn
     except BaseException:
-        conn.execute("ROLLBACK;")
+        if conn.in_transaction:
+            conn.execute("ROLLBACK;")
         raise
     else:
-        conn.execute("COMMIT;")
+        if conn.in_transaction:
+            conn.execute("COMMIT;")
 
 
 def assert_run_mutable(conn: sqlite3.Connection, *, operation: str = "mutate") -> None:

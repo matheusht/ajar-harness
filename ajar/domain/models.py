@@ -5,15 +5,29 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ajar import EXIT_GATE_BLOCKED
+from ajar import EXIT_GATE_BLOCKED, EXIT_USER_ERROR
 from ajar.domain.enums import EvidenceState, ResearchState
 
 
-class InvalidTransitionError(Exception):
+class AjarError(Exception):
+    """Structured error carrying an explicit CLI exit code."""
+
+    def __init__(
+        self,
+        message: str,
+        exit_code: int = EXIT_USER_ERROR,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.exit_code = exit_code
+        self.details = details or {}
+
+
+class InvalidTransitionError(AjarError):
     """Raised when a state-machine transition violates an architectural invariant.
 
-    Carries `exit_code = EXIT_GATE_BLOCKED` so CLI/MCP dispatch treats it uniformly
-    alongside `AjarError`.
+    Subclasses `AjarError` with `exit_code = EXIT_GATE_BLOCKED` so all CLI, MCP, and
+    caller `except AjarError` handlers catch invalid transitions uniformly.
     """
 
     def __init__(
@@ -31,8 +45,7 @@ class InvalidTransitionError(Exception):
         self.target = target
         self.entity_id = entity_id
         self.reason = reason
-        self.exit_code = exit_code
-        self.details: dict[str, Any] = {
+        details: dict[str, Any] = {
             "machine": machine,
             "current": current,
             "target": target,
@@ -41,7 +54,7 @@ class InvalidTransitionError(Exception):
         prefix = f"Invalid {machine} transition"
         who = f" for {entity_id}" if entity_id else ""
         detail = f": {reason}" if reason else ""
-        super().__init__(f"{prefix}{who}: {current!r} -> {target!r}{detail}")
+        super().__init__(f"{prefix}{who}: {current!r} -> {target!r}{detail}", exit_code=exit_code, details=details)
 
 
 @dataclass(frozen=True, slots=True)

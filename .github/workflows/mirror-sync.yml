@@ -1,0 +1,79 @@
+name: mirror-sync
+
+on:
+  push:
+    branches: [main]
+    tags: ["*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror-sync-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check MIRROR_TOKEN availability
+        id: auth
+        env:
+          MIRROR_TOKEN: ${{ secrets.MIRROR_TOKEN }}
+        run: |
+          if [[ -z "$MIRROR_TOKEN" ]]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::MIRROR_TOKEN secret is not configured in ${{ github.repository }}; skipping mirror sync."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve mirror target
+        if: steps.auth.outputs.configured == 'true'
+        id: target
+        run: |
+          case "${{ github.repository }}" in
+            matheusht/ajar-harness) echo "repo=avenza-cloud/ajar" >> "$GITHUB_OUTPUT" ;;
+            avenza-cloud/ajar)      echo "repo=matheusht/ajar-harness" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "::notice::Unmapped repository ${{ github.repository }}; skipping mirror sync."
+              echo "repo=" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - name: Checkout full history
+        if: steps.auth.outputs.configured == 'true' && steps.target.outputs.repo != ''
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Mirror main and tags (loop-safe)
+        if: steps.auth.outputs.configured == 'true' && steps.target.outputs.repo != ''
+        env:
+          MIRROR_TOKEN: ${{ secrets.MIRROR_TOKEN }}
+          TARGET_REPO: ${{ steps.target.outputs.repo }}
+        run: |
+          set -euo pipefail
+          AUTH_B64="$(printf 'x-access-token:%s' "$MIRROR_TOKEN" | base64 -w0)"
+          echo "::add-mask::${AUTH_B64}"
+          TARGET_URL="https://github.com/${TARGET_REPO}.git"
+
+          LOCAL_HEAD="$(git rev-parse HEAD)"
+          REMOTE_HEAD="$(git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_B64}" \
+            ls-remote --heads "$TARGET_URL" refs/heads/main | awk '{print $1}')"
+
+          LOCAL_TAGS="$(git show-ref --tags | sort || true)"
+          REMOTE_TAGS="$(git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_B64}" \
+            ls-remote --tags "$TARGET_URL" | grep -v '\^{}$' | sort || true)"
+
+          if [[ "$LOCAL_HEAD" == "$REMOTE_HEAD" && "$LOCAL_TAGS" == "$REMOTE_TAGS" ]]; then
+            echo "Mirror ${TARGET_REPO} is already up to date at ${LOCAL_HEAD}."
+            exit 0
+          fi
+
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_B64}" \
+            push "$TARGET_URL" HEAD:refs/heads/main --tags
+          echo "Mirrored ${LOCAL_HEAD} (+ tags) to ${TARGET_REPO}."

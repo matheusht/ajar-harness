@@ -2,7 +2,7 @@
 # Canonical single-command verification driver for `ajar-harness`.
 #
 # Usage:
-#   scripts/verify-repo.sh --fast           # Inner loop (~19s): AGENTS.md, ruff, arch_lint, mypy, unit+contract+DST
+#   scripts/verify-repo.sh --fast           # Inner loop (~10s): AGENTS.md, ruff, arch_lint, mypy --strict, unit+contract+DST
 #   scripts/verify-repo.sh --full           # Pre-PR outer loop: adds integration tests + archived legacy checks
 #   scripts/verify-repo.sh --full --strict-legacy
 #
@@ -72,9 +72,8 @@ echo "==> [2/${TOTAL}] Ruff lint (E, F, I, W, B)"
 echo "==> [3/${TOTAL}] Mechanical architecture guardrails (tools/arch_lint.py)"
 python3 tools/arch_lint.py
 
-echo "==> [4/${TOTAL}] Static type-check (mypy --strict core + package)"
-"$MYPY" --strict ajar/domain ajar/store ajar/services tools/arch_lint.py
-"$MYPY" ajar --ignore-missing-imports
+echo "==> [4/${TOTAL}] Static type-check (mypy --strict ajar/ + arch_lint.py)"
+"$MYPY" --strict ajar tools/arch_lint.py
 
 if [[ "$MODE" == "fast" ]]; then
   echo "==> [5/${TOTAL}] Fast inner-loop suite (unit + conformance + arch_lint + parity + DST)"

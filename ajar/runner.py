@@ -19,6 +19,7 @@ import subprocess
 import urllib.request
 from typing import Any
 
+from ajar import EXIT_USER_ERROR
 from ajar.db import (
     lease_next_task,
     log_event,
@@ -29,6 +30,7 @@ from ajar.db import (
     run_pulse,
     utc_now_iso,
 )
+from ajar.domain import AjarError
 from ajar.gates import (
     check_all_gates,
     compute_attribution_and_economics,
@@ -210,7 +212,10 @@ def _call_chat_completion(base_url: str, api_key: str, model: str, context_md: s
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=45) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+        raw = json.loads(resp.read().decode("utf-8"))
+        if not isinstance(raw, dict):
+            raise AjarError("Chat completion endpoint returned a non-object JSON payload.", EXIT_USER_ERROR)
+        return dict(raw)
 
 
 def _invoke_openai_compatible_step(

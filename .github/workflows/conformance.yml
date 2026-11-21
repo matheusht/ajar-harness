@@ -37,9 +37,7 @@ jobs:
         run: python3 tools/arch_lint.py
 
       - name: Static type-check with mypy
-        run: |
-          mypy --strict ajar/domain ajar/store ajar/services tools/arch_lint.py
-          mypy ajar --ignore-missing-imports
+        run: mypy --strict ajar tools/arch_lint.py
 
       - name: Run unit, gate, redaction, and conformance suite
         run: pytest -q

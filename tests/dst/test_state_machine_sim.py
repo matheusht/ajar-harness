@@ -15,6 +15,7 @@ import io
 import os
 import pathlib
 import random
+import shutil
 import sqlite3
 import tempfile
 import unittest
@@ -129,8 +130,20 @@ def _seed_target_dir(root: pathlib.Path) -> pathlib.Path:
     return root
 
 
-def _bootstrap_sim_run(run_id: str, target_dir: pathlib.Path) -> sqlite3.Connection:
-    conn = open_run_db(run_id, create=True)
+def _bootstrap_sim_run(
+    run_id: str,
+    target_dir: pathlib.Path,
+    *,
+    ajar_home: pathlib.Path | None = None,
+    template_db: pathlib.Path | None = None,
+) -> sqlite3.Connection:
+    if template_db is not None and ajar_home is not None:
+        rdir = ajar_home / "runs" / run_id
+        rdir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(template_db, rdir / "run.db")
+        conn = open_run_db(run_id, create=False, ajar_home=ajar_home)
+    else:
+        conn = open_run_db(run_id, create=True, ajar_home=ajar_home)
     now = utc_now_iso()
     with immediate_tx(conn):
         conn.execute(
@@ -245,6 +258,7 @@ def _run_simulation_seed(
     ajar_home: pathlib.Path,
     stats: dict[str, int] | None = None,
     deterministic_ids: bool = False,
+    template_db: pathlib.Path | None = None,
 ) -> None:
     rng = random.Random(seed)
     clock = _DeterministicClock()
@@ -274,7 +288,7 @@ def _run_simulation_seed(
             stack.enter_context(mock.patch.object(chain_planner_mod, "new_id", side_effect=_det_new_id))
             stack.enter_context(mock.patch.object(swarm_mod, "new_id", side_effect=_det_new_id))
 
-        conn = _bootstrap_sim_run(run_id, target_dir)
+        conn = _bootstrap_sim_run(run_id, target_dir, ajar_home=ajar_home, template_db=template_db)
         try:
             # Seed one global steer so Certified Run Prefix exercises non-trivial steering content.
             add_steer(conn, rule_text="DST invariant: never skip auth boundary", scope="global")
@@ -934,8 +948,19 @@ class DeterministicStateMachineSimTests(unittest.TestCase):
             base = pathlib.Path(td)
             target_dir = _seed_target_dir(base / "target")
             ajar_home = base / "ajar_home"
+            tpl_home = base / "tpl_home"
+            tpl_conn = open_run_db("dst-template", create=True, ajar_home=tpl_home)
+            tpl_conn.close()
+            template_db = tpl_home / "runs" / "dst-template" / "run.db"
             for seed in seeds:
-                _run_simulation_seed(seed, steps=40, target_dir=target_dir, ajar_home=ajar_home, stats=stats)
+                _run_simulation_seed(
+                    seed,
+                    steps=40,
+                    target_dir=target_dir,
+                    ajar_home=ajar_home,
+                    stats=stats,
+                    template_db=template_db,
+                )
 
         if single_seed is None:
             for key in (

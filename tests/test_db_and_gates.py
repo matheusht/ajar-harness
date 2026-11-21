@@ -3,6 +3,7 @@ from __future__ import annotations
 import concurrent.futures
 import os
 import pathlib
+import shutil
 import tempfile
 import time
 import unittest
@@ -28,27 +29,52 @@ from ajar.workspace import init_run_workspace, unlock_run_dir_permissions
 
 
 class TestDbAndGates(unittest.TestCase):
+    _template_tmp: tempfile.TemporaryDirectory[str]
+    _template_root: pathlib.Path
+    _template_run_id: str = "run-test-001"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._template_tmp = tempfile.TemporaryDirectory(prefix="ajar-db-gates-tpl-")
+        cls._template_root = pathlib.Path(cls._template_tmp.name)
+        tpl_home = cls._template_root / "ajar_home"
+        tpl_target = cls._template_root / "target"
+        (tpl_target / "auth").mkdir(parents=True)
+        (tpl_target / "auth" / "guard.py").write_text(
+            "MAX_TOKEN_TTL = 3600\ndef check_owner(user, owner):\n    if user != owner:\n        raise PermissionError('denied')\n",
+            encoding="utf-8",
+        )
+        init_run_workspace(
+            target=str(tpl_target),
+            target_mode="source",
+            workspace_mode="in_place",
+            goal="Verify auth subsystem invariants",
+            budget_usd=20.0,
+            run_id=cls._template_run_id,
+            ajar_home=tpl_home,
+        )
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        unlock_run_dir_permissions(run_dir_for(cls._template_run_id, cls._template_root / "ajar_home"))
+        cls._template_tmp.cleanup()
+
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp_path = pathlib.Path(self._tmp.name)
         self.ajar_home = self.tmp_path / "ajar_home"
         self.target_dir = self.tmp_path / "target"
-        self.target_dir.mkdir(parents=True)
-        (self.target_dir / "auth").mkdir()
-        (self.target_dir / "auth" / "guard.py").write_text(
-            "MAX_TOKEN_TTL = 3600\ndef check_owner(user, owner):\n    if user != owner:\n        raise PermissionError('denied')\n",
-            encoding="utf-8",
-        )
-        self.run_id = "run-test-001"
-        init_run_workspace(
-            target=str(self.target_dir),
-            target_mode="source",
-            workspace_mode="in_place",
-            goal="Verify auth subsystem invariants",
-            budget_usd=20.0,
-            run_id=self.run_id,
-            ajar_home=self.ajar_home,
-        )
+        shutil.copytree(self._template_root / "target", self.target_dir)
+        shutil.copytree(self._template_root / "ajar_home", self.ajar_home)
+        self.run_id = self._template_run_id
+        conn = open_run_db(self.run_id, ajar_home=self.ajar_home)
+        try:
+            conn.execute(
+                "UPDATE runs SET target_path = ?, workspace_path = ? WHERE run_id = ?",
+                (str(self.target_dir), str(self.target_dir), self.run_id),
+            )
+        finally:
+            conn.close()
 
     def tearDown(self) -> None:
         unlock_run_dir_permissions(run_dir_for(self.run_id, self.ajar_home))

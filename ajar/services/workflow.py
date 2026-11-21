@@ -1106,7 +1106,7 @@ def record_reproduction_outcome(
                 UPDATE claims
                 SET status = 'duplicate_root_cause', duplicate_of_claim_id = ?,
                     research_state = ?, evidence_state = ?, updated_at = ?
-                WHERE claim_id = ?
+                WHERE claim_id = ? AND status = 'survived_falsify'
                 """,
                 (
                     claim_id,

@@ -20,6 +20,33 @@ from ajar.store import immediate_tx
 
 MAX_CONSECUTIVE_STALLS = 3
 
+# Non-progress telemetry actions that must NOT reset the 3-stall circuit breaker.
+_NON_PROGRESS_ACTIONS: tuple[str, ...] = (
+    "stop_hook_check",
+    "spend_added",
+    "task_checkpoint",
+    "task_checkpointed",
+    "human_touch_recorded",
+)
+_NON_PROGRESS_PLACEHOLDERS = ", ".join("?" for _ in _NON_PROGRESS_ACTIONS)
+
+
+def _semantic_progress_tuple(conn: Any) -> tuple[int, int, int, int, int]:
+    """Return `(max_semantic_event_id, closed_tasks, claims, findings, chains)` ignoring noise events."""
+    max_ev = int(
+        conn.execute(
+            f"SELECT COALESCE(MAX(event_id), 0) AS m FROM events WHERE action NOT IN ({_NON_PROGRESS_PLACEHOLDERS})",
+            _NON_PROGRESS_ACTIONS,
+        ).fetchone()["m"]
+    )
+    closed_tasks = int(
+        conn.execute("SELECT COUNT(*) AS c FROM tasks WHERE status IN ('done', 'dry')").fetchone()["c"]
+    )
+    claims = int(conn.execute("SELECT COUNT(*) AS c FROM claims").fetchone()["c"])
+    findings = int(conn.execute("SELECT COUNT(*) AS c FROM findings").fetchone()["c"])
+    chains = int(conn.execute("SELECT COUNT(*) AS c FROM chains").fetchone()["c"])
+    return (max_ev, closed_tasks, claims, findings, chains)
+
 
 def evaluate_claude_stop_hook(
     conn: Any,
@@ -40,11 +67,14 @@ def evaluate_claude_stop_hook(
     if gate_res["passed"]:
         return (EXIT_OK, {"decision": "approve", "reason": "All closeout gates G1-G5 passed."})
 
-    # Measure database progress since previous stop check (`events` monotonic `event_id`).
+    # Measure semantic progress since previous stop check (ignoring noisy telemetry events).
     with immediate_tx(conn):
-        max_ev = int(
-            conn.execute("SELECT COALESCE(MAX(event_id), 0) AS m FROM events WHERE action != 'stop_hook_check'").fetchone()["m"]
-        )
+        run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
+        if run is None or run["status"] in ("finished", "blocked"):
+            return (EXIT_OK, {"decision": "approve", "reason": "Run is already finished or blocked."})
+
+        sem_tuple = _semantic_progress_tuple(conn)
+        max_ev = sem_tuple[0]
         prev_ev = int(run["last_stop_event_id"] or 0)
         stalls = int(run["consecutive_stall_checks"] or 0)
 
@@ -62,12 +92,16 @@ def evaluate_claude_stop_hook(
             "host_hook",
             "stop_hook_check",
             run["run_id"],
-            {"stalls": stalls, "blockers_count": len(gate_res["blockers"])},
+            {
+                "stalls": stalls,
+                "blockers_count": len(gate_res["blockers"]),
+                "semantic_progress": list(sem_tuple),
+            },
         )
 
         if stalls >= MAX_CONSECUTIVE_STALLS:
             reason = (
-                f"Released stalled host session after {stalls} consecutive stop checks with zero new run events."
+                f"Released stalled host session after {stalls} consecutive stop checks with zero semantic progress."
             )
             conn.execute("UPDATE runs SET stop_reason = ? WHERE run_id = ?", (reason, run["run_id"]))
             return (
@@ -125,7 +159,7 @@ def run_host_continuation_loop(
             gate_res = check_all_gates(conn, target_dir=tpath, auto_enqueue_chain=True)
             if gate_res["passed"] or (run and run["status"] == "finished"):
                 return {"completed": True, "rounds_run": rounds_run, "gates": gate_res}
-            cur_event_id = int(conn.execute("SELECT COALESCE(MAX(event_id), 0) AS m FROM events").fetchone()["m"])
+            before_progress = _semantic_progress_tuple(conn)
             ws_path = str(run["workspace_path"]) if run else "."
             blocker_prompt = "Continue Ajar run " + run_id + ". Remaining gates: " + " | ".join(gate_res["blockers"][:4])
         finally:
@@ -146,8 +180,8 @@ def run_host_continuation_loop(
 
         conn2 = open_run_db(run_id, ajar_home=ajar_home)
         try:
-            after_event_id = int(conn2.execute("SELECT COALESCE(MAX(event_id), 0) AS m FROM events").fetchone()["m"])
-            if after_event_id <= cur_event_id:
+            after_progress = _semantic_progress_tuple(conn2)
+            if after_progress <= before_progress:
                 stalled_rounds += 1
             else:
                 stalled_rounds = 0

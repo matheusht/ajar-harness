@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import pathlib
 import re
-from typing import Mapping
+from typing import Any, Mapping
 
 REDACTED = "<REDACTED>"
 REDACTED_BYTES = b"<REDACTED>"
@@ -211,6 +211,22 @@ def scrub_text(text: str, extra_literals: tuple[str, ...] = ()) -> str:
     return scrub_bytes(text.encode("utf-8", errors="replace"), extra_literals=extra_literals).decode(
         "utf-8", errors="replace"
     )
+
+
+def scrub_json_value(value: Any, extra_literals: tuple[str, ...] = ()) -> Any:
+    """Recursively scrub strings inside a JSON-serializable Python structure without touching JSON delimiters."""
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return scrub_text(value, extra_literals=extra_literals)
+    if isinstance(value, Mapping):
+        return {
+            scrub_text(str(k), extra_literals=extra_literals): scrub_json_value(v, extra_literals=extra_literals)
+            for k, v in value.items()
+        }
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [scrub_json_value(item, extra_literals=extra_literals) for item in value]
+    return scrub_text(str(value), extra_literals=extra_literals)
 
 
 def _sanitize_path_entries(existing_path: str) -> str:

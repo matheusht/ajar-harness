@@ -1013,6 +1013,296 @@ class DeterministicStateMachineSimTests(unittest.TestCase):
 
             self.assertEqual(_dump(home_a), _dump(home_b))
 
+    def test_two_strike_repro_failure_pivots_to_instrumentation_and_enqueues_task(self) -> None:
+        from ajar.db import record_repro_failure
+
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            target_dir = _seed_target_dir(base / "target")
+            ajar_home = base / "ajar_home"
+            with mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}):
+                conn = _bootstrap_sim_run("dst-2strike", target_dir, ajar_home=ajar_home)
+                try:
+                    surf = add_surface(
+                        conn,
+                        name="Auth handler",
+                        kind="http",
+                        subsystem="src",
+                        locus="src/auth.py:1",
+                        priority="high",
+                        trust_boundary="ext->auth",
+                    )
+                    clm = propose_claim(
+                        conn,
+                        worker_id="w-prop",
+                        title="Bypass check on empty token",
+                        locus="src/auth.py:1",
+                        severity="high",
+                        mechanism="Unchecked prefix match allows empty token bypass",
+                        surface_id=str(surf["surface_id"]),
+                        falsification_prediction="Empty token fails auth",
+                        falsification_test="Submit empty token",
+                    )
+                    cid = str(clm["claim_id"])
+                    survive_claim(
+                        conn,
+                        claim_id=cid,
+                        worker_id="w-fals",
+                        notes="Confirmed reachable via verify()",
+                    )
+
+                    # Strike 1: stays survived_falsify.
+                    clm_row0 = conn.execute("SELECT * FROM claims WHERE claim_id = ?", (cid,)).fetchone()
+                    r1 = record_repro_failure(
+                        conn,
+                        claim=clm_row0,
+                        worker_id="w-repro",
+                        observation_hash="neg-hash-1",
+                        reason="Arm 1 exit 0",
+                    )
+                    self.assertFalse(r1["pivoted_to_instrumentation"])
+                    self.assertEqual(r1["failed_repro_count"], 1)
+
+                    # Strike 2 (identical observation hash): pivots to needs_instrumentation + spawns instrument task.
+                    clm_row1 = conn.execute("SELECT * FROM claims WHERE claim_id = ?", (cid,)).fetchone()
+                    r2 = record_repro_failure(
+                        conn,
+                        claim=clm_row1,
+                        worker_id="w-repro",
+                        observation_hash="neg-hash-1",
+                        reason="Arm 1 exit 0 again",
+                    )
+                    self.assertTrue(r2["pivoted_to_instrumentation"])
+                    self.assertTrue(r2["instrument_task_id"])
+                    clm_row = conn.execute("SELECT status FROM claims WHERE claim_id = ?", (cid,)).fetchone()
+                    self.assertEqual(str(clm_row["status"]), "needs_instrumentation")
+                    inst_row = conn.execute(
+                        "SELECT kind, status FROM tasks WHERE task_id = ?",
+                        (str(r2["instrument_task_id"]),),
+                    ).fetchone()
+                    self.assertEqual(str(inst_row["kind"]), "instrument")
+                    self.assertEqual(str(inst_row["status"]), "open")
+                    _assert_global_invariants(conn, target_dir=target_dir, seed=901, step=1, prev_phase_rank=0)
+                finally:
+                    conn.close()
+
+    def test_primitive_addition_wakes_parked_door_and_percolates_multi_hop_path(self) -> None:
+        from ajar.chain_planner import detect_percolated_multi_hop_paths
+        from ajar.services import add_primitive
+
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            target_dir = _seed_target_dir(base / "target")
+            ajar_home = base / "ajar_home"
+            with mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}):
+                conn = _bootstrap_sim_run("dst-percolate", target_dir, ajar_home=ajar_home)
+                try:
+                    jwl = add_crown_jewel(
+                        conn,
+                        name="Admin token mint",
+                        impact_class="auth_bypass",
+                        locus="src/auth.py:4",
+                    )
+                    door = park_open_door(
+                        conn,
+                        anchor_locus="src/auth.py:4",
+                        missing_link_summary="Requires cap:forge_cookie to mint admin session",
+                        jewel_id=str(jwl["jewel_id"]),
+                        blocker_locus="src/auth.py:1",
+                        wanted_tags=["cap:forge_cookie"],
+                        direction="sink_to_source",
+                        spawn_hunters=False,
+                    )
+                    door_id = str(door["door_id"])
+
+                    # Hop 1: untrusted entry in billing.py -> cap:leak_secret
+                    add_primitive(
+                        conn,
+                        kind="info_leak",
+                        locus="src/billing.py:1",
+                        preconditions="unauthenticated request",
+                        postconditions="leaks hmac secret",
+                        evidence_cmd="python3 -c 'print(1)'",
+                        provides_tags=["cap:leak_secret"],
+                        requires_tags=[],
+                    )
+                    # Hop 2: cap:leak_secret -> cap:forge_cookie (wakes door + completes 2-hop percolation!)
+                    add_primitive(
+                        conn,
+                        kind="auth_bypass",
+                        locus="src/auth.py:4",
+                        preconditions="requires cap:leak_secret",
+                        postconditions="mints forged session cookie",
+                        evidence_cmd="python3 -c 'print(2)'",
+                        provides_tags=["cap:forge_cookie"],
+                        requires_tags=["cap:leak_secret"],
+                    )
+
+                    drow = conn.execute("SELECT status FROM parked_doors WHERE door_id = ?", (door_id,)).fetchone()
+                    self.assertEqual(str(drow["status"]), "ready")
+                    perc = detect_percolated_multi_hop_paths(conn, enqueue_tasks=False)
+                    self.assertGreaterEqual(len(perc["percolated_paths"]), 1)
+                    self.assertGreaterEqual(perc["percolated_paths"][0]["hop_count"], 2)
+                    _assert_global_invariants(conn, target_dir=target_dir, seed=902, step=1, prev_phase_rank=0)
+                finally:
+                    conn.close()
+
+    def test_diff_sync_preserves_build_cmd_and_global_invariants(self) -> None:
+        import subprocess
+
+        from ajar.diff_sync import sync_pr_differential_state
+        from ajar.services import record_reproduction_outcome
+
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            target_dir = _seed_target_dir(base / "target")
+            ajar_home = base / "ajar_home"
+            env = {
+                **os.environ,
+                "GIT_AUTHOR_NAME": "DST",
+                "GIT_AUTHOR_EMAIL": "dst@example.com",
+                "GIT_COMMITTER_NAME": "DST",
+                "GIT_COMMITTER_EMAIL": "dst@example.com",
+            }
+            subprocess.run(["git", "-C", str(target_dir), "init", "-q"], check=True, env=env)
+            subprocess.run(["git", "-C", str(target_dir), "add", "."], check=True, env=env)
+            subprocess.run(["git", "-C", str(target_dir), "commit", "-q", "-m", "base"], check=True, env=env)
+            base_sha = subprocess.check_output(
+                ["git", "-C", str(target_dir), "rev-parse", "HEAD"], text=True, env=env
+            ).strip()
+
+            # Commit an unrelated change in src/billing.py so src/auth.py finding carries forward cleanly.
+            (target_dir / "src" / "billing.py").write_text("def charge(n: int) -> int:\n    return max(0, n)\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(target_dir), "add", "."], check=True, env=env)
+            subprocess.run(["git", "-C", str(target_dir), "commit", "-q", "-m", "head"], check=True, env=env)
+            head_sha = subprocess.check_output(
+                ["git", "-C", str(target_dir), "rev-parse", "HEAD"], text=True, env=env
+            ).strip()
+
+            with mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}):
+                parent_conn = _bootstrap_sim_run("dst-parent", target_dir, ajar_home=ajar_home)
+                child_conn = _bootstrap_sim_run("dst-child", target_dir, ajar_home=ajar_home)
+                try:
+                    surf = add_surface(
+                        parent_conn,
+                        name="Auth",
+                        kind="http",
+                        subsystem="src",
+                        locus="src/auth.py:1",
+                        priority="high",
+                        trust_boundary="ext->auth",
+                    )
+                    clm = propose_claim(
+                        parent_conn,
+                        worker_id="w-p",
+                        title="Auth token check bug",
+                        locus="src/auth.py:1",
+                        severity="high",
+                        mechanism="Accepts malformed prefix",
+                        surface_id=str(surf["surface_id"]),
+                        falsification_prediction="Rejects prefix",
+                        falsification_test="Run prefix test",
+                    )
+                    cid = str(clm["claim_id"])
+                    survive_claim(
+                        parent_conn,
+                        claim_id=cid,
+                        worker_id="w-f",
+                        notes="Verified by inspecting auth.py",
+                    )
+                    record_reproduction_outcome(
+                        parent_conn,
+                        claim_id=cid,
+                        worker_id="w-repro",
+                        poc_cmd="python3 -c 'raise SystemExit(1)'",
+                        control_cmd="python3 -c 'raise SystemExit(0)'",
+                        build_cmd="echo build-ok",
+                        repro_result={
+                            "passed": True,
+                            "observation_hash": "obs-sync-1",
+                            "micropatch_diff": "--- a/src/auth.py\n+++ b/src/auth.py\n",
+                            "arm1_clean_poc": {"arm_passed": True},
+                            "arm2_clean_control": {"arm_passed": True},
+                            "arm3_patch_poc": {"arm_passed": True},
+                            "arm4_patch_control": {"arm_passed": True},
+                        },
+                    )
+                    child_run_dir = ajar_home / "runs" / "dst-child"
+                    sync_res = sync_pr_differential_state(
+                        child_conn,
+                        run_dir=child_run_dir,
+                        target_dir=target_dir,
+                        diff_range=f"{base_sha}..{head_sha}",
+                        parent_run_id="dst-parent",
+                        ajar_home=ajar_home,
+                    )
+                    self.assertGreaterEqual(len(sync_res["kept_findings"]), 1)
+                    kept_row = child_conn.execute("SELECT build_cmd FROM findings LIMIT 1").fetchone()
+                    self.assertEqual(str(kept_row["build_cmd"]), "echo build-ok")
+                    _assert_global_invariants(child_conn, target_dir=target_dir, seed=903, step=1, prev_phase_rank=0)
+                finally:
+                    parent_conn.close()
+                    child_conn.close()
+
+    def test_concurrent_two_connection_wal_immediate_tx_contention(self) -> None:
+        import concurrent.futures
+
+        from ajar.services import add_task
+
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            target_dir = _seed_target_dir(base / "target")
+            ajar_home = base / "ajar_home"
+            with mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}):
+                seed_conn = _bootstrap_sim_run("dst-wal", target_dir, ajar_home=ajar_home)
+                try:
+                    for i in range(16):
+                        add_task(
+                            seed_conn,
+                            kind="investigate",
+                            title=f"Concurrent task {i}",
+                            locus=f"src/auth.py:{(i % 5) + 1}",
+                            priority="high",
+                        )
+                finally:
+                    seed_conn.close()
+
+                def _worker(worker_idx: int) -> list[str]:
+                    leased: list[str] = []
+                    conn = open_run_db("dst-wal", ajar_home=ajar_home)
+                    try:
+                        for j in range(10):
+                            add_anomaly(
+                                conn,
+                                locus=f"src/auth.py:{(j % 5) + 1}",
+                                observation=f"Concurrent anomaly w{worker_idx}-{j}",
+                            )
+                            res = lease_next_task(conn, worker_id=f"wal-worker-{worker_idx}")
+                            if res is not None:
+                                leased.append(str(res["task_id"]))
+                    finally:
+                        conn.close()
+                    return leased
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                    f1 = pool.submit(_worker, 1)
+                    f2 = pool.submit(_worker, 2)
+                    leased1 = f1.result()
+                    leased2 = f2.result()
+
+                # Zero duplicate leases across concurrent connections!
+                self.assertEqual(len(set(leased1) & set(leased2)), 0)
+                self.assertEqual(len(leased1) + len(leased2), 16)
+
+                verify_conn = open_run_db("dst-wal", ajar_home=ajar_home)
+                try:
+                    anom_count = int(verify_conn.execute("SELECT COUNT(*) AS c FROM anomalies").fetchone()["c"])
+                    self.assertEqual(anom_count, 20)
+                    qc = verify_conn.execute("PRAGMA quick_check").fetchone()
+                    self.assertEqual(qc[0], "ok")
+                finally:
+                    verify_conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -74,6 +74,108 @@ from ajar.target_check import (
 from ajar.workspace import init_run_workspace
 
 
+def _dir_size_bytes(path: pathlib.Path) -> int:
+    total = 0
+    if path.is_symlink() or not path.exists():
+        return 0
+    for item in path.rglob("*"):
+        if item.is_file() and not item.is_symlink():
+            try:
+                total += item.stat().st_size
+            except OSError:
+                pass
+    return total
+
+
+def _diagnose_run_health(run_id: str, *, prune_slots: bool = False) -> dict[str, Any]:
+    import fcntl
+    import time
+
+    rdir = run_dir_for(run_id)
+    conn = open_run_db(run_id)
+    try:
+        qc_rows = [str(r[0]) for r in conn.execute("PRAGMA quick_check;").fetchall()]
+        quick_check_ok = qc_rows == ["ok"]
+        ver_row = conn.execute("PRAGMA user_version;").fetchone()
+        schema_version = int(ver_row[0]) if ver_row is not None else 0
+        run_row = conn.execute("SELECT status, campaign_phase FROM runs LIMIT 1").fetchone()
+        open_tasks = int(conn.execute("SELECT COUNT(*) AS c FROM tasks WHERE status = 'open'").fetchone()["c"])
+        leased_tasks = int(conn.execute("SELECT COUNT(*) AS c FROM tasks WHERE status = 'leased'").fetchone()["c"])
+        now_ep = time.time()
+        stale_leases = int(
+            conn.execute(
+                "SELECT COUNT(*) AS c FROM tasks WHERE status = 'leased' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?",
+                (now_ep,),
+            ).fetchone()["c"]
+        )
+    finally:
+        conn.close()
+
+    repro_dir = rdir / "repro"
+    slots_info: list[dict[str, Any]] = []
+    pruned_slots: list[str] = []
+    reclaimed_bytes = 0
+    if repro_dir.is_dir():
+        for slot_dir in sorted(
+            p for p in repro_dir.iterdir() if not p.is_symlink() and p.is_dir() and p.name.startswith("slot-")
+        ):
+            lock_path = repro_dir / f"{slot_dir.name}.lock"
+            locked = False
+            fh = open(lock_path, "a+", encoding="utf-8")
+            try:
+                try:
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    locked = True
+                size_bytes = _dir_size_bytes(slot_dir)
+                stale_git_locks = [
+                    name
+                    for name in ("index.lock", "shallow.lock")
+                    if (slot_dir / ".git" / name).is_file()
+                ]
+                pruned = False
+                if prune_slots and not locked:
+                    shutil.rmtree(slot_dir, ignore_errors=True)
+                    pruned = not slot_dir.exists()
+                    if pruned:
+                        pruned_slots.append(slot_dir.name)
+                        reclaimed_bytes += size_bytes
+                slots_info.append(
+                    {
+                        "name": slot_dir.name,
+                        "locked": locked,
+                        "size_mib": round(size_bytes / (1024 * 1024), 3),
+                        "stale_git_locks": stale_git_locks,
+                        "pruned": pruned,
+                    }
+                )
+            finally:
+                if not locked:
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+                fh.close()
+
+    failures_dir = repro_dir / "failures"
+    failure_artifacts = len(list(failures_dir.glob("*.json"))) if failures_dir.is_dir() else 0
+
+    return {
+        "run_id": run_id,
+        "run_dir": str(rdir),
+        "db_quick_check_ok": quick_check_ok,
+        "db_quick_check": qc_rows,
+        "schema_version": schema_version,
+        "run_status": str(run_row["status"]) if run_row else "unknown",
+        "campaign_phase": str(run_row["campaign_phase"]) if run_row else "unknown",
+        "open_tasks": open_tasks,
+        "leased_tasks": leased_tasks,
+        "stale_leases": stale_leases,
+        "failure_artifacts": failure_artifacts,
+        "slots": slots_info,
+        "pruned_slots": pruned_slots,
+        "reclaimed_bytes": reclaimed_bytes,
+        "healthy": quick_check_ok,
+    }
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     tools = ("git", "rg", "ctags", "gcc", "gdb", "go", "cargo", "node", "forge")
     found = {t: shutil.which(t) for t in tools}
@@ -92,6 +194,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         "toolchain_paths": {k: v for k, v in found.items() if v},
     }
     base_ok = py_ok and fts5_ok and bool(found["git"])
+    run_ok = True
+    if getattr(args, "run", None):
+        rh = _diagnose_run_health(
+            resolve_run_id(args.run),
+            prune_slots=bool(getattr(args, "prune_slots", False)),
+        )
+        report["run_health"] = rh
+        run_ok = bool(rh["healthy"])
     if getattr(args, "target", None):
         tc = evaluate_target_readiness(
             args.target,
@@ -103,11 +213,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         )
         report["target_check"] = tc
         _emit(report, bool(args.json))
-        if not base_ok:
+        if not base_ok or not run_ok:
             return EXIT_USER_ERROR
         return EXIT_OK if tc["passed"] else EXIT_GATE_BLOCKED
     _emit(report, bool(args.json))
-    return EXIT_OK if base_ok else EXIT_USER_ERROR
+    return EXIT_OK if (base_ok and run_ok) else EXIT_USER_ERROR
 
 
 def cmd_quote(args: argparse.Namespace) -> int:

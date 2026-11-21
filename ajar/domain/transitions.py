@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from enum import Enum
+
 from ajar.domain.enums import (
     AnomalyStatus,
     AssumptionStatus,
@@ -164,22 +167,37 @@ def derive_claim_axes(status: ClaimStatus | str) -> ClaimAxes:
     return ClaimAxes(ResearchState.CANDIDATE, EvidenceState.UNVERIFIED)
 
 
+def _sorted_targets(allowed: Iterable[Enum]) -> tuple[str, ...]:
+    return tuple(sorted(str(x.value) for x in allowed))
+
+
 def assert_valid_run_transition(current: str, target: str, *, run_id: str = "") -> RunStatus:
     cur, dst = RunStatus(current), RunStatus(target)
     if dst not in ALLOWED_RUN_TRANSITIONS[cur]:
-        raise InvalidTransitionError("run.status", cur.value, dst.value, entity_id=run_id)
+        allowed = _sorted_targets(ALLOWED_RUN_TRANSITIONS[cur])
+        raise InvalidTransitionError(
+            "run.status",
+            cur.value,
+            dst.value,
+            entity_id=run_id,
+            allowed_targets=allowed,
+            fix_hint="Use `ajar reopen` to reactivate a finished run before mutating state.",
+        )
     return dst
 
 
 def assert_valid_phase_transition(current: str, target: str, *, run_id: str = "") -> CampaignPhase:
     cur, dst = CampaignPhase(current), CampaignPhase(target)
     if dst not in ALLOWED_PHASE_TRANSITIONS[cur]:
+        allowed = _sorted_targets(ALLOWED_PHASE_TRANSITIONS[cur])
         raise InvalidTransitionError(
             "campaign_phase",
             cur.value,
             dst.value,
             entity_id=run_id,
             reason="campaign_phase is monotonic (`hunt -> remediate -> full`); rewind is forbidden",
+            allowed_targets=allowed,
+            fix_hint="Advance monotonically via `ajar phase advance --to remediate|full`.",
         )
     return dst
 
@@ -187,12 +205,15 @@ def assert_valid_phase_transition(current: str, target: str, *, run_id: str = ""
 def assert_valid_task_transition(current: str, target: str, *, task_id: str = "") -> TaskStatus:
     cur, dst = TaskStatus(current), TaskStatus(target)
     if dst not in ALLOWED_TASK_TRANSITIONS[cur]:
+        allowed = _sorted_targets(ALLOWED_TASK_TRANSITIONS[cur])
         raise InvalidTransitionError(
             "task.status",
             cur.value,
             dst.value,
             entity_id=task_id,
             reason="terminal task states (`done`, `dry`) cannot be overwritten",
+            allowed_targets=allowed,
+            fix_hint="Enqueue a new follow-up task via `ajar task add` instead of mutating a closed task.",
         )
     return dst
 
@@ -212,12 +233,20 @@ def assert_valid_claim_transition(
     ):
         return dst
     if dst not in ALLOWED_CLAIM_TRANSITIONS[cur]:
+        allowed = _sorted_targets(ALLOWED_CLAIM_TRANSITIONS[cur])
+        hint = (
+            "Run `ajar claim survive` with an independent falsifier before `ajar claim reproduce`."
+            if cur == ClaimStatus.PROPOSED and dst == ClaimStatus.REPRODUCED
+            else "Check claim status with `ajar status` and propose a new claim if this one is terminal."
+        )
         raise InvalidTransitionError(
             "claim.status",
             cur.value,
             dst.value,
             entity_id=claim_id,
             reason=f"claim cannot transition from {cur.value!r} to {dst.value!r}",
+            allowed_targets=allowed,
+            fix_hint=hint,
         )
     return dst
 
@@ -225,19 +254,43 @@ def assert_valid_claim_transition(
 def assert_valid_primitive_transition(current: str, target: str, *, primitive_id: str = "") -> PrimitiveStatus:
     cur, dst = PrimitiveStatus(current), PrimitiveStatus(target)
     if dst not in ALLOWED_PRIMITIVE_TRANSITIONS[cur]:
-        raise InvalidTransitionError("primitive.status", cur.value, dst.value, entity_id=primitive_id)
+        allowed = _sorted_targets(ALLOWED_PRIMITIVE_TRANSITIONS[cur])
+        raise InvalidTransitionError(
+            "primitive.status",
+            cur.value,
+            dst.value,
+            entity_id=primitive_id,
+            allowed_targets=allowed,
+            fix_hint="Register a new primitive via `ajar primitive add` instead of mutating a chained/dry primitive.",
+        )
     return dst
 
 
 def assert_valid_anomaly_transition(current: str, target: str, *, anomaly_id: str = "") -> AnomalyStatus:
     cur, dst = AnomalyStatus(current), AnomalyStatus(target)
     if dst not in ALLOWED_ANOMALY_TRANSITIONS[cur]:
-        raise InvalidTransitionError("anomaly.status", cur.value, dst.value, entity_id=anomaly_id)
+        allowed = _sorted_targets(ALLOWED_ANOMALY_TRANSITIONS[cur])
+        raise InvalidTransitionError(
+            "anomaly.status",
+            cur.value,
+            dst.value,
+            entity_id=anomaly_id,
+            allowed_targets=allowed,
+            fix_hint="Anomalies already consumed by a chain are terminal; record a distinct anomaly if needed.",
+        )
     return dst
 
 
 def assert_valid_door_transition(current: str, target: str, *, door_id: str = "") -> DoorStatus:
     cur, dst = DoorStatus(current), DoorStatus(target)
     if dst not in ALLOWED_DOOR_TRANSITIONS[cur]:
-        raise InvalidTransitionError("parked_door.status", cur.value, dst.value, entity_id=door_id)
+        allowed = _sorted_targets(ALLOWED_DOOR_TRANSITIONS[cur])
+        raise InvalidTransitionError(
+            "parked_door.status",
+            cur.value,
+            dst.value,
+            entity_id=door_id,
+            allowed_targets=allowed,
+            fix_hint="Inspect door states via `ajar door list` or park a new door via `ajar door park`.",
+        )
     return dst

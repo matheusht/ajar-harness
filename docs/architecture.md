@@ -37,9 +37,10 @@ Run state lives outside the target tree under `~/.ajar/runs/<run_id>/`, paired w
     ├── repo.git/                    # Standalone repacked git clone of source target (zero alternates)
     ├── baseline_suite.json          # Cached clean-HEAD test suite baseline for Arm 5 diffing
     ├── snapshots/                   # Captured Arm-1 post-state tarballs (snp-*.tar.gz) for `ajar chain probe`
+    ├── failures/                    # Scrubbed replayable JSON failure receipts (<claim_id>-<n>.json)
     ├── helpers/                     # Read-only (0444) StageContext, sitecustomize.py, ajar_helpers/
-    ├── slot-<k>/                    # Isolated 4-arm, chain-ablation, and 9-arm patch worktrees (warm .o reuse)
-    └── slot-inst/                   # Isolated scratch worktree for `ajar repro try`, `chain probe`, and `claim instrument`
+    ├── slot-<k>/                    # Shared 8-slot pool for 4-arm repro, `repro try`, chain ablation, and 9-arm patches (auto-heals stale `.git/index.lock`)
+    └── slot-inst/                   # Isolated scratch worktree for `chain probe` and `claim instrument`
 ```
 
 - **Hybrid Storage & Cross-VM `ajar reopen`:** Heavy `CARGO_TARGET_DIR`, `GOCACHE`, and `CCACHE_DIR` trees stay on local SSD `/tmp/ajar-build-cache/<run_id>` while `_clean_slot_preserving_objects` retains compiled `.o`/`.a` files across both 4-arm and 9-arm resets via monotonic `mtime` bumps. `ajar reopen <run_id>` hydrates `~/.ajar/runs/<run_id>` from `/shared/user/.gemini/ajar/runs/<run_id>`, upgrades `v3.2.x` tables in-place, reconstructs missing `target_path` checkouts offline from `repro/repo.git`, and resets zero-attempt `blocked` claims to `survived_falsify`.
@@ -47,9 +48,9 @@ Run state lives outside the target tree under `~/.ajar/runs/<run_id>/`, paired w
 
 ---
 
-## 3. SQLite WAL State Model, Reactive Open Doors, & Multi-Hop Percolation (`ADR-0018`..`ADR-0022`)
+## 3. SQLite WAL State Model, Reactive Open Doors, & Multi-Hop Percolation (`ADR-0018`..`ADR-0024`)
 
-`ajar/db.py`, `ajar/chain_planner.py`, and `ajar/epistemic_hooks.py` coordinate **Work**, **Suspended Open Doors**, **Percolation**, **Epistemic Hooks**, **Long-Horizon Memory**, **Truth**, and **Economics**:
+`ajar/store/`, `ajar/db.py`, `ajar/chain_planner.py`, `ajar/epistemic_hooks.py`, and `ajar/reactions.py` coordinate **Work**, **Suspended Open Doors**, **Percolation**, **Epistemic Hooks**, **Long-Horizon Memory**, **Truth**, and **Economics**:
 
 ### Work, Portfolio Anti-Starvation, & PR Differential Axis
 - `surfaces` (`requires_tags_json`) & `surface_drivers`: Mapped entrypoints, required capability tags, trust boundaries, and executable harnesses.
@@ -61,23 +62,23 @@ Run state lives outside the target tree under `~/.ajar/runs/<run_id>/`, paired w
 - `parked_doors` & `door_fts`: Suspended deep sinks or partial chains (`ajar door park`) holding `wanted_tags_json`, `wanted_symbols_json`, `blocker_locus`, and `snapshot_id`. Spawns `<= 2` bounded `bridge` tasks (`max_bridge_attempts = 2`) and wakes reactively (`parked | bridging | exhausted_locked -> ready`) via tri-modal matching (tags + code symbols/guard proximity/1-hop `repomap_edges` + FTS5 BM25) whenever any worker records a matching primitive, anomaly, claim, or finding.
 - **Multi-Hop Percolation & Trust Gadgets:** `primitives` separates invariant-breaking capabilities (`role = 'capability'`) from non-buggy code that trusts a broken invariant (`role = 'trust_gadget'`, `ajar primitive dry`). `detect_percolated_multi_hop_paths` computes $2..10$-hop forward/backward DAG reachability, enqueuing `salience = 98` `chain` tasks when a middle link connects an entry prefix to a sink suffix and surfacing 1-link `unicorn_gaps` in `ajar chain frontier`.
 
-### Event-Driven Epistemic Hooks & Prefix-Stable `< 4 KB` Context (`ajar/epistemic_hooks.py`)
+### Event-Driven Epistemic Hooks & Prefix-Stable `< 4 KB` Context (`ajar/epistemic_hooks.py`, `ajar/reactions.py`)
 - **Bounded `H1`–`H8` Micro-Hooks:** Triggered deterministically by SQLite state transitions (`H1_GUARD_SYMMETRY`, `H4_TYPED_STATE_BRIDGE`, `H5_POST_CONFIRM_ESCALATION` including `stepping_stone` `High -> Critical` escalation, `H6_RELEASE_UB_DIFF`) or AST/source signals (`H2`, `H3`, `H7`, `H8`), capped at `<= 2` active hooks (`<= 90` tokens) with mandatory `Kill Rule` lines.
 - **Prefix-Stable `< 4 KB` Context (`render_task_context`):** Keeps the `Certified Run Prefix` (`Goal`, `Active Workspace Steers`, sorted `Certified Bindings`) 100% byte-identical across workers while placing `Open Doors`, `Cross-Subsystem Capability Bridges`, and `Active Epistemic Hooks` inside `Task Delta`.
 
 ### Truth & Remediation Axis
 - `claims`: Enforces structural prose (`validate_structural_claim_prose`) and separates `preflight_error` / `build_or_env_error` (`0` strikes) from `target_negative` (`failed_repro_count` incremented only on real target negatives).
-- `findings` & `repro_snapshots`: Created by `ajar claim reproduce` with `realism_tier` (`crown_jewel | high_impact | stepping_stone`), optional `snp-*` post-state snapshots (`--save-post-state`), and single-command calibration (`ajar finding calibrate`).
+- `findings` & `repro_snapshots`: Created by `ajar claim reproduce` with `realism_tier` (`crown_jewel | high_impact | stepping_stone`), persisted `build_cmd`, optional `snp-*` post-state snapshots (`--save-post-state`), and single-command calibration (`ajar finding calibrate`).
 - `chains`: Composes `fnd-*`, `clm-*`, `prim-*`, and `anom-*` directly in `ajar chain propose` (auto-inheriting `micropatch_diff`, rejecting gadget-only chains and caller self-execution flags, and enforcing `AJAR_ABLATE_STEPS=""` on Arm 2).
 - `patch_verifications`: Created by `ajar patch verify` in `remediate` phase after all **9 hardened production arms** pass (`remediation_state = 'verified_local'`).
 
 ---
 
-## 4. Verification Stages: Reproduction, Zero-Boilerplate Chains, & 9-Arm `Fixes` (`ADR-0019`..`ADR-0022`)
+## 4. Verification Stages: Reproduction, Zero-Boilerplate Chains, & 9-Arm `Fixes` (`ADR-0019`..`ADR-0024`)
 
 1. **Stage A — Strike-Free Smoke Probes & Locus-Bound Reproduction (`ajar repro try`, `ajar claim reproduce`):**
-   - `ajar repro try` runs strike-free build/PoC checks inside `slot-inst`.
-   - `ajar claim reproduce` enforces `evaluate_precondition_realism`, `validate_entrypoint_fidelity`, and `validate_no_static_source_cheat`, runs `--build-cmd` + Arms 1–4 (`clean+PoC`, `clean+control`, `micropatch+PoC`, `micropatch+control`), captures `--save-post-state` snapshots after Arm 1, and runs optional Arms `5A`/`5B` (`--release-cmd`).
+   - `ajar repro try` runs strike-free build/PoC checks inside the shared 8-slot pool (`slot-<k>`), eliminating single-slot contention during parallel swarm hunts.
+   - `ajar claim reproduce` enforces `evaluate_precondition_realism`, `validate_entrypoint_fidelity`, and `validate_no_static_source_cheat`, runs `--build-cmd` + Arms 1–4 (`clean+PoC`, `clean+control`, `micropatch+PoC`, `micropatch+control`), persists scrubbed replayable failure artifacts (`repro/failures/<claim_id>-<n>.json`) on non-passing runs, captures `--save-post-state` snapshots after Arm 1, and runs optional Arms `5A`/`5B` (`--release-cmd`).
 2. **Stage B — Post-State Probing & Multi-Artifact Chain Ablation (`ajar chain probe`, `ajar chain propose`):**
    - `ajar chain probe --from-snapshot <snp_id>` hydrates a Stage-1 filesystem tarball into `slot-inst` to test Stage-2 consumers immediately.
    - `ajar chain propose --steps <fnd|clm|prim|anom,...>` auto-inherits stored micropatches (with optional `StageContext` helpers), runs full chain + benign control (`AJAR_ABLATE_STEPS=""`) + per-step marginal ablation, and marks resolved `parked_doors` / `crown_jewels`.
@@ -96,22 +97,24 @@ Run state lives outside the target tree under `~/.ajar/runs/<run_id>/`, paired w
 
 ---
 
-## 6. Internal Package Layering, Mechanical Guardrails, DST, & Proof Helpers (`ADR-0023`)
+## 6. Internal Package Layering, Zero-Cycle DAG, Guardrails, & DST (`ADR-0023`..`ADR-0024`)
 
-To prevent CLI/MCP drift, silent state-machine corruption, and prose-only conventions, `ajar/` follows a strict acyclic layer architecture enforced mechanically in CI:
+To prevent CLI/MCP drift, silent state-machine corruption, import cycles, and prose-only conventions, `ajar/` follows a strict acyclic DAG enforced mechanically in CI:
 
 ```text
-ajar/domain/   (pure zero-IO StrEnums, models, explicit transition graphs, derive_claim_axes)
+ajar/domain/ & ajar/redact.py & ajar/repro_helpers.py   (pure zero-IO StrEnums, models, self-healing transitions, leaves)
      ▲
-ajar/store/    (CURRENT_SCHEMA_VERSION, PRAGMA user_version fast-path, immediate_tx, assert_run_mutable)
+ajar/store/                                             (tx.py, migrations.py, util.py: immediate_tx, SCHEMA_SQL, open_run_db)
      ▲
-ajar/services/ (workflow.py unified transactional mutations; proof.py DEC-0132 & P0-3 read-only helpers)
+ajar/epistemic_hooks.py -> ajar/chain_planner.py -> ajar/db.py -> ajar/reactions.py
      ▲
-ajar/cli.py  &  ajar/mcp.py  (thin CLI/STDIO-MCP transport adapters; 0 raw SQL writes in mcp.py)
+ajar/services/                                          (workflow.py unified transactional mutations; proof.py DEC-0132 & P0-3)
+     ▲
+ajar/cli/ & ajar/mcp.py                                 (thin modular CLI package & STDIO-MCP adapter; 0 raw SQL writes)
 ```
 
-- **Atomic Transactional Services (`ajar/services/workflow.py`):** Every core workflow mutation acquires `immediate_tx(conn)` (`BEGIN IMMEDIATE` / nested `SAVEPOINT`) before reading mutable rows, checking `assert_run_mutable`, normalizing `worker_id`, and enforcing `ALLOWED_*_TRANSITIONS` + `derive_claim_axes`. `ajar/db.py:open_run_db` skips redundant migrations via `PRAGMA user_version` (`<= 4` SQL statements on warm opens), and `ajar/oracles.py:index_target_oracles` batches FTS5 writes inside one `immediate_tx` with an mtime+size-keyed cache for built-in `precedent` docs.
-- **Mechanical Guardrails (`tools/arch_lint.py` + CI):** Enforces `NO_RAW_SQL_IN_MCP`, `CLI_RAW_SQL_RATCHET`, `LAYER_DAG_BOUNDARY` (absolute and relative imports), `ZERO_LLM_ENGINE`, `NO_HARDCODED_DEVBOX_PATH`, `NO_AMBIENT_ENV_MUTATION`, and `NO_UNFILTERED_TAR_EXTRACT` (literal `'tar'`/`'data'` filters), emitting self-healing `fix_hint` messages. CI runs `ruff` (`E,F,I,W,B`), `tools/arch_lint.py`, `mypy --strict` on `domain`/`store`/`services`/`arch_lint`, package `mypy`, CLI-vs-Docs/Skills conformance checks, and full `pytest -q`.
-- **Deterministic Simulation Testing & Verification Driver (`tests/dst/test_state_machine_sim.py`, `scripts/verify-repo.sh`):** Seeded multi-worker DST (`AJAR_DST_SEED=<n>` for exact replay) asserts 10 global invariants after every randomized operation, including strict read-only `check_all_gates(..., auto_enqueue_chain=False)` purity, KV prefix-cache stability, `reopen_run` claim-axis coherence, and advisory Host Mode budget behavior. Contributors run `scripts/verify-repo.sh --fast` (`~19s` inner loop) during iteration and `scripts/verify-repo.sh --full` before opening a PR.
+- **Atomic Transactional Services & Self-Healing Errors (`ajar/services/workflow.py`, `ajar/domain/`, `ajar/mcp.py`):** Every workflow mutation acquires `immediate_tx(conn)` (`BEGIN IMMEDIATE` / nested `SAVEPOINT`, never held across subprocesses), checks `assert_run_mutable`, and enforces `ALLOWED_*_TRANSITIONS` + `derive_claim_axes`. `InvalidTransitionError` includes `allowed_targets` and `fix_hint`, MCP `tools/call` returns structured JSON error payloads, `ajar swarm packet` embeds scrubbed claim/task records directly (no raw SQL query instructions), `ajar/hooks.py` evaluates a semantic progress tuple ignoring telemetry noise, and `ajar doctor --run <id> [--prune-slots]` audits SQLite integrity, stale leases, and lock-safe slot cleanup.
+- **Mechanical Guardrails (`tools/arch_lint.py` + CI):** Enforces 10 rules (`NO_RAW_SQL_IN_MCP`, `CLI_RAW_SQL_RATCHET` locked at `0`, `LAYER_DAG_BOUNDARY`, `ZERO_LLM_ENGINE`, `NO_HARDCODED_DEVBOX_PATH`, `NO_AMBIENT_ENV_MUTATION`, `NO_UNFILTERED_TAR_EXTRACT`, `NO_COMMIT_NOOP`, `MULTI_WRITE_REQUIRES_IMMEDIATE_TX`, and Tarjan SCC `NO_CIRCULAR_IMPORTS`), emitting self-healing `fix_hint` messages. CI runs `ruff` (`E,F,I,W,B`), `tools/arch_lint.py`, universal `mypy --strict ajar tools/arch_lint.py`, CLI-vs-Docs/Skills conformance checks, and full `pytest -q`.
+- **Deterministic Simulation Testing & Verification Driver (`tests/dst/test_state_machine_sim.py`, `scripts/verify-repo.sh`):** Seeded multi-worker DST (`AJAR_DST_SEED=<n>` for exact replay) asserts 10 global invariants plus dedicated checks for the 2-strike instrumentation pivot, primitive-to-door wakeup and multi-hop percolation, `diff_sync` `build_cmd` carry-forward, and 2-connection WAL contention under `immediate_tx`. Contributors run `scripts/verify-repo.sh --fast` (`~10s` inner loop) during iteration and `scripts/verify-repo.sh --full` before opening a PR.
 - **Startup Proof Helpers (`ajar/services/proof.py`):** `ajar economics export` exports read-only, strictly advisory `DEC-0132` COGS/LoC calibration telemetry (`ajar-economics-calibration/1`), and `ajar ledger commit-preimage` produces redacted `P0-3` SHA-256 commit-before-submit records with atomic symlink-refusing `0o600` preimage files and stdout isolation.
 

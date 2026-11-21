@@ -175,6 +175,7 @@ def cmd_claim(args: argparse.Namespace) -> int:
                     f"Claim {args.claim_id} has status {clm['status']!r}; must pass independent `ajar claim survive` before reproduction.",
                     EXIT_GATE_BLOCKED,
                 )
+            assert_run_mutable(conn)
             if not clm["falsifier_worker_id"] or clm["falsifier_worker_id"] == clm["proposer_worker_id"]:
                 raise AjarError("Claim lacks an independent falsifier (`proposer != falsifier`).", EXIT_GATE_BLOCKED)
 

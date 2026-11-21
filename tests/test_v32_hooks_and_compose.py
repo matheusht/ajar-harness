@@ -12,12 +12,16 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
+import pytest
+
 from ajar import EXIT_GATE_BLOCKED, EXIT_OK
 from ajar.cli import main as cli_main
 from ajar.db import open_run_db, render_task_context, run_dir_for
 from ajar.oracles import index_target_oracles, query_oracle
 from ajar.runner import detect_soliloquy_transcript
 from ajar.workspace import unlock_run_dir_permissions
+
+pytestmark = pytest.mark.integration
 
 
 def _run_cli(argv: list[str], ajar_home: pathlib.Path) -> tuple[int, dict[str, object]]:

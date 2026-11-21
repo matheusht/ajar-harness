@@ -27,6 +27,9 @@ include = ["ajar*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "integration: end-to-end tests invoking external compilers/debuggers (gcc, go, cargo, gdb), live HTTP, or multi-subprocess CLI suites",
+]
 
 [tool.ruff]
 line-length = 100

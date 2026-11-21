@@ -10,10 +10,14 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 
+import pytest
+
 from ajar import EXIT_GATE_BLOCKED, EXIT_OK
 from ajar.cli import main
 from ajar.db import open_run_db
 from ajar.redact import scrubbed_subprocess_env
+
+pytestmark = pytest.mark.integration
 
 
 def _run_cli(argv: list[str], ajar_home: pathlib.Path) -> tuple[int, dict[str, object] | str]:

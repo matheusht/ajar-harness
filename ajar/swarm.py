@@ -32,6 +32,7 @@ from ajar.db import (
     run_dir_for,
     utc_now_iso,
 )
+from ajar.domain import derive_claim_axes
 from ajar.redact import scrub_text, scrubbed_subprocess_env
 
 WIRE_PROFILE_LADDER: tuple[str, ...] = ("direct", "swarm_patch_first", "regression_tdd")
@@ -976,10 +977,11 @@ def reopen_run(
                 if not is_policy_deferred and env_b in ZERO_ATTEMPT_EXEMPT_ENV_BLOCKERS:
                     continue
                 if is_policy_deferred or fails == 0:
-                    has_falsifier = bool(str(bc["falsifier_worker_id"] or "").strip()) and (
-                        str(bc["falsifier_worker_id"]) != str(bc["proposer_worker_id"])
-                    )
+                    fals_id = str(bc["falsifier_worker_id"] or "").strip()
+                    prop_id = str(bc["proposer_worker_id"] or "").strip()
+                    has_falsifier = bool(fals_id) and (fals_id != prop_id)
                     next_status = "survived_falsify" if has_falsifier else "proposed"
+                    axes = derive_claim_axes(next_status)
                     preserved_notes = str(bc["falsify_notes"] or "").strip()
                     if not preserved_notes and bc["blocker_reason"]:
                         stripped_note = POLICY_REFUSAL_BLOCK_RE.sub("", str(bc["blocker_reason"])).strip()
@@ -987,11 +989,19 @@ def reopen_run(
                     conn.execute(
                         """
                         UPDATE claims
-                        SET status = ?, blocker_reason = '', env_blocker = '',
+                        SET status = ?, research_state = ?, evidence_state = ?,
+                            blocker_reason = '', env_blocker = '',
                             falsify_notes = ?, updated_at = ?
                         WHERE claim_id = ?
                         """,
-                        (next_status, scrub_text(preserved_notes), now_iso, bc["claim_id"]),
+                        (
+                            next_status,
+                            axes.research_state.value,
+                            axes.evidence_state.value,
+                            scrub_text(preserved_notes),
+                            now_iso,
+                            bc["claim_id"],
+                        ),
                     )
                     conn.execute(
                         """

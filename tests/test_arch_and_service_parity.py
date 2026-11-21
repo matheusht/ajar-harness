@@ -174,8 +174,8 @@ class CliMcpDifferentialParityTests(unittest.TestCase):
             target = _make_git_target(base)
 
             with mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}):
-                rc1, init_cli = _run_cli(["init", "--json", str(target)])
-                rc2, init_mcp = _run_cli(["init", "--json", str(target)])
+                rc1, init_cli = _run_cli(["init", "--in-place", "--json", str(target)])
+                rc2, init_mcp = _run_cli(["init", "--in-place", "--json", str(target)])
                 self.assertEqual(rc1, 0)
                 self.assertEqual(rc2, 0)
                 rid_cli = str(init_cli["run_id"])
@@ -600,7 +600,7 @@ class CliMcpDifferentialParityTests(unittest.TestCase):
             target = _make_git_target(base)
 
             with mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}):
-                rc_init, init_res = _run_cli(["init", "--json", str(target)])
+                rc_init, init_res = _run_cli(["init", "--in-place", "--json", str(target)])
                 self.assertEqual(rc_init, 0)
                 rid = str(init_res["run_id"])
                 conn = open_run_db(rid)

@@ -10,8 +10,12 @@ import time
 import unittest
 import urllib.request
 
+import pytest
+
 from ajar.repro_binary_live import run_binary_reproduction, run_live_reproduction
 from ajar.repro_source import init_source_mirror, run_source_reproduction, validate_micropatch_diff
+
+pytestmark = pytest.mark.integration
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 POLYGLOT = REPO_ROOT / "benchmarks" / "polyglot"

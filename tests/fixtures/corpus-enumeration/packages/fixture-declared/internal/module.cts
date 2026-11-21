@@ -1,1 +1,0 @@
-exports.commonTypeScript = true;

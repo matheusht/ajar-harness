@@ -15,6 +15,7 @@ import unittest
 from ajar.cli import main as cli_main
 from ajar.db import SCHEMA_SQL, open_run_db, utc_now_iso
 from ajar.domain import (
+    AjarError,
     AnomalyStatus,
     AssumptionStatus,
     CampaignPhase,
@@ -295,7 +296,7 @@ class TestDomainAndMigrations(unittest.TestCase):
             run_id,
         )
         self.assertNotEqual(rc_sf, 0)
-        with self.assertRaises(Exception):
+        with self.assertRaises(AjarError):
             dispatch_mcp_tool(
                 run_id,
                 "ajar_claim_falsify",

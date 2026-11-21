@@ -603,7 +603,7 @@ def _assert_no_symlink_components(base_dir: pathlib.Path, target_path: pathlib.P
         rel_parts = target_path.relative_to(base_dir).parts
     except ValueError:
         if target_path.is_symlink():
-            raise AjarError(f"Refusing symlinked database path: {target_path}", EXIT_USER_ERROR)
+            raise AjarError(f"Refusing symlinked database path: {target_path}", EXIT_USER_ERROR) from None
         return
     for part in rel_parts:
         cur = cur / part

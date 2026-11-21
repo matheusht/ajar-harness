@@ -977,17 +977,13 @@ def run_snapshot_chain_probe(
                     if joined == ".." or joined.startswith("../"):
                         continue
                 safe_members.append(member)
-            use_filter = hasattr(tarfile, "tar_filter")
             for member in safe_members:
                 dest = slot_dir / member.name
                 if dest.exists() or dest.is_symlink():
                     if dest.is_symlink() or dest.is_file():
                         dest.unlink(missing_ok=True)
                 try:
-                    if use_filter:
-                        tar.extract(member, path=str(slot_dir), set_attrs=False, filter="tar")
-                    else:
-                        tar.extract(member, path=str(slot_dir), set_attrs=False)
+                    tar.extract(member, path=str(slot_dir), set_attrs=False, filter="tar")
                 except tarfile.FilterError as exc:
                     raise AjarError(f"Unsafe tar member in snapshot {snapshot_id}: {exc}", EXIT_GATE_BLOCKED) from exc
 

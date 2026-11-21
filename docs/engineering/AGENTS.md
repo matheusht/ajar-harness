@@ -14,7 +14,10 @@ Read this file before modifying `ajar/`, `skills/`, `benchmarks/`, `docs/`, or `
 
 | Module | Responsibility |
 | --- | --- |
-| `ajar/db.py` | SQLite WAL schema (`v3.3` + `_ensure_v33_schema` auto-migration), `O_NOFOLLOW` run dirs, portfolio-balanced task leases, `hunt`/`remediate` phase split, `calibrate_finding`, `mark_primitive_dry`, prefix-stable `< 4 KB` context, `steers`, pulse |
+| `ajar/domain/` | Pure zero-IO `StrEnum`s for all state machines (`enums.py`), frozen models & `AjarError`/`InvalidTransitionError` (`models.py`), explicit transition graphs & `derive_claim_axes` (`transitions.py`) |
+| `ajar/store/` | Schema version constant (`CURRENT_SCHEMA_VERSION`), `immediate_tx(conn)` (`BEGIN IMMEDIATE` + nested `SAVEPOINT`), and `assert_run_mutable(conn)` (`tx.py`) |
+| `ajar/services/` | Unified transactional workflow mutations (`workflow.py`: surfaces, tasks, anomalies, claims, phase advance, run finish) shared identically by `cli.py` and `mcp.py` |
+| `ajar/db.py` | SQLite WAL schema (`v3.3` + `PRAGMA user_version` fast-path + auto-migration), `O_NOFOLLOW` run dirs, portfolio-balanced task leases, `hunt`/`remediate` phase split, `calibrate_finding`, `mark_primitive_dry`, prefix-stable `< 4 KB` context, `steers`, pulse |
 | `ajar/chain_planner.py` | Suspended Open Doors (`crown_jewels`, `parked_doors`, `door_fts`), tri-modal reactive wakeup, `<= 2` bounded `bridge` hunters, $2..10$-hop middle-unicorn percolation (`detect_percolated_multi_hop_paths`), `compute_chain_frontier`, and `evaluate_precondition_realism` |
 | `ajar/epistemic_hooks.py` | Event-driven `H1`–`H8` epistemic micro-hooks (`0` overhead on clean code, mandatory `Kill Rule`, `stepping_stone` `H5` escalation) and `provides_tags <-> requires_tags` capability bridges |
 | `ajar/repro_compose.py` | Zero-boilerplate `fnd-*`/`clm-*`/`prim-*`/`anom-*` chain composition with auto-inherited micropatches, `run_snapshot_chain_probe` (`--from-snapshot`), optional `StageContext` helpers, and container loopback socket guard |
@@ -29,19 +32,36 @@ Read this file before modifying `ajar/`, `skills/`, `benchmarks/`, `docs/`, or `
 | `ajar/graph.py` | Deterministic `Platform` component, hook, helper, coverage, and attack-flow JSON exporter (`ajar-platform-graph/1`) |
 | `ajar/oracles.py` | SQLite FTS5 indexing and queries for `intent` (`[UNTRUSTED_TARGET_DOC]` tagged), `reachability`, and `precedent` |
 | `ajar/hooks.py` | Host Mode `claude-stop` hook and `codex`/`omp` continuation loop with 3-stall circuit breaker |
-| `ajar/mcp.py` | Thin STDIO JSON-RPC MCP wrapper delegating directly to `ajar` operations |
+| `ajar/mcp.py` | Thin STDIO JSON-RPC MCP wrapper delegating all mutations to `ajar/services/` (0 inline SQL writes) |
 | `ajar/runner.py` | Standalone Mode (`ajar run`) scheduler with `--until crown-jewel`, `--phase`, `--discover-passes N`, role-tier model routing, `detect_soliloquy_transcript`, and `80% / 20%` verify reserve |
 | `ajar/report.py` | Markdown and JSON report compiler including `realism_tier`, `ub_divergence_class`, `ablation_matrix_json`, `patch_verifications`, and `CLOSEOUT_RECEIPT` |
 | `ajar/redact.py` | Secret scanner/redactor and `scrubbed_subprocess_env` preserving `SDKROOT`/macOS `xcrun`, offline `rustup`/`cargo` toolchains, `$AJAR_RUN_DIR`, and dangling-symlink-clean `PATH` |
-| `ajar/cli.py` | Command-line interface entrypoint (`ajar`) |
+| `ajar/cli.py` | Command-line interface entrypoint (`ajar`) delegating core workflow mutations to `ajar/services/` |
+| `tools/arch_lint.py` | Mechanical architecture & invariant linter with self-healing `fix_hint` diagnostics |
+
+## Rule-to-Enforcer Map
+
+Every durable engineering rule is mechanically enforced in CI (never prose-only):
+
+| Rule | Mechanical Enforcer |
+| --- | --- |
+| Zero LLM SDKs in `ajar/` & no `tools/legacy/` imports | `tools/arch_lint.py` (`ZERO_LLM_ENGINE`, `LAYER_DAG_BOUNDARY`) |
+| Strict layer DAG (`domain -> store -> services -> cli/mcp`) | `tools/arch_lint.py` (`LAYER_DAG_BOUNDARY`) + `mypy --strict` |
+| Single mutation path across CLI & MCP (0 raw SQL writes in `mcp.py`, ratcheted `cli.py`) | `tools/arch_lint.py` (`NO_RAW_SQL_IN_MCP`, `CLI_RAW_SQL_RATCHET`) + `tests/test_arch_and_service_parity.py` |
+| No hardcoded developer paths or ambient `HOME`/`PATH` mutation in tests | `tools/arch_lint.py` (`NO_HARDCODED_DEVBOX_PATH`, `NO_AMBIENT_ENV_MUTATION`) |
+| Explicit `filter=` on every `tarfile` extraction | `tools/arch_lint.py` (`NO_UNFILTERED_TAR_EXTRACT`) |
+| Enum-to-SQL CHECK & `HookCode` parity + explicit state transitions | `tests/test_domain_and_migrations.py` |
+| Root `AGENTS.md == CLAUDE.md <= 50` lines & zero doc/skill CLI flag drift | `tests/test_conformance.py` + `.github/workflows/conformance.yml` |
 
 ## Required Verification Before Opening a PR
 
-Run all four checks from the repository root and disclose results in the PR description:
+Run all checks from the repository root and disclose results in the PR description:
 
 ```bash
 test "$(wc -l < AGENTS.md)" -le 50 && cmp -s AGENTS.md CLAUDE.md
-ruff check ajar tests
+ruff check ajar tests tools/arch_lint.py
+python3 tools/arch_lint.py
+mypy --strict ajar/domain ajar/store ajar/services tools/arch_lint.py && mypy ajar --ignore-missing-imports
 pytest -q
 for t in tools/legacy/*-test.py; do python3 "$t"; done
 ```

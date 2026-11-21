@@ -529,6 +529,12 @@ def run_chain_reproduction(
     for sid in clean_steps:
         prow = conn.execute("SELECT * FROM primitives WHERE primitive_id = ?", (sid,)).fetchone()
         if prow is not None:
+            pstatus = str(prow["status"] if "status" in prow.keys() else "active")
+            if pstatus == "dry":
+                raise AjarError(
+                    f"Cannot compose chain with closed `dry` primitive {sid}.",
+                    EXIT_GATE_BLOCKED,
+                )
             prim_rows[sid] = prow
             prole = str(prow["role"] if "role" in prow.keys() else "capability")
             step_roles[sid] = prole

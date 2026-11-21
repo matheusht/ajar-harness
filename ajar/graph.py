@@ -267,7 +267,9 @@ def export_attack_flow_graph(conn: sqlite3.Connection) -> dict[str, Any]:
             "surfaces_guarded_dry": len(dry_surfaces),
             "primitives_total": len(primitives),
             "primitive_helpers_verified": sum(1 for h in primitive_helpers if h["verified"]),
-            "unchained_primitives": sum(1 for p in primitives if not p["chained"]),
+            "unchained_primitives": sum(
+                1 for p in primitives if not p["chained"] and p.get("status", "active") != "dry"
+            ),
             "unexplained_anomalies": sum(1 for a in anomalies if a["status"] == "unexplained"),
             "confirmed_findings": len(findings),
             "verified_chains": sum(1 for c in chains if c["verified"]),

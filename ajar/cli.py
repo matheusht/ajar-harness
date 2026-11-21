@@ -1861,6 +1861,7 @@ def cmd_patch(args: argparse.Namespace) -> int:
                 max_changed_lines=args.max_changed_lines,
                 timeout_sec=args.timeout,
                 suite_timeout_sec=int(getattr(args, "suite_timeout", 1800)),
+                build_cmd=str(getattr(args, "build_cmd", None) or ""),
                 worker_id=args.worker,
             )
             _emit(res, True)
@@ -2777,6 +2778,7 @@ def build_parser() -> argparse.ArgumentParser:
     ppt_v.add_argument("--max-changed-lines", type=int, default=120)
     ppt_v.add_argument("--timeout", type=int, default=90)
     ppt_v.add_argument("--suite-timeout", type=int, default=1800, help="Timeout in seconds for Arm 5 full project test suite (default: 1800).")
+    ppt_v.add_argument("--build-cmd", default="", help="Optional build command run before clean/patched/reverted verification steps.")
     ppt_v.add_argument("--worker", default="worker")
     ppt_v.add_argument("--run")
     ppt_l = ptc_sub.add_parser("list")

@@ -956,24 +956,34 @@ def run_snapshot_chain_probe(
                     raise AjarError(f"Unsafe tar member path in snapshot {snapshot_id}: {member.name!r}", EXIT_GATE_BLOCKED)
                 if member.ischr() or member.isblk() or member.isfifo():
                     continue
-                if member.issym() or member.islnk():
+                if member.issym():
                     lnk = member.linkname
                     if os.path.isabs(lnk):
                         continue
                     joined = os.path.normpath(os.path.join(os.path.dirname(member.name), lnk))
                     if joined == ".." or joined.startswith("../"):
                         continue
+                elif member.islnk():
+                    lnk = member.linkname
+                    if os.path.isabs(lnk):
+                        continue
+                    joined = os.path.normpath(lnk)
+                    if joined == ".." or joined.startswith("../"):
+                        continue
                 safe_members.append(member)
-            use_filter = hasattr(tarfile, "data_filter")
+            use_filter = hasattr(tarfile, "tar_filter")
             for member in safe_members:
                 dest = slot_dir / member.name
                 if dest.exists() or dest.is_symlink():
                     if dest.is_symlink() or dest.is_file():
                         dest.unlink(missing_ok=True)
-                if use_filter:
-                    tar.extract(member, path=str(slot_dir), set_attrs=False, filter="data")
-                else:
-                    tar.extract(member, path=str(slot_dir), set_attrs=False)
+                try:
+                    if use_filter:
+                        tar.extract(member, path=str(slot_dir), set_attrs=False, filter="tar")
+                    else:
+                        tar.extract(member, path=str(slot_dir), set_attrs=False)
+                except tarfile.FilterError as exc:
+                    raise AjarError(f"Unsafe tar member in snapshot {snapshot_id}: {exc}", EXIT_GATE_BLOCKED) from exc
 
         if patch_path is not None:
             if not patch_path.is_file():

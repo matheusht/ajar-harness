@@ -459,7 +459,7 @@ def sync_pr_differential_state(
                         pp["provides_tags_json"] if "provides_tags_json" in pp_keys else "[]",
                         pp["requires_tags_json"] if "requires_tags_json" in pp_keys else "[]",
                         pp["micropatch_diff"] if "micropatch_diff" in pp_keys else "",
-                        pp["snapshot_id"] if "snapshot_id" in pp_keys else "",
+                        "",
                         pp["evidence_cmd"],
                         pp["evidence_output"],
                         now_iso,

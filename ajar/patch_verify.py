@@ -234,6 +234,28 @@ def run_8arm_patch_verification(
         _prepare_slot_worktree(mirror_dir, slot_dir)
 
         # Clean-HEAD pre-checks:
+        if eff_build_cmd:
+            clean_bld = _run_shell_in_slot(eff_build_cmd, slot_dir=slot_dir, cache_dir=cache_dir, timeout_sec=eff_suite_timeout)
+            if clean_bld["timed_out"] or int(clean_bld["exit_code"]) != 0:
+                return _persist_patch_verification(
+                    conn,
+                    finding_id=finding_id,
+                    claim_id=claim_id,
+                    patch_path=patch_path,
+                    patch_diff=str(base_repro.get("micropatch_diff") or ""),
+                    suite_cmd=suite_cmd,
+                    variant_cmds=clean_variants,
+                    caller_audit=caller_audit,
+                    sibling_audit=sibling_audit,
+                    caller_cmd=caller_cmd,
+                    sibling_cmd=sibling_cmd,
+                    baseline_suite=baseline_suite,
+                    arms=arms,
+                    passed=False,
+                    reason=f"Clean-HEAD --build-cmd failed before Arms 5-6 (exit={clean_bld['exit_code']}): {scrub_text(str(clean_bld['stderr'])[:180])}",
+                    worker_id=worker_id,
+                )
+
         # (a) Record/load clean-HEAD suite baseline (`AISLE` baseline diffing).
         baseline_suite = _load_or_run_baseline_suite(
             suite_cmd,
@@ -298,6 +320,27 @@ def run_8arm_patch_verification(
         )
         _neutralize_python_pth_escapes(slot_dir)
         _bump_files_mtime(slot_dir, touched_files, watermark_file)
+        if eff_build_cmd:
+            patched_bld = _run_shell_in_slot(eff_build_cmd, slot_dir=slot_dir, cache_dir=cache_dir, timeout_sec=eff_suite_timeout)
+            if patched_bld["timed_out"] or int(patched_bld["exit_code"]) != 0:
+                return _persist_patch_verification(
+                    conn,
+                    finding_id=finding_id,
+                    claim_id=claim_id,
+                    patch_path=patch_path,
+                    patch_diff=str(base_repro.get("micropatch_diff") or ""),
+                    suite_cmd=suite_cmd,
+                    variant_cmds=clean_variants,
+                    caller_audit=caller_audit,
+                    sibling_audit=sibling_audit,
+                    caller_cmd=caller_cmd,
+                    sibling_cmd=sibling_cmd,
+                    baseline_suite=baseline_suite,
+                    arms=arms,
+                    passed=False,
+                    reason=f"Patched --build-cmd failed before Arms 5-8 (exit={patched_bld['exit_code']}): {scrub_text(str(patched_bld['stderr'])[:180])}",
+                    worker_id=worker_id,
+                )
 
         # Arm 5: Full test suite passes (exit 0) OR introduces zero new failure markers vs clean-HEAD baseline.
         suite_res = _run_trials(
@@ -493,7 +536,32 @@ def run_8arm_patch_verification(
 
         _bump_files_mtime(slot_dir, touched_files, watermark_file)
         if eff_build_cmd:
-            _run_shell_in_slot(eff_build_cmd, slot_dir=slot_dir, cache_dir=cache_dir, timeout_sec=eff_suite_timeout)
+            rev_bld = _run_shell_in_slot(eff_build_cmd, slot_dir=slot_dir, cache_dir=cache_dir, timeout_sec=eff_suite_timeout)
+            if rev_bld["timed_out"] or int(rev_bld["exit_code"]) != 0:
+                arms["arm9_revert_poc"] = {
+                    "arm_passed": False,
+                    "build_exit_code": rev_bld["exit_code"],
+                    "build_timed_out": rev_bld["timed_out"],
+                    "stderr": scrub_text(str(rev_bld["stderr"])[:240]),
+                }
+                return _persist_patch_verification(
+                    conn,
+                    finding_id=finding_id,
+                    claim_id=claim_id,
+                    patch_path=patch_path,
+                    patch_diff=str(base_repro.get("micropatch_diff") or ""),
+                    suite_cmd=suite_cmd,
+                    variant_cmds=clean_variants,
+                    caller_audit=caller_audit,
+                    sibling_audit=sibling_audit,
+                    caller_cmd=caller_cmd,
+                    sibling_cmd=sibling_cmd,
+                    baseline_suite=baseline_suite,
+                    arms=arms,
+                    passed=False,
+                    reason=f"Arm 9 failed: --build-cmd failed after `git apply -R` (exit={rev_bld['exit_code']}).",
+                    worker_id=worker_id,
+                )
         rev_poc_res = _run_trials(
             str(finding["poc_cmd"]),
             slot_dir=slot_dir,

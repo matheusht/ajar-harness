@@ -18,10 +18,10 @@ import sqlite3
 from typing import Any, Sequence
 
 from ajar import EXIT_GATE_BLOCKED, EXIT_USER_ERROR
-from ajar.db import AjarError, infer_subsystem, log_event, new_id, utc_now_iso
-from ajar.epistemic_hooks import parse_tag_list, register_epistemic_hook
+from ajar.domain.models import AjarError
+from ajar.epistemic_hooks import detect_capability_bridges, register_epistemic_hook
 from ajar.redact import scrub_text
-from ajar.store import immediate_tx
+from ajar.store import immediate_tx, infer_subsystem, log_event, new_id, parse_tag_list, utc_now_iso
 
 VALID_IMPACT_CLASSES: tuple[str, ...] = (
     "rce",
@@ -1453,8 +1453,6 @@ def detect_percolated_multi_hop_paths(
 
 def compute_chain_frontier(conn: sqlite3.Connection) -> dict[str, Any]:
     """Compile the complete Crown-Jewel, Open-Door, Percolation, Snapshot, and Capability-Bridge frontier."""
-    from ajar.epistemic_hooks import detect_capability_bridges
-
     reconcile_door_bridge_tasks(conn)
     jewels = list_crown_jewels(conn)
     doors = [dict(r) for r in conn.execute("SELECT * FROM parked_doors ORDER BY updated_at DESC").fetchall()]

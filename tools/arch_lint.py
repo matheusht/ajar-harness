@@ -41,7 +41,7 @@ FORBIDDEN_LLM_SDKS: frozenset[str] = frozenset(
 )
 
 DOMAIN_ALLOWED_AJAR_PREFIXES: tuple[str, ...] = ("ajar", "ajar.domain")
-STORE_ALLOWED_AJAR_PREFIXES: tuple[str, ...] = ("ajar", "ajar.domain", "ajar.store")
+STORE_ALLOWED_AJAR_PREFIXES: tuple[str, ...] = ("ajar", "ajar.domain", "ajar.redact", "ajar.store")
 SERVICES_FORBIDDEN_AJAR_PREFIXES: tuple[str, ...] = (
     "ajar.cli",
     "ajar.mcp",
@@ -352,7 +352,7 @@ def check_layer_dag_boundaries(
                             lineno,
                             "LAYER_DAG_BOUNDARY",
                             f"`ajar/store/` cannot depend upward on `{mod}`.",
-                            "`ajar/store/` may only import stdlib, top-level `ajar` constants, `ajar.domain`, and `ajar.store`.",
+                            "`ajar/store/` may only import stdlib, top-level `ajar` constants, `ajar.domain`, `ajar.redact`, and `ajar.store`.",
                         )
 
             elif rel.startswith("ajar/services/") and any(
@@ -362,7 +362,7 @@ def check_layer_dag_boundaries(
                     lineno,
                     "LAYER_DAG_BOUNDARY",
                     f"`ajar/services/` cannot import transport/driver module `{mod}`.",
-                    "Transport layers (`cli.py`, `mcp.py`, `runner.py`) depend on `ajar/services/`, never the reverse.",
+                    "Transport layers (`ajar/cli/`, `mcp.py`, `runner.py`) depend on `ajar/services/`, never the reverse.",
                 )
     return violations
 
@@ -639,6 +639,88 @@ def check_multi_write_requires_immediate_tx(
     return violations
 
 
+def _module_name_for_rel(rel_posix: str) -> str:
+    parts = list(pathlib.PurePosixPath(rel_posix).with_suffix("").parts)
+    if parts and parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts)
+
+
+def check_no_circular_imports(
+    root: pathlib.Path,
+    *,
+    _cache: _RepoAstCache | None = None,
+) -> list[LintViolation]:
+    """Enforce a strict module DAG (0 circular imports, including function-scoped lazy imports) across `ajar/`."""
+    ajar_dir = root / "ajar"
+    if not ajar_dir.is_dir():
+        return []
+    cache = _cache if _cache is not None else _RepoAstCache(root)
+    parsed_files = cache.py_files_under("ajar")
+    mod_to_rel: dict[str, str] = {}
+    for parsed in parsed_files:
+        mod_to_rel[_module_name_for_rel(parsed.rel)] = parsed.rel
+
+    graph: dict[str, set[str]] = {m: set() for m in mod_to_rel}
+    for parsed in parsed_files:
+        src_mod = _module_name_for_rel(parsed.rel)
+        for _lineno, imported in _iter_imported_modules(parsed.tree, parsed.rel):
+            if imported in mod_to_rel and imported != src_mod:
+                graph[src_mod].add(imported)
+
+    # Tarjan's strongly connected components algorithm.
+    index = 0
+    stack: list[str] = []
+    on_stack: set[str] = set()
+    indices: dict[str, int] = {}
+    lowlink: dict[str, int] = {}
+    cycles: list[list[str]] = []
+
+    def _strongconnect(node: str) -> None:
+        nonlocal index
+        indices[node] = index
+        lowlink[node] = index
+        index += 1
+        stack.append(node)
+        on_stack.add(node)
+
+        for dep in sorted(graph[node]):
+            if dep not in indices:
+                _strongconnect(dep)
+                lowlink[node] = min(lowlink[node], lowlink[dep])
+            elif dep in on_stack:
+                lowlink[node] = min(lowlink[node], indices[dep])
+
+        if lowlink[node] == indices[node]:
+            scc: list[str] = []
+            while True:
+                member = stack.pop()
+                on_stack.remove(member)
+                scc.append(member)
+                if member == node:
+                    break
+            if len(scc) > 1:
+                cycles.append(sorted(scc))
+
+    for mod in sorted(graph):
+        if mod not in indices:
+            _strongconnect(mod)
+
+    violations: list[LintViolation] = []
+    for scc in sorted(cycles):
+        cycle_str = " <-> ".join(scc)
+        violations.append(
+            LintViolation(
+                rule="NO_CIRCULAR_IMPORTS",
+                path=mod_to_rel[scc[0]],
+                line=1,
+                message=f"Circular import strongly-connected component detected: {cycle_str}.",
+                fix_hint="Extract shared primitives into a lower leaf module (`ajar/domain/`, `ajar/store/`, `ajar/repro_helpers.py`) or hoist cross-module reactions into `ajar/reactions.py`.",
+            )
+        )
+    return violations
+
+
 def run_all_checks(root: pathlib.Path) -> list[LintViolation]:
     cache = _RepoAstCache(root)
     violations: list[LintViolation] = []
@@ -650,6 +732,7 @@ def run_all_checks(root: pathlib.Path) -> list[LintViolation]:
     violations.extend(check_no_unfiltered_tar_extract(root, _cache=cache))
     violations.extend(check_no_commit_noop(root, _cache=cache))
     violations.extend(check_multi_write_requires_immediate_tx(root, _cache=cache))
+    violations.extend(check_no_circular_imports(root, _cache=cache))
     return violations
 
 

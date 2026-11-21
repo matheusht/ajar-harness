@@ -24,7 +24,10 @@ from unittest import mock
 
 import ajar.chain_planner as chain_planner_mod
 import ajar.db as db_mod
+import ajar.epistemic_hooks as epistemic_hooks_mod
+import ajar.reactions as reactions_mod
 import ajar.services.workflow as workflow_mod
+import ajar.store.util as store_util_mod
 import ajar.swarm as swarm_mod
 from ajar.chain_planner import (
     VALID_DOOR_DIRECTIONS,
@@ -277,6 +280,9 @@ def _run_simulation_seed(
     with ExitStack() as stack:
         stack.enter_context(mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}))
         stack.enter_context(mock.patch.object(db_mod, "utc_now_iso", side_effect=clock.iso))
+        stack.enter_context(mock.patch.object(store_util_mod, "utc_now_iso", side_effect=clock.iso))
+        stack.enter_context(mock.patch.object(epistemic_hooks_mod, "utc_now_iso", side_effect=clock.iso))
+        stack.enter_context(mock.patch.object(reactions_mod, "utc_now_iso", side_effect=clock.iso))
         stack.enter_context(mock.patch.object(workflow_mod, "utc_now_iso", side_effect=clock.iso))
         stack.enter_context(mock.patch.object(chain_planner_mod, "utc_now_iso", side_effect=clock.iso))
         stack.enter_context(mock.patch.object(swarm_mod, "utc_now_iso", side_effect=clock.iso))
@@ -284,6 +290,9 @@ def _run_simulation_seed(
         stack.enter_context(mock.patch.object(workflow_mod.time, "time", side_effect=clock.epoch))
         if deterministic_ids:
             stack.enter_context(mock.patch.object(db_mod, "new_id", side_effect=_det_new_id))
+            stack.enter_context(mock.patch.object(store_util_mod, "new_id", side_effect=_det_new_id))
+            stack.enter_context(mock.patch.object(epistemic_hooks_mod, "new_id", side_effect=_det_new_id))
+            stack.enter_context(mock.patch.object(reactions_mod, "new_id", side_effect=_det_new_id))
             stack.enter_context(mock.patch.object(workflow_mod, "new_id", side_effect=_det_new_id))
             stack.enter_context(mock.patch.object(chain_planner_mod, "new_id", side_effect=_det_new_id))
             stack.enter_context(mock.patch.object(swarm_mod, "new_id", side_effect=_det_new_id))

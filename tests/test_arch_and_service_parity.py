@@ -190,6 +190,19 @@ class ArchLintSelfTests(unittest.TestCase):
             self.assertIn("bad_commit", bad_tx_multi[0].message)
             self.assertTrue(bad_tx_multi[0].fix_hint)
 
+            # 9. NO_CIRCULAR_IMPORTS (Tarjan SCC across ajar.*)
+            (root / "ajar" / "cyc_a.py").write_text("from ajar.cyc_b import B\nA = B\n", encoding="utf-8")
+            (root / "ajar" / "cyc_b.py").write_text(
+                "def load():\n    from ajar.cyc_a import A\n    return A\nB = 1\n",
+                encoding="utf-8",
+            )
+            v_cyc = self.lint.check_no_circular_imports(root)
+            self.assertEqual(len(v_cyc), 1)
+            self.assertEqual(v_cyc[0].rule, "NO_CIRCULAR_IMPORTS")
+            self.assertIn("ajar.cyc_a", v_cyc[0].message)
+            self.assertIn("ajar.cyc_b", v_cyc[0].message)
+            self.assertTrue(v_cyc[0].fix_hint)
+
 
 class CliMcpDifferentialParityTests(unittest.TestCase):
     def test_cli_and_mcp_produce_identical_workflow_state_and_errors(self) -> None:

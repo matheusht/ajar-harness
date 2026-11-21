@@ -185,7 +185,7 @@ def init_run_workspace(
 ) -> dict[str, Any]:
     """Initialize a new Ajar run in `--envelope` (default) or `--in-place` mode."""
     from ajar.repomap import count_diff_loc
-    from ajar.repro_compose import ensure_helpers_runtime
+    from ajar.repro_helpers import ensure_helpers_runtime
 
     if target_mode not in ("source", "binary", "live"):
         raise AjarError(f"Unsupported --mode {target_mode!r}.", EXIT_USER_ERROR)

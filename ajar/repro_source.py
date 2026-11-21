@@ -29,6 +29,8 @@ import time
 from typing import Any, Mapping
 
 from ajar.redact import scrub_text, scrubbed_subprocess_env
+from ajar.repro_helpers import ensure_helpers_runtime
+from ajar.store import new_id, utc_now_iso
 
 _UNSHARE_AVAILABLE: bool | None = None
 
@@ -378,8 +380,6 @@ def _run_shell_in_slot(
     helpers_dir: pathlib.Path | None = None,
     extra_env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
-    from ajar.repro_compose import ensure_helpers_runtime
-
     eff_helpers = helpers_dir or ensure_helpers_runtime(slot_dir.parent.parent)
     ports = _allocate_ephemeral_ports(4)
     arm_token = secrets.token_hex(12)
@@ -772,8 +772,6 @@ def capture_slot_post_state_snapshot(
     source_cmd: str = "",
 ) -> dict[str, Any]:
     """Archive a relative directory/file produced by Arm 1 inside `slot-<k>` into `repro/snapshots/<snp_id>.tar.gz`."""
-    from ajar.db import new_id, utc_now_iso
-
     raw_rel = (rel_dir or ".").strip() or "."
     norm_rel = pathlib.PurePosixPath(raw_rel)
     if norm_rel.is_absolute() or ".." in norm_rel.parts:
@@ -1004,8 +1002,6 @@ def run_source_reproduction(
             "ub_divergence_class": "",
             "cross_killed_claim_ids": [],
         }
-
-    from ajar.repro_compose import ensure_helpers_runtime
 
     helpers_dir = ensure_helpers_runtime(run_dir)
     mirror_dir = init_source_mirror(run_dir, target_dir)
@@ -1398,8 +1394,6 @@ def run_repro_try(
     timeout_sec: int = 60,
 ) -> dict[str, Any]:
     """Execute a strike-free exploratory build/PoC smoke test inside scratch `slot-inst`."""
-    from ajar.repro_compose import ensure_helpers_runtime
-
     helpers_dir = ensure_helpers_runtime(run_dir)
     mirror_dir = init_source_mirror(run_dir, target_dir)
     repro_dir = run_dir / "repro"

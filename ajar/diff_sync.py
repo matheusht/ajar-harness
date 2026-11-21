@@ -36,7 +36,7 @@ from ajar.db import (
 from ajar.epistemic_hooks import register_epistemic_hook, scan_source_for_epistemic_signals
 from ajar.redact import scrub_text, scrubbed_subprocess_env
 from ajar.repomap import SOURCE_EXTENSIONS
-from ajar.repro_compose import ensure_helpers_runtime
+from ajar.repro_helpers import ensure_helpers_runtime
 from ajar.repro_source import (
     _acquire_slot,
     _evaluate_defect_fired,

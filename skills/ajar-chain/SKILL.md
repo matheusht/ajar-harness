@@ -9,25 +9,31 @@ Use this skill when closeout gate `G5` enqueues a Stage-5 `Converge` (`chain`) t
 
 ## 1. Load All Composable Signals
 
-Inspect every recorded capability, guarded sink, anomaly, binding, and capped claim across subsystems:
+Inspect the live chain frontier (woken `ready` Open Doors, $2..10$-hop percolated paths, 1-link `unicorn_gaps`, post-state snapshots, and capability bridges) alongside recorded capabilities, trust gadgets, and stepping-stone findings:
 
 ```bash
+ajar chain frontier
+ajar door list
 ajar primitive list
 ajar anomaly list
 ajar claim list
-ajar binding list
 ajar precedent search "<stage1_kind> <stage2_kind>"
 ```
 
 Consult `skills/references/project-zero-zdi-chain-corpus.md` and `skills/references/defi-exploit-chain-corpus.md` for verified multi-stage handoff patterns.
 
-## 2. Invariant-Pair Guard Breaking
+## 2. Multi-Hop Middle-Unicorn Percolation & Open-Door Synthesis
 
-Match `primitives.postconditions` against every guarded sink (`primitives.guarded_by_locus` / `guard_assumption`) and `conditional_blocked` task predicate:
-
-1. List every guarded primitive where standalone exploitation was blocked by an upstream invariant `I`.
-2. Search all other `primitives`, `anomalies`, and `low`/`medium` findings across sibling routes, background workers, callbacks, or batch endpoints whose `postconditions` falsify or bypass `I`.
-3. Run `ajar pulse` after recording new primitives so `conditional_blocked` tasks whose predicates are satisfied reopen automatically with boosted salience.
+1. **Middle-Unicorn Percolation (`percolated_paths` & `unicorn_gaps`):** A Low/Medium quirk (`role=capability`) plus normal trust-laundering code (`role=trust_gadget`) may sit disconnected from a Crown-Jewel sink until an intermediate link bridges the gap. Check `ajar chain frontier`:
+   - If `percolated_paths` is non-empty, prioritize proving the full $N$-hop sequence immediately (`salience = 98`).
+   - If `unicorn_gaps` shows a 1-link gap (`forward_prefix -> [unmet_requires] -> backward_suffix`), either park an explicit `middle_bridge` Open Door (`ajar door park --direction middle_bridge ...`) or dispatch bounded hunters (`ajar swarm packet --stage bridge`).
+2. **Post-State Snapshot Probing (`ajar chain probe --from-snapshot`):** When Stage 1 captured a filesystem snapshot (`snp-*` via `ajar claim reproduce --save-post-state`), test downstream Stage-2 consumers directly against that hydrated state inside `slot-inst` before writing the combined end-to-end command:
+   ```bash
+   ajar chain probe \
+     --from-snapshot <snp_id> \
+     --cmd "<stage-2 consumer command operating on hydrated Stage-1 post-state>" \
+     [--oracle-json '{"expect_regex":"UNAUTHORIZED_SINK"}']
+   ```
 
 ## 3. Check All 6 Chain Angle-Shapes
 
@@ -44,34 +50,29 @@ Evaluate composition across six concrete structural patterns:
 
 Before proposing or closing out chains, apply three critiques:
 
-1. **Attack Your Own Caps First:** Inspect every `low`/`medium` finding and `blocked` claim. Ask: *"Which recorded primitive or sibling route removes the precondition that capped this bug's severity?"*
-2. **Marginal-Contribution Critique:** Every step listed in `--steps` must be causally required. Remove any step whose deletion still allows `--poc-cmd` to cross the final trust boundary; never pad a standalone bug into a synthetic multi-step chain.
-3. **Sibling Cross-Kill Deduplication:** When multiple candidate chains or claims pivot through the exact same broken chokepoint, group them under one root cause or verify duplicate cross-kill rather than inflating finding counts.
+1. **Attack Your Own Stepping Stones First:** Inspect every `low`/`medium` finding, `stepping_stone` `high` finding, and `ready` Open Door. Ask: *"Which recorded capability, trust gadget, or sibling route turns this multi-step capability into a single-entrypoint Crown Jewel?"*
+2. **Marginal-Contribution & Anti-Gadget-Only Critique:** Every step listed in `--steps` must be causally required, and at least one step must be a real invariant-breaking defect (`fnd-*`, `clm-*`, `anom-*`, or `role=capability` `prim-*`; gadget-only chains are rejected). Remove any step whose ablation still allows `--poc-cmd` to cross the final boundary.
+3. **Sibling Cross-Kill Deduplication:** Group sibling paths sharing one broken chokepoint under one root cause rather than inflating counts.
 
-## 5. Promote Composable `StageContext` Helpers and Prove $N$-Step Causal Ablation
+## 5. Zero-Boilerplate Multi-Artifact `ajar chain propose` & $N$-Step Causal Ablation
 
-1. For reusable stage capabilities, promote a dual-mode Python helper (`ctx.is_ablated("<prim_id>")` returning benign state during control/ablation) into read-only `repro/helpers/ajar_helpers/` outside `slot-<k>`:
-   ```bash
-   ajar primitive promote-helper <primitive_id> \
-     --file <path/to/stage_helper.py> \
-     --callable <fn_name> \
-     --provides-tags "<ns:tag>"
-   ```
-2. Propose and verify the end-to-end chain inside `repro/slot-<k>`. `ajar chain propose` automatically runs (a) full exploit chain, (b) benign control, and (c) per-step marginal ablation (`AJAR_ABLATE_STEPS=<step_id>` or `--step-micropatch <step_id>:<diff>`), rejecting any padded step whose removal still triggers the oracle:
+1. **Direct Step Composition (Zero Mandatory Python Boilerplate):** `--steps` accepts `fnd-*`, `clm-*`, `prim-*`, and `anom-*` IDs directly in causal order and **auto-inherits** `findings.micropatch_diff` and `primitives.micropatch_diff` for per-step ablation (use `--step-micropatch <id>:<diff>` only when overriding or ablating a step without a stored patch, or `ajar primitive promote-helper` when stateful Python `StageContext` builders are helpful):
    ```bash
    ajar chain propose \
      --title "<Stage 1 -> Stage 2 -> Terminal Impact>" \
-     --steps "<primitive_id_1>,<primitive_id_2>" \
-     --poc-cmd "<end-to-end multi-stage command using ajar_helpers or target binary>" \
-     --control-cmd "<benign workflow command that does not cross boundary>" \
-     [--step-micropatch "<primitive_id_1>:<step1.diff>"] \
+     --steps "<fnd_or_prim_1>,<prim_or_gadget_2>[,<step_3>...]" \
+     [--door <door_id>] \
+     [--jewel <jewel_id>] \
+     [--declared-steps <N>] \
+     --poc-cmd "<end-to-end command invoking real target binary>" \
+     --control-cmd "<benign workflow command (runs with AJAR_ABLATE_STEPS='')>" \
+     [--step-micropatch "<step_id>:<ablation.diff>"] \
      [--oracle-json '{"expect_regex":"UNAUTHORIZED_STATE"}'] \
      --severity critical
    ```
-
-3. **Stage-Split Swarm Dispatch & Runtime Execution Integrity:**
-   - Keep multi-step discovery/invariant mapping separate from Stage-5 execution: dispatch a dedicated Stage-5 worker with `ajar swarm packet --stage chain` (`--wire-profile direct` by default; `ajar swarm fallback <dispatch_id>` if filter-blocked).
-   - `--poc-cmd` and `--control-cmd` must execute the compiled target binary or dual-mode `StageContext` helpers against real runtime state. `ajar chain propose` rejects `<conceptual_placeholder>` inputs and external scripts that read or `grep` patched source files instead of running the target.
+2. **Portfolio Swarm Dispatch & Runtime Execution Integrity:**
+   - Dispatch parallel hunters and chain verifiers via `ajar swarm packet --stage portfolio` (or `--stage chain` / `--stage bridge`), preserving greenfield exploration alongside active bridge hunts.
+   - `--poc-cmd` and `--control-cmd` must execute the real target binary without caller-supplied execution self-overrides (`-c core.sshCommand=`, `--upload-pack=`, `GIT_SSH_COMMAND=`, `LD_PRELOAD=`) or static source-inspection cheats.
 
 Elevate chain severity above its individual links only when the end-to-end PoC passes per-step causal ablation and achieves an unauthorized `C`/`I`/`A` impact that no single step reaches alone.
 

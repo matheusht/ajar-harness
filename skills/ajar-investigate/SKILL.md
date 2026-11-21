@@ -42,33 +42,49 @@ Discovery is **keep-biased**: capture real behavioral signals first and let `aja
      --repro-cmd "<command that triggers observation>" \
      --surface <surface_id>
    ```
-3. Record bounded capabilities as a `primitive` with typed `--provides-tags` and `--requires-tags` (`ns:name`) so `ajar` matches cross-subsystem bridges automatically:
+3. Record bounded capabilities (`--role capability`) AND non-buggy **Trust-Laundering Gadgets** (`--role trust_gadget` — normal code that trusts an upstream invariant such as path containment or pre-validated config) with typed `--provides-tags` and `--requires-tags` (`ns:name`) so multi-hop percolation and Open Doors snap together automatically:
    ```bash
    ajar primitive add \
      --surface <surface_id> \
      --locus "<file:line>" \
-     --kind "<capability_type>" \
+     --kind "<capability_or_gadget_type>" \
+     --role <capability|trust_gadget> \
+     [--trusted-invariant "<invariant assumed by trust_gadget>"] \
+     [--symbols "<fn_or_state_carrier>"] \
      --preconditions "<required caller state and inputs>" \
      --postconditions "<state or capability gained>" \
      --provides-tags "<ns:capability_provided>" \
      --requires-tags "<ns:precondition_needed>" \
      --guarded-by "<optional upstream guard file:line>" \
      --guard-assumption "<optional invariant assumed by upstream guard>" \
+     [--micropatch <optional_ablation.diff>] \
      --evidence-cmd "<verification command>"
    ```
-4. Update explicit campaign threat-model assumptions when code inspection proves or breaks them (assumptions with `--invalidated-by-tags` or `--check-locus` also auto-violate when matching primitives or findings land):
+4. Update explicit campaign threat-model assumptions when code inspection proves or breaks them:
    ```bash
    ajar threat-model verify <assumption_id> --locus "<file:line>" --notes "<verified boundary guard>"
    ajar threat-model invalidate <assumption_id> --evidence "<prim_id|finding_id|file:line>" --notes "<how boundary breaks>"
    ```
 
-## 3. Anti-Premature-`dry` Rule for Guarded Sinks
+## 3. Suspended Open Doors (`ajar door park`) & Anti-Premature-`dry` Rule
 
-Never mark a task `dry` the moment you spot an upstream check if an inner sink or primitive remains dangerous when that check's assumption breaks:
+Push maximum depth on every promising lead. When a deep sink or partial chain hits a concrete missing link, **park** it as a reactive **Open Door** instead of abandoning the idea or spinning indefinitely on one surface:
 
-1. Register the inner capability with `ajar primitive add --guarded-by "<guard_file:line>" --guard-assumption "<assumption>"`. `H1_GUARD_SYMMETRY` automatically enqueues an inside-out audit of `<guard_file:line>`.
-2. Either complete the guard-break audit on `<guard_file:line>` (proving it sound via `dry` or breaking it via `chain`), or park the current task with `ajar task block`.
-3. `ajar task dry` deterministically rejects closing a task when an unchained guarded primitive on the same surface/subsystem still awaits completed guard verification.
+1. Suspend the blocked sink or partial prefix/suffix with `ajar door park`. Ajar spawns `<= 2` bounded `bridge` hunter tasks while preserving parallel greenfield exploration, and automatically wakes the door (`status = 'ready'`, `salience >= 96`) via tags, code symbols/call edges, or FTS5 the moment any worker discovers a matching piece:
+   ```bash
+   ajar door park \
+     --direction <sink_to_source|source_to_sink|middle_bridge> \
+     [--jewel <jewel_id>] \
+     [--held-ids "<prim_or_fnd_id>"] \
+     [--snapshot <snp_id>] \
+     --anchor-locus "<sink_or_tip_file:line>" \
+     [--blocker-locus "<guard_file:line>"] \
+     --missing "<exact upstream capability, state carrier, or guard bypass needed>" \
+     [--wanted-tags "<ns:tag1,ns:tag2>"] \
+     [--wanted-symbols "<symbol_or_filename>"]
+   ```
+2. If inside-out verification proves a guarded primitive's upstream check cannot be bypassed on any reachable caller, close the primitive cleanly via `ajar primitive dry <prim_id> --locus "<guard_file:line>" --reason "<verified invariant>"`.
+3. `ajar task dry` deterministically rejects closing a task when an active (`status != 'dry'`) unchained guarded primitive on the same surface/subsystem still awaits completed guard verification.
 
 ## 4. Propose Falsifiable Claims
 

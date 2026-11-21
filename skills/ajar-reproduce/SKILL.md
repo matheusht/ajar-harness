@@ -39,20 +39,31 @@ Interrogate every PoC, control, and micro-patch against all 12 lenses before inv
 
 ### Source Targets (`--mode source`)
 
-When `H6_RELEASE_UB_DIFF` fires on compiled C/C++/Rust/Zig UB or integer-overflow claims, supply `--release-cmd` (`-O2` / `--release` without debug assertions or `-ftrapv`) so Arms `5A`/`5B` classify `consistent | silent_wrap_escalated | debug_assert_only | trap_dos_only` (`debug_assert_only` is blocked on `critical`/`high` until rescoped):
-
-```bash
-ajar claim reproduce <claim_id> \
-  --worker <worker_id> \
-  --mode source \
-  --poc-cmd "<command proving exploit impact>" \
-  --control-cmd "<command exercising benign caller path>" \
-  --micropatch <path/to/micropatch.diff> \
-  [--release-cmd "<release-profile PoC command>"] \
-  [--release-control-cmd "<release-profile benign control command>"] \
-  [--shared-guard-locus "<file:line>"] \
-  --determinism deterministic
-```
+1. **Strike-Free Smoke Probe (`ajar repro try`):** Before running full 4-arm reproduction, validate compiler flags, fixtures (`$AJAR_ARTIFACTS_DIR`), and candidate patches inside scratch `slot-inst` with zero `failed_repro_count` impact (`build_or_env_error` and `preflight_error` never burn strikes on `ajar claim reproduce` either):
+   ```bash
+   ajar repro try \
+     [--build-cmd "<incremental build command>"] \
+     --cmd "<exploratory PoC command>" \
+     [--patch <path/to/candidate.diff>]
+   ```
+2. **4-Arm Reproduction + Post-State Snapshot (`--save-post-state`):** Supply `--build-cmd` when compiling untracked target binaries across clean/patched resets, `--save-post-state <rel_dir>` to archive Arm-1 post-state (`snp-*` `.tar.gz`) for downstream `ajar door park` / `ajar chain probe`, and `--release-cmd` when `H6_RELEASE_UB_DIFF` fires. Never pass caller-supplied self-execution flags (`-c core.sshCommand=`, `--upload-pack=`, `GIT_SSH_COMMAND=`, `LD_PRELOAD=` — rejected by `evaluate_precondition_realism`):
+   ```bash
+   ajar claim reproduce <claim_id> \
+     --worker <worker_id> \
+     --mode source \
+     [--build-cmd "<incremental build command>"] \
+     --poc-cmd "<command proving exploit impact>" \
+     --control-cmd "<command exercising benign caller path>" \
+     --micropatch <path/to/micropatch.diff> \
+     [--save-post-state "<rel_dir_written_by_arm1>"] \
+     [--provides-tags "<ns:capability_unlocked>"] \
+     [--declared-steps <N>] \
+     [--release-cmd "<release-profile PoC command>"] \
+     [--release-control-cmd "<release-profile benign control command>"] \
+     [--shared-guard-locus "<file:line>"] \
+     --determinism deterministic
+   ```
+3. **Single-Command Realism Calibration (`ajar finding calibrate`):** If post-confirm review finds that a reproduced finding requires multi-step caller interaction or carries a lower standalone ceiling (`stepping_stone`), calibrate it in one atomic command (`ajar finding calibrate <finding_id> --severity <sev> --declared-steps <N> --reason "..."`).
 
 ### Stripped or Closed-Source Binaries (`--mode binary`)
 

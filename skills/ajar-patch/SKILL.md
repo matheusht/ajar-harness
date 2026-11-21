@@ -5,14 +5,18 @@ description: Upgrade a verified 4-arm micro-patch into a maintainer-grade produc
 
 # Ajar Patch (`Fixes` 9-Arm Gate)
 
-Use this skill during `Fixes` workflows to upgrade a minimal `1–5` line `micropatch` from `ajar claim reproduce` (`remediation_state = 'micropatched'`) into a maintainer-ready production patch (`remediation_state = 'maintainer_patched'`).
+Use this skill during `Fixes` workflows (`campaign_phase = 'remediate'`) to upgrade a minimal `1–5` line `micropatch` from `ajar claim reproduce` (`remediation_state = 'micropatched'`) into a locally verified production patch (`remediation_state = 'verified_local'`).
 
-## 1. Two-Stage Verification Split
+## 1. Hunt vs. Remediate Phase Split (`ajar phase`)
 
-Ajar separates vulnerability proof from production remediation:
+Ajar strictly separates active vulnerability/chain hunting from heavy 9-arm test-suite remediation so runs never burn discovery hours recompiling full suites prematurely:
 
-- **Stage A (`ajar claim reproduce` — 4+ Arms):** Proves causal root cause fast with a minimal `1–5` line micro-patch overlapping `claim.locus`.
-- **Stage B (`ajar patch verify` — 9 Arms):** Verifies that a production fix preserves codebase idioms, introduces zero test regressions relative to clean `HEAD`, blocks real bypass variants (`>= 1` proven to fire on clean `HEAD`), handles caller error returns safely, closes sibling routes, and re-fails when reverted (`git apply -R`).
+- **Default `hunt` Phase:** `ajar patch verify` is blocked (`EXIT_GATE_BLOCKED`) and `ajar task lease` skips `patch` tasks while discovery, Open-Door bridge hunts, and Stage-5 chain synthesis remain underway.
+- **Advancing to `remediate`:** Advance only when explicitly running a `Fixes` workflow or after discovery and chain synthesis have finished:
+  ```bash
+  ajar phase status
+  ajar phase advance --to remediate
+  ```
 
 ## 2. Inspect Callers, Sibling Routes, and Fix Precedents
 
@@ -36,13 +40,14 @@ Ajar separates vulnerability proof from production remediation:
 
 ## 4. Run the Hardened 9-Arm Production Remediation Gate
 
-Execute `ajar patch verify` to promote the finding to `maintainer_patched`:
+Execute `ajar patch verify` (preserving compiled `.o`/`.a` objects across resets with a default `1800s` `--suite-timeout`) to promote the finding to `verified_local`:
 
 ```bash
 ajar patch verify <finding_id> \
   --worker <worker_id> \
   --patch <path/to/production_fix.diff> \
-  --suite-cmd "<full project test suite command>" \
+  --suite-cmd "<project or subsystem regression suite command>" \
+  [--suite-timeout 1800] \
   --variant-cmd "<bypass variant 1: alternate encoding or normalization>" \
   --variant-cmd "<bypass variant 2: boundary value or nested/batch payload>" \
   --variant-cmd "<bypass variant 3: sibling route or second-order path>" \
@@ -55,7 +60,7 @@ ajar patch verify <finding_id> \
 | Arm | Verification Check |
 | --- | --- |
 | **Arms 1–4** | Clean PoC fires, clean control passes, production patch blocks PoC, production patch passes control at `finding.locus` |
-| **Arm 5** | Full test suite (`--suite-cmd`) introduces zero new failures vs cached clean-`HEAD` `repro/baseline_suite.json` |
+| **Arm 5** | Regression suite (`--suite-cmd`) introduces zero new failures vs cached clean-`HEAD` `repro/baseline_suite.json` |
 | **Arm 6** | `>= 3` distinct `--variant-cmd` tests all pass on patched worktree AND `>= 1` triggers the defect oracle on clean `HEAD` |
 | **Arm 7** | Caller NULL/error-return audit (`--caller-audit`) + optional `--caller-cmd` exits `0` |
 | **Arm 8** | Sibling-route symmetry audit (`--sibling-audit`) + optional `--sibling-cmd` exits `0` |
@@ -64,5 +69,5 @@ ajar patch verify <finding_id> \
 Close the `patch` task once `ajar patch verify` exits `0`:
 
 ```bash
-ajar task done <task_id> --worker <worker_id> --summary "<finding_id promoted to maintainer_patched across 9 arms>"
+ajar task done <task_id> --worker <worker_id> --summary "<finding_id promoted to verified_local across 9 arms>"
 ```

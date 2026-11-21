@@ -2072,9 +2072,9 @@ def render_task_context(
     direction = str(task["direction"] if "direction" in task.keys() and task["direction"] else "outside_in")
     # Global steers only in the invariant prefix so cross-subsystem tasks share identical top bytes;
     # path/subsystem steers appear in Task Delta if present.
-    all_active_steers = list_steers(conn, active_only=True, subsystem=sub, locus=str(task["locus"] or ""))[:5]
-    global_steers = [s for s in all_active_steers if s["scope"] == "global"]
-    scoped_steers = [s for s in all_active_steers if s["scope"] != "global"]
+    all_active_steers = list_steers(conn, active_only=True, subsystem=sub, locus=str(task["locus"] or ""))
+    global_steers = [s for s in all_active_steers if s["scope"] == "global"][:5]
+    scoped_steers = [s for s in all_active_steers if s["scope"] != "global"][:5]
 
     anomalies = conn.execute(
         """

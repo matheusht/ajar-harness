@@ -921,9 +921,14 @@ def run_snapshot_chain_probe(
     if not cmd.strip():
         raise AjarError("`ajar chain probe` requires a non-empty --cmd.", EXIT_USER_ERROR)
 
-    arch_path = pathlib.Path(str(srow["archive_path"]))
+    raw_arch = pathlib.Path(str(srow["archive_path"]))
+    arch_path = raw_arch if raw_arch.is_absolute() else (run_dir / raw_arch)
     if not arch_path.is_file():
-        raise AjarError(f"Snapshot archive missing on disk: {arch_path}", EXIT_USER_ERROR)
+        fallback_arch = run_dir / "repro" / "snapshots" / raw_arch.name
+        if fallback_arch.is_file():
+            arch_path = fallback_arch
+        else:
+            raise AjarError(f"Snapshot archive missing on disk: {arch_path}", EXIT_USER_ERROR)
     actual_sha = hashlib.sha256(arch_path.read_bytes()).hexdigest()
     if actual_sha != str(srow["sha256"]):
         raise AjarError(f"Snapshot SHA-256 integrity mismatch for {snapshot_id}.", EXIT_GATE_BLOCKED)
@@ -959,12 +964,16 @@ def run_snapshot_chain_probe(
                     if joined == ".." or joined.startswith("../"):
                         continue
                 safe_members.append(member)
+            use_filter = hasattr(tarfile, "data_filter")
             for member in safe_members:
                 dest = slot_dir / member.name
                 if dest.exists() or dest.is_symlink():
                     if dest.is_symlink() or dest.is_file():
                         dest.unlink(missing_ok=True)
-                tar.extract(member, path=str(slot_dir), set_attrs=False)
+                if use_filter:
+                    tar.extract(member, path=str(slot_dir), set_attrs=False, filter="data")
+                else:
+                    tar.extract(member, path=str(slot_dir), set_attrs=False)
 
         if patch_path is not None:
             if not patch_path.is_file():

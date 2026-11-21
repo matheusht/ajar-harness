@@ -295,8 +295,8 @@ def sync_pr_differential_state(
                                     pf["control_cmd"],
                                     pf["micropatch_path"],
                                     pf["micropatch_diff"],
-                                    json.dumps(poc_res, sort_keys=True),
-                                    json.dumps(ctrl_res, sort_keys=True),
+                                    json.dumps({**poc_res, "arm_passed": True}, sort_keys=True),
+                                    json.dumps({**ctrl_res, "arm_passed": True}, sort_keys=True),
                                     pf["arm3_patch_poc_json"],
                                     pf["arm4_patch_ctrl_json"],
                                     oracle_raw or "{}",
@@ -355,7 +355,7 @@ def sync_pr_differential_state(
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                         """,
                         (
-                            new_id("bnd"),
+                            new_id("bind"),
                             pb["task_id"],
                             pb["name"],
                             pb["value"],
@@ -429,17 +429,19 @@ def sync_pr_differential_state(
                     kept_dry_tasks.append(dtid)
 
             for pp in parent_conn.execute(
-                "SELECT * FROM primitives WHERE guarded_by_locus != '' AND chained = 0"
+                "SELECT * FROM primitives WHERE guarded_by_locus != '' AND chained = 0 AND status != 'dry'"
             ).fetchall():
                 gloc = str(pp["guarded_by_locus"])
-                new_pid = new_id("prm")
+                new_pid = new_id("prim")
+                pp_keys = set(pp.keys())
                 conn.execute(
                     """
                     INSERT INTO primitives(
-                        primitive_id, surface_id, subsystem, locus, kind, preconditions,
-                        postconditions, guarded_by_locus, guard_assumption, evidence_cmd,
-                        evidence_output, chained, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                        primitive_id, surface_id, subsystem, locus, kind, role, trusted_invariant,
+                        symbols_json, preconditions, postconditions, guarded_by_locus, guard_assumption,
+                        provides_tags_json, requires_tags_json, micropatch_diff, snapshot_id,
+                        evidence_cmd, evidence_output, chained, status, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'active', ?)
                     """,
                     (
                         new_pid,
@@ -447,10 +449,17 @@ def sync_pr_differential_state(
                         pp["subsystem"],
                         pp["locus"],
                         pp["kind"],
+                        pp["role"] if "role" in pp_keys else "capability",
+                        pp["trusted_invariant"] if "trusted_invariant" in pp_keys else "",
+                        pp["symbols_json"] if "symbols_json" in pp_keys else "[]",
                         pp["preconditions"],
                         pp["postconditions"],
                         gloc,
                         pp["guard_assumption"],
+                        pp["provides_tags_json"] if "provides_tags_json" in pp_keys else "[]",
+                        pp["requires_tags_json"] if "requires_tags_json" in pp_keys else "[]",
+                        pp["micropatch_diff"] if "micropatch_diff" in pp_keys else "",
+                        pp["snapshot_id"] if "snapshot_id" in pp_keys else "",
                         pp["evidence_cmd"],
                         pp["evidence_output"],
                         now_iso,

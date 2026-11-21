@@ -35,6 +35,7 @@ from ajar.repro_source import (
     _clean_slot_preserving_objects,
     _neutralize_python_pth_escapes,
     _prepare_slot_worktree,
+    _run_shell_in_slot,
     _run_trials,
     init_source_mirror,
     resolve_local_build_cache_dir,
@@ -116,6 +117,7 @@ def run_8arm_patch_verification(
     max_changed_lines: int = 120,
     timeout_sec: int = 90,
     suite_timeout_sec: int = 1800,
+    build_cmd: str = "",
     worker_id: str = "worker",
 ) -> dict[str, Any]:
     """Execute all 9 hardened verification arms before promoting a fix to `verified_local`."""
@@ -167,6 +169,9 @@ def run_8arm_patch_verification(
         except json.JSONDecodeError:
             eff_oracle = None
 
+    eff_build_cmd = build_cmd.strip() or (
+        str(finding["build_cmd"] or "").strip() if "build_cmd" in finding.keys() else ""
+    )
     claim_id = str(finding["claim_id"])
     base_repro = run_source_reproduction(
         run_dir=run_dir,
@@ -180,6 +185,7 @@ def run_8arm_patch_verification(
         claim_locus=str(finding["locus"]),
         shared_guard_locus=shared_guard_locus,
         max_changed_lines=max_changed_lines,
+        build_cmd=eff_build_cmd,
     )
 
     arms: dict[str, Any] = {
@@ -486,6 +492,8 @@ def run_8arm_patch_verification(
             )
 
         _bump_files_mtime(slot_dir, touched_files, watermark_file)
+        if eff_build_cmd:
+            _run_shell_in_slot(eff_build_cmd, slot_dir=slot_dir, cache_dir=cache_dir, timeout_sec=eff_suite_timeout)
         rev_poc_res = _run_trials(
             str(finding["poc_cmd"]),
             slot_dir=slot_dir,

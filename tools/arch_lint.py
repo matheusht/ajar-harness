@@ -352,7 +352,7 @@ def check_layer_dag_boundaries(
                             lineno,
                             "LAYER_DAG_BOUNDARY",
                             f"`ajar/store/` cannot depend upward on `{mod}`.",
-                            "`ajar/store/` may only import stdlib, top-level `ajar` constants, `ajar.domain`, and `ajar.store`.",
+                            "`ajar/store/` may only import stdlib, top-level `ajar` constants, `ajar.domain`, `ajar.redact`, and `ajar.store`.",
                         )
 
             elif rel.startswith("ajar/services/") and any(
@@ -362,7 +362,7 @@ def check_layer_dag_boundaries(
                     lineno,
                     "LAYER_DAG_BOUNDARY",
                     f"`ajar/services/` cannot import transport/driver module `{mod}`.",
-                    "Transport layers (`cli.py`, `mcp.py`, `runner.py`) depend on `ajar/services/`, never the reverse.",
+                    "Transport layers (`ajar/cli/`, `mcp.py`, `runner.py`) depend on `ajar/services/`, never the reverse.",
                 )
     return violations
 

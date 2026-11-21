@@ -246,15 +246,22 @@ def check_all_gates(
     *,
     target_dir: pathlib.Path | None = None,
     auto_enqueue_chain: bool = True,
+    reconcile: bool | None = None,
 ) -> dict[str, Any]:
-    """Evaluate gates `G1` through `G5` and return structured pass/blocker details."""
+    """Evaluate gates `G1` through `G5` and return structured pass/blocker details.
+
+    When `auto_enqueue_chain=False` and `reconcile` is not explicitly `True`, this function
+    is strictly read-only and performs zero database mutations.
+    """
     from ajar.chain_planner import reconcile_door_bridge_tasks
 
     run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
     if run is None:
         return {"passed": False, "gates": {}, "blockers": ["Run metadata missing in run.db."]}
 
-    reconcile_door_bridge_tasks(conn)
+    do_reconcile = auto_enqueue_chain if reconcile is None else reconcile
+    if do_reconcile:
+        reconcile_door_bridge_tasks(conn)
 
     stopping = str(run["stopping_criterion"] or "exhaustive-high")
     target_mode = str(run["target_mode"] or "source")

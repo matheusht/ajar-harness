@@ -26,7 +26,10 @@ from datetime import datetime, timezone
 from typing import Any, Sequence
 
 from ajar import EXIT_GATE_BLOCKED, EXIT_USER_ERROR
+from ajar.domain.models import AjarError
+from ajar.domain.transitions import assert_valid_primitive_transition
 from ajar.redact import scrub_text
+from ajar.store.tx import CURRENT_SCHEMA_VERSION, immediate_tx
 
 PRIORITY_BASE_SALIENCE: dict[str, int] = {
     "critical": 80,
@@ -570,15 +573,6 @@ CREATE INDEX IF NOT EXISTS idx_cov_rel_path ON coverage_spans(rel_path, start_li
 CREATE INDEX IF NOT EXISTS idx_tm_assumptions_status ON threat_assumptions(status, subsystem);
 CREATE INDEX IF NOT EXISTS idx_swarm_dispatches_stage ON swarm_dispatches(stage, status, created_at DESC);
 """
-
-
-class AjarError(Exception):
-    """Structured error carrying an explicit CLI exit code."""
-
-    def __init__(self, message: str, exit_code: int = EXIT_USER_ERROR, details: dict[str, Any] | None = None):
-        super().__init__(message)
-        self.exit_code = exit_code
-        self.details = details or {}
 
 
 def utc_now_iso() -> str:
@@ -1320,19 +1314,28 @@ def open_run_db(
     if not create and not db_path.is_file():
         raise AjarError(f"Run database does not exist: {db_path}", EXIT_USER_ERROR)
 
+    existed_nonempty = db_path.is_file() and db_path.stat().st_size > 0
     conn = sqlite3.connect(str(db_path), timeout=30.0, isolation_level=None)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.execute("PRAGMA busy_timeout=30000;")
-    if create:
+    if create and not existed_nonempty:
+        conn.execute("PRAGMA journal_mode=WAL;")
         conn.executescript(SCHEMA_SQL)
+        conn.execute(f"PRAGMA user_version={CURRENT_SCHEMA_VERSION};")
     else:
-        _ensure_v31_schema(conn)
-        _ensure_v32_schema(conn)
-        _ensure_v322_schema(conn)
-        _ensure_v33_schema(conn)
+        ver_row = conn.execute("PRAGMA user_version;").fetchone()
+        schema_ver = int(ver_row[0]) if ver_row is not None else 0
+        if schema_ver < CURRENT_SCHEMA_VERSION:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            if create:
+                conn.executescript(SCHEMA_SQL)
+            _ensure_v31_schema(conn)
+            _ensure_v32_schema(conn)
+            _ensure_v322_schema(conn)
+            _ensure_v33_schema(conn)
+            conn.execute(f"PRAGMA user_version={CURRENT_SCHEMA_VERSION};")
     return conn
 
 
@@ -1544,7 +1547,7 @@ def lease_next_task(
 
         row: sqlite3.Row | None = None
         if kind:
-            if verify_only and kind in ("map", "investigate", "bridge"):
+            if (verify_only and kind in ("map", "investigate", "bridge")) or (in_hunt_phase and kind == "patch"):
                 conn.commit()
                 return None
             row = conn.execute(
@@ -2333,11 +2336,8 @@ def mark_primitive_dry(
     prow = conn.execute("SELECT * FROM primitives WHERE primitive_id = ?", (primitive_id,)).fetchone()
     if prow is None:
         raise AjarError(f"Unknown primitive_id: {primitive_id}", EXIT_USER_ERROR)
-    if int(prow["chained"] or 0) == 1 or str(prow["status"] if "status" in prow.keys() else "active") == "chained":
-        raise AjarError(
-            f"Verified chained primitive {primitive_id} cannot be closed dry.",
-            EXIT_GATE_BLOCKED,
-        )
+    cur_status = "chained" if int(prow["chained"] or 0) == 1 else str(prow["status"] if "status" in prow.keys() else "active")
+    assert_valid_primitive_transition(cur_status, "dry", primitive_id=primitive_id)
     clean_locus = (locus or "").strip()
     clean_reason = scrub_text((reason or "").strip())
     if not clean_locus or len(clean_reason) < 8:
@@ -2352,22 +2352,23 @@ def mark_primitive_dry(
                 f"Guard control locus not found in target repository: {clean_locus}",
                 EXIT_USER_ERROR,
             )
-    conn.execute(
-        """
-        UPDATE primitives
-        SET status = 'dry', dry_locus = ?, dry_reason = ?
-        WHERE primitive_id = ?
-        """,
-        (clean_locus, clean_reason, primitive_id),
-    )
-    recompute_all_open_salience(conn)
-    log_event(
-        conn,
-        worker_id,
-        "primitive_marked_dry",
-        primitive_id,
-        {"dry_control_locus": clean_locus, "dry_reason": clean_reason[:200]},
-    )
+    with immediate_tx(conn):
+        conn.execute(
+            """
+            UPDATE primitives
+            SET status = 'dry', dry_locus = ?, dry_reason = ?
+            WHERE primitive_id = ?
+            """,
+            (clean_locus, clean_reason, primitive_id),
+        )
+        recompute_all_open_salience(conn)
+        log_event(
+            conn,
+            worker_id,
+            "primitive_marked_dry",
+            primitive_id,
+            {"dry_control_locus": clean_locus, "dry_reason": clean_reason[:200]},
+        )
     return {
         "primitive_id": primitive_id,
         "status": "dry",

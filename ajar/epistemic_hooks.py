@@ -20,18 +20,10 @@ import re
 import sqlite3
 from typing import Any, Sequence
 
+from ajar.domain.enums import HookCode
 from ajar.redact import scrub_text
 
-HOOK_CODES: tuple[str, ...] = (
-    "H1_GUARD_SYMMETRY",
-    "H2_DIRTY_UNWIND",
-    "H3_INTRINSIC_AND_PEER_SINK",
-    "H4_TYPED_STATE_BRIDGE",
-    "H5_POST_CONFIRM_ESCALATION",
-    "H6_RELEASE_UB_DIFF",
-    "H7_TRUST_METADATA_AND_FSM_ORDER",
-    "H8_PROJECTION_UNDER_CONSTRAINT",
-)
+HOOK_CODES: tuple[str, ...] = tuple(h.value for h in HookCode)
 
 COMPILED_UB_EXTENSIONS: frozenset[str] = frozenset(
     {".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".rs", ".zig"}

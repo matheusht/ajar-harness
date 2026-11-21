@@ -59,6 +59,14 @@ from ajar.db import (
     upsert_threat_model,
     utc_now_iso,
 )
+from ajar.domain import (
+    InvalidTransitionError,
+    assert_valid_anomaly_transition,
+    assert_valid_claim_transition,
+    assert_valid_phase_transition,
+    assert_valid_task_transition,
+    derive_claim_axes,
+)
 from ajar.epistemic_hooks import (
     claim_requires_release_ub_diff,
     consume_hooks_for_locus,
@@ -100,6 +108,7 @@ from ajar.repro_source import (
     validate_micropatch_diff,
 )
 from ajar.runner import run_autonomous_schedule
+from ajar.store import assert_run_mutable, immediate_tx
 from ajar.swarm import (
     ENV_BLOCKER_KINDS,
     VALID_FALLBACK_REASONS,
@@ -635,42 +644,47 @@ def cmd_task(args: argparse.Namespace) -> int:
             return EXIT_OK
 
         if args.task_cmd == "done":
+            assert_run_mutable(conn, operation="task_done")
             now_iso = utc_now_iso()
             cur = conn.execute("SELECT * FROM tasks WHERE task_id = ?", (args.task_id,)).fetchone()
             if cur is None:
                 raise AjarError(f"Unknown task_id: {args.task_id}", EXIT_USER_ERROR)
-            conn.execute(
-                """
-                UPDATE tasks
-                SET status = 'done', worker_id = ?, summary = ?, lease_expires_at = NULL,
-                    closed_epoch = ?, updated_at = ?
-                WHERE task_id = ?
-                """,
-                (args.worker, scrub_text(args.summary or ""), time.time(), now_iso, args.task_id),
-            )
-            # If completing an `instrument` task, unlock stalled claims at that locus!
-            if cur["kind"] == "instrument" and cur["locus"]:
+            assert_valid_task_transition(str(cur["status"]), "done", task_id=args.task_id)
+            with immediate_tx(conn):
                 conn.execute(
                     """
-                    UPDATE claims
-                    SET instrumented_since_fail = 1,
-                        status = CASE WHEN status = 'needs_instrumentation' THEN 'survived_falsify' ELSE status END,
-                        updated_at = ?
-                    WHERE locus = ?
+                    UPDATE tasks
+                    SET status = 'done', worker_id = ?, summary = ?, lease_expires_at = NULL,
+                        closed_epoch = ?, updated_at = ?
+                    WHERE task_id = ?
                     """,
-                    (now_iso, cur["locus"]),
+                    (args.worker, scrub_text(args.summary or ""), time.time(), now_iso, args.task_id),
                 )
-            if cur["kind"] == "escalate" and cur["locus"]:
-                consume_hooks_for_locus(conn, locus=str(cur["locus"]), hook_code="H5_POST_CONFIRM_ESCALATION")
-            log_event(conn, args.worker, "task_done", args.task_id, {"kind": cur["kind"]})
+                # If completing an `instrument` task, unlock stalled claims at that locus!
+                if cur["kind"] == "instrument" and cur["locus"]:
+                    conn.execute(
+                        """
+                        UPDATE claims
+                        SET instrumented_since_fail = 1,
+                            status = CASE WHEN status = 'needs_instrumentation' THEN 'survived_falsify' ELSE status END,
+                            updated_at = ?
+                        WHERE locus = ?
+                        """,
+                        (now_iso, cur["locus"]),
+                    )
+                if cur["kind"] == "escalate" and cur["locus"]:
+                    consume_hooks_for_locus(conn, locus=str(cur["locus"]), hook_code="H5_POST_CONFIRM_ESCALATION")
+                log_event(conn, args.worker, "task_done", args.task_id, {"kind": cur["kind"]})
             pulse = maybe_auto_pulse(conn, tpath)
             _emit({"task_id": args.task_id, "status": "done", "pulse": pulse}, True)
             return EXIT_OK
 
         if args.task_cmd == "dry":
+            assert_run_mutable(conn, operation="task_dry")
             cur = conn.execute("SELECT * FROM tasks WHERE task_id = ?", (args.task_id,)).fetchone()
             if cur is None:
                 raise AjarError(f"Unknown task_id: {args.task_id}", EXIT_USER_ERROR)
+            assert_valid_task_transition(str(cur["status"]), "dry", task_id=args.task_id)
             ok, msg = validate_dry_locus(
                 tpath, str(run["target_mode"] if run else "source"), args.locus, args.control
             )
@@ -680,48 +694,55 @@ def cmd_task(args: argparse.Namespace) -> int:
             if not ok_gp:
                 raise AjarError(msg_gp, EXIT_GATE_BLOCKED)
             now_iso = utc_now_iso()
-            conn.execute(
-                """
-                UPDATE tasks
-                SET status = 'dry', worker_id = ?, dry_control_locus = ?, dry_control_reason = ?,
-                    lease_expires_at = NULL, closed_epoch = ?, updated_at = ?
-                WHERE task_id = ?
-                """,
-                (
-                    args.worker,
-                    args.locus,
-                    scrub_text(args.control),
-                    time.time(),
-                    now_iso,
-                    args.task_id,
-                ),
-            )
-            consume_hooks_for_locus(conn, locus=args.locus)
-            if cur["locus"]:
-                consume_hooks_for_locus(conn, locus=str(cur["locus"]))
-            log_event(conn, args.worker, "task_dry", args.task_id, {"locus": args.locus})
+            with immediate_tx(conn):
+                conn.execute(
+                    """
+                    UPDATE tasks
+                    SET status = 'dry', worker_id = ?, dry_control_locus = ?, dry_control_reason = ?,
+                        lease_expires_at = NULL, closed_epoch = ?, updated_at = ?
+                    WHERE task_id = ?
+                    """,
+                    (
+                        args.worker,
+                        args.locus,
+                        scrub_text(args.control),
+                        time.time(),
+                        now_iso,
+                        args.task_id,
+                    ),
+                )
+                consume_hooks_for_locus(conn, locus=args.locus)
+                if cur["locus"]:
+                    consume_hooks_for_locus(conn, locus=str(cur["locus"]))
+                log_event(conn, args.worker, "task_dry", args.task_id, {"locus": args.locus})
             pulse = maybe_auto_pulse(conn, tpath)
             _emit({"task_id": args.task_id, "status": "dry", "pulse": pulse}, True)
             return EXIT_OK
 
         if args.task_cmd == "block":
+            assert_run_mutable(conn, operation="task_block")
+            cur = conn.execute("SELECT * FROM tasks WHERE task_id = ?", (args.task_id,)).fetchone()
+            if cur is None:
+                raise AjarError(f"Unknown task_id: {args.task_id}", EXIT_USER_ERROR)
+            assert_valid_task_transition(str(cur["status"]), "conditional_blocked", task_id=args.task_id)
             now_iso = utc_now_iso()
-            conn.execute(
-                """
-                UPDATE tasks
-                SET status = 'conditional_blocked', worker_id = ?, blocker_predicate = ?,
-                    blocker_check_locus = ?, lease_expires_at = NULL, updated_at = ?
-                WHERE task_id = ?
-                """,
-                (
-                    args.worker,
-                    scrub_text(args.predicate),
-                    args.check_locus or "",
-                    now_iso,
-                    args.task_id,
-                ),
-            )
-            log_event(conn, args.worker, "task_conditional_blocked", args.task_id, {"predicate": args.predicate})
+            with immediate_tx(conn):
+                conn.execute(
+                    """
+                    UPDATE tasks
+                    SET status = 'conditional_blocked', worker_id = ?, blocker_predicate = ?,
+                        blocker_check_locus = ?, lease_expires_at = NULL, updated_at = ?
+                    WHERE task_id = ?
+                    """,
+                    (
+                        args.worker,
+                        scrub_text(args.predicate),
+                        args.check_locus or "",
+                        now_iso,
+                        args.task_id,
+                    ),
+                )
+                log_event(conn, args.worker, "task_conditional_blocked", args.task_id, {"predicate": args.predicate})
             _emit({"task_id": args.task_id, "status": "conditional_blocked"}, True)
             return EXIT_OK
 
@@ -820,18 +841,24 @@ def cmd_anomaly(args: argparse.Namespace) -> int:
             return EXIT_OK
 
         if args.anomaly_cmd == "explain":
+            assert_run_mutable(conn, operation="anomaly_explain")
             if len(args.reason.strip()) < 12:
                 raise AjarError("Explanation --reason must be at least 12 characters.", EXIT_USER_ERROR)
+            anom = conn.execute("SELECT status FROM anomalies WHERE anomaly_id = ?", (args.anomaly_id,)).fetchone()
+            if anom is None:
+                raise AjarError(f"Unknown anomaly_id: {args.anomaly_id}", EXIT_USER_ERROR)
+            assert_valid_anomaly_transition(str(anom["status"]), "benign_explained", anomaly_id=args.anomaly_id)
             now_iso = utc_now_iso()
-            conn.execute(
-                """
-                UPDATE anomalies
-                SET status = 'benign_explained', explanation_locus = ?, explanation_reason = ?, updated_at = ?
-                WHERE anomaly_id = ?
-                """,
-                (args.locus, scrub_text(args.reason), now_iso, args.anomaly_id),
-            )
-            log_event(conn, "worker", "anomaly_explained", args.anomaly_id, {"locus": args.locus})
+            with immediate_tx(conn):
+                conn.execute(
+                    """
+                    UPDATE anomalies
+                    SET status = 'benign_explained', explanation_locus = ?, explanation_reason = ?, updated_at = ?
+                    WHERE anomaly_id = ?
+                    """,
+                    (args.locus, scrub_text(args.reason), now_iso, args.anomaly_id),
+                )
+                log_event(conn, "worker", "anomaly_explained", args.anomaly_id, {"locus": args.locus})
             _emit({"anomaly_id": args.anomaly_id, "status": "benign_explained"}, True)
             return EXIT_OK
 
@@ -1038,6 +1065,7 @@ def cmd_claim(args: argparse.Namespace) -> int:
         tmode = str(run["target_mode"])
 
         if args.claim_cmd == "propose":
+            assert_run_mutable(conn, operation="claim_propose")
             if len(args.falsification_prediction.strip()) < 10 or len(args.falsification_test.strip()) < 5:
                 raise AjarError(
                     "DEC-0128 gate: --falsification-prediction and --falsification-test are required before proposing a claim.",
@@ -1130,42 +1158,49 @@ def cmd_claim(args: argparse.Namespace) -> int:
             return EXIT_OK
 
         if args.claim_cmd == "falsify":
+            assert_run_mutable(conn, operation="claim_falsify")
             clm = conn.execute("SELECT * FROM claims WHERE claim_id = ?", (args.claim_id,)).fetchone()
             if clm is None:
                 raise AjarError(f"Unknown claim_id: {args.claim_id}", EXIT_USER_ERROR)
-            if clm["status"] == "reproduced":
+            if clm["proposer_worker_id"] == args.worker:
                 raise AjarError(
-                    f"Truth-axis monotonicity gate: verified reproduced claim {args.claim_id} cannot be downgraded to falsified.",
+                    f"Fresh-falsifier separation gate: proposer {args.worker!r} cannot falsify its own claim. "
+                    "Use an independent falsifier worker.",
                     EXIT_GATE_BLOCKED,
                 )
             now_iso = utc_now_iso()
             cfg_gate = (getattr(args, "config_gate", None) or "").strip()
             if cfg_gate:
-                conn.execute(
-                    """
-                    UPDATE claims
-                    SET status = 'config_gated', config_gate = ?, falsifier_worker_id = ?,
-                        falsify_notes = ?, falsify_control_locus = ?,
-                        research_state = 'candidate', evidence_state = 'unverified', updated_at = ?
-                    WHERE claim_id = ?
-                    """,
-                    (
-                        scrub_text(cfg_gate),
+                assert_valid_claim_transition(str(clm["status"]), "config_gated", claim_id=args.claim_id)
+                axes = derive_claim_axes("config_gated")
+                with immediate_tx(conn):
+                    conn.execute(
+                        """
+                        UPDATE claims
+                        SET status = 'config_gated', config_gate = ?, falsifier_worker_id = ?,
+                            falsify_notes = ?, falsify_control_locus = ?,
+                            research_state = ?, evidence_state = ?, updated_at = ?
+                        WHERE claim_id = ?
+                        """,
+                        (
+                            scrub_text(cfg_gate),
+                            args.worker,
+                            scrub_text(args.notes),
+                            args.control_locus,
+                            axes.research_state.value,
+                            axes.evidence_state.value,
+                            now_iso,
+                            args.claim_id,
+                        ),
+                    )
+                    probe = on_claim_config_gated(conn, claim_row=clm, config_predicate=cfg_gate)
+                    log_event(
+                        conn,
                         args.worker,
-                        scrub_text(args.notes),
-                        args.control_locus,
-                        now_iso,
+                        "claim_config_gated",
                         args.claim_id,
-                    ),
-                )
-                probe = on_claim_config_gated(conn, claim_row=clm, config_predicate=cfg_gate)
-                log_event(
-                    conn,
-                    args.worker,
-                    "claim_config_gated",
-                    args.claim_id,
-                    {"config_gate": cfg_gate, "probe_task_id": probe["probe_task_id"]},
-                )
+                        {"config_gate": cfg_gate, "probe_task_id": probe["probe_task_id"]},
+                    )
                 _emit(
                     {
                         "claim_id": args.claim_id,
@@ -1177,53 +1212,76 @@ def cmd_claim(args: argparse.Namespace) -> int:
                 )
                 return EXIT_OK
 
-            conn.execute(
-                """
-                UPDATE claims
-                SET status = 'falsified', falsifier_worker_id = ?, falsify_notes = ?,
-                    falsify_control_locus = ?, research_state = 'rejected_during_research',
-                    evidence_state = 'falsified', updated_at = ?
-                WHERE claim_id = ?
-                """,
-                (args.worker, scrub_text(args.notes), args.control_locus, now_iso, args.claim_id),
-            )
-            # Orphaned Anomaly Survival: restore any anomaly tentatively consumed by this disproved claim!
-            conn.execute(
-                """
-                UPDATE anomalies
-                SET status = 'unexplained', consumed_by_id = NULL, updated_at = ?
-                WHERE consumed_by_id = ? AND status = 'consumed_by_claim'
-                """,
-                (now_iso, args.claim_id),
-            )
-            consume_hooks_for_locus(conn, source_entity_id=args.claim_id)
-            log_event(conn, args.worker, "claim_falsified", args.claim_id, {})
+            assert_valid_claim_transition(str(clm["status"]), "falsified", claim_id=args.claim_id)
+            axes = derive_claim_axes("falsified")
+            with immediate_tx(conn):
+                conn.execute(
+                    """
+                    UPDATE claims
+                    SET status = 'falsified', falsifier_worker_id = ?, falsify_notes = ?,
+                        falsify_control_locus = ?, research_state = ?,
+                        evidence_state = ?, updated_at = ?
+                    WHERE claim_id = ?
+                    """,
+                    (
+                        args.worker,
+                        scrub_text(args.notes),
+                        args.control_locus,
+                        axes.research_state.value,
+                        axes.evidence_state.value,
+                        now_iso,
+                        args.claim_id,
+                    ),
+                )
+                # Orphaned Anomaly Survival: restore any anomaly tentatively consumed by this disproved claim!
+                conn.execute(
+                    """
+                    UPDATE anomalies
+                    SET status = 'unexplained', consumed_by_id = NULL, updated_at = ?
+                    WHERE consumed_by_id = ? AND status = 'consumed_by_claim'
+                    """,
+                    (now_iso, args.claim_id),
+                )
+                consume_hooks_for_locus(conn, source_entity_id=args.claim_id)
+                log_event(conn, args.worker, "claim_falsified", args.claim_id, {})
             _emit({"claim_id": args.claim_id, "status": "falsified"}, True)
             return EXIT_OK
 
         if args.claim_cmd == "survive":
+            assert_run_mutable(conn, operation="claim_survive")
             clm = conn.execute("SELECT * FROM claims WHERE claim_id = ?", (args.claim_id,)).fetchone()
             if clm is None:
                 raise AjarError(f"Unknown claim_id: {args.claim_id}", EXIT_USER_ERROR)
-            if clm["status"] == "reproduced":
-                raise AjarError(
-                    f"Truth-axis monotonicity gate: verified reproduced claim {args.claim_id} cannot be downgraded.",
-                    EXIT_GATE_BLOCKED,
-                )
             if clm["proposer_worker_id"] == args.worker:
                 raise AjarError(
                     f"Fresh-falsifier separation gate: proposer {args.worker!r} cannot validate its own claim. "
                     "Use an independent falsifier worker.",
                     EXIT_GATE_BLOCKED,
                 )
+            assert_valid_claim_transition(str(clm["status"]), "survived_falsify", claim_id=args.claim_id)
+            axes = derive_claim_axes("survived_falsify")
             now_iso = utc_now_iso()
-            conn.execute(
-                "UPDATE claims SET status = 'survived_falsify', falsifier_worker_id = ?, falsify_notes = ?, updated_at = ? WHERE claim_id = ?",
-                (args.worker, scrub_text(args.notes), now_iso, args.claim_id),
-            )
-            updated_clm = conn.execute("SELECT * FROM claims WHERE claim_id = ?", (args.claim_id,)).fetchone()
-            hooks = on_claim_survived(conn, claim_row=updated_clm)
-            log_event(conn, args.worker, "claim_survived_falsify", args.claim_id, {})
+            with immediate_tx(conn):
+                conn.execute(
+                    """
+                    UPDATE claims
+                    SET status = 'survived_falsify', falsifier_worker_id = ?, falsify_notes = ?,
+                        research_state = ?, evidence_state = ?, env_blocker = '', blocker_reason = '',
+                        updated_at = ?
+                    WHERE claim_id = ?
+                    """,
+                    (
+                        args.worker,
+                        scrub_text(args.notes),
+                        axes.research_state.value,
+                        axes.evidence_state.value,
+                        now_iso,
+                        args.claim_id,
+                    ),
+                )
+                updated_clm = conn.execute("SELECT * FROM claims WHERE claim_id = ?", (args.claim_id,)).fetchone()
+                hooks = on_claim_survived(conn, claim_row=updated_clm)
+                log_event(conn, args.worker, "claim_survived_falsify", args.claim_id, {})
             _emit(
                 {
                     "claim_id": args.claim_id,
@@ -1235,6 +1293,7 @@ def cmd_claim(args: argparse.Namespace) -> int:
             return EXIT_OK
 
         if args.claim_cmd == "instrument":
+            assert_run_mutable(conn, operation="claim_instrument")
             if tmode != "source":
                 raise AjarError("`ajar claim instrument` requires source mode.", EXIT_USER_ERROR)
             probe_p = pathlib.Path(args.probe_patch) if args.probe_patch else None
@@ -1252,14 +1311,11 @@ def cmd_claim(args: argparse.Namespace) -> int:
             return EXIT_OK
 
         if args.claim_cmd == "block":
+            assert_run_mutable(conn, operation="claim_block")
             clm = conn.execute("SELECT * FROM claims WHERE claim_id = ?", (args.claim_id,)).fetchone()
             if clm is None:
                 raise AjarError(f"Unknown claim_id: {args.claim_id}", EXIT_USER_ERROR)
-            if clm["status"] == "reproduced":
-                raise AjarError(
-                    f"Truth-axis monotonicity gate: verified reproduced claim {args.claim_id} cannot be downgraded to blocked.",
-                    EXIT_GATE_BLOCKED,
-                )
+            assert_valid_claim_transition(str(clm["status"]), "blocked", claim_id=args.claim_id)
             env_b = (getattr(args, "env_blocker", None) or "").strip()
             ok_blk, blk_msg = validate_claim_block_request(
                 clm,
@@ -1269,18 +1325,32 @@ def cmd_claim(args: argparse.Namespace) -> int:
             )
             if not ok_blk:
                 raise AjarError(blk_msg, EXIT_GATE_BLOCKED)
+            axes = derive_claim_axes("blocked")
             now_iso = utc_now_iso()
-            conn.execute(
-                "UPDATE claims SET status = 'blocked', blocker_reason = ?, env_blocker = ?, updated_at = ? WHERE claim_id = ?",
-                (scrub_text(args.reason), env_b, now_iso, args.claim_id),
-            )
-            log_event(
-                conn,
-                args.worker,
-                "claim_blocked",
-                args.claim_id,
-                {"env_blocker": env_b, "reason": args.reason},
-            )
+            with immediate_tx(conn):
+                conn.execute(
+                    """
+                    UPDATE claims
+                    SET status = 'blocked', blocker_reason = ?, env_blocker = ?,
+                        research_state = ?, evidence_state = ?, updated_at = ?
+                    WHERE claim_id = ?
+                    """,
+                    (
+                        scrub_text(args.reason),
+                        env_b,
+                        axes.research_state.value,
+                        axes.evidence_state.value,
+                        now_iso,
+                        args.claim_id,
+                    ),
+                )
+                log_event(
+                    conn,
+                    args.worker,
+                    "claim_blocked",
+                    args.claim_id,
+                    {"env_blocker": env_b, "reason": args.reason},
+                )
             _emit({"claim_id": args.claim_id, "status": "blocked", "env_blocker": env_b}, True)
             return EXIT_OK
 
@@ -1889,15 +1959,18 @@ def cmd_phase(args: argparse.Namespace) -> int:
         new_phase = str(args.to).strip()
         if new_phase not in ("hunt", "remediate", "full"):
             raise AjarError(f"Unsupported phase {new_phase!r}; choose hunt, remediate, or full.", EXIT_USER_ERROR)
-        conn.execute("UPDATE runs SET campaign_phase = ? WHERE run_id = ?", (new_phase, rid))
-        recompute_all_open_salience(conn)
-        log_event(
-            conn,
-            "operator",
-            "campaign_phase_advanced",
-            rid,
-            {"previous_phase": prev_phase, "campaign_phase": new_phase, "notes": scrub_text(args.notes or "")},
-        )
+        assert_run_mutable(conn, operation="phase_advance")
+        assert_valid_phase_transition(prev_phase, new_phase, run_id=rid)
+        with immediate_tx(conn):
+            conn.execute("UPDATE runs SET campaign_phase = ? WHERE run_id = ?", (new_phase, rid))
+            recompute_all_open_salience(conn)
+            log_event(
+                conn,
+                "operator",
+                "campaign_phase_advanced",
+                rid,
+                {"previous_phase": prev_phase, "campaign_phase": new_phase, "notes": scrub_text(args.notes or "")},
+            )
         _emit({"run_id": rid, "previous_phase": prev_phase, "campaign_phase": new_phase}, True)
         return EXIT_OK
     finally:
@@ -2964,7 +3037,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.func(args))
-    except AjarError as exc:
+    except (AjarError, InvalidTransitionError) as exc:
         err_obj = {"error": scrub_text(str(exc)), "exit_code": exc.exit_code, **exc.details}
         sys.stderr.write(json.dumps(err_obj, sort_keys=True) + "\n")
         return int(exc.exit_code)

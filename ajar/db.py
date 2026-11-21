@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from typing import Any, Sequence
 
 from ajar import EXIT_GATE_BLOCKED, EXIT_USER_ERROR
-from ajar.domain.models import AjarError
+from ajar.domain.models import AjarError as AjarError
 from ajar.domain.transitions import assert_valid_primitive_transition
 from ajar.redact import scrub_text
 from ajar.store.tx import CURRENT_SCHEMA_VERSION, immediate_tx

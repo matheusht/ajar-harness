@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 
 from ajar import EXIT_GATE_BLOCKED, EXIT_USER_ERROR
 from ajar.domain.enums import EvidenceState, ResearchState
@@ -38,6 +38,8 @@ class InvalidTransitionError(AjarError):
         *,
         entity_id: str = "",
         reason: str = "",
+        allowed_targets: Sequence[str] = (),
+        fix_hint: str = "",
         exit_code: int = EXIT_GATE_BLOCKED,
     ) -> None:
         self.machine = machine
@@ -45,16 +47,27 @@ class InvalidTransitionError(AjarError):
         self.target = target
         self.entity_id = entity_id
         self.reason = reason
+        self.allowed_targets: tuple[str, ...] = tuple(str(x) for x in allowed_targets)
+        self.fix_hint = fix_hint
         details: dict[str, Any] = {
             "machine": machine,
             "current": current,
             "target": target,
             "entity_id": entity_id,
+            "allowed_targets": list(self.allowed_targets),
         }
+        if fix_hint:
+            details["fix_hint"] = fix_hint
         prefix = f"Invalid {machine} transition"
         who = f" for {entity_id}" if entity_id else ""
         detail = f": {reason}" if reason else ""
-        super().__init__(f"{prefix}{who}: {current!r} -> {target!r}{detail}", exit_code=exit_code, details=details)
+        allowed_s = f" (allowed: {', '.join(self.allowed_targets)})" if self.allowed_targets else ""
+        hint_s = f". Hint: {fix_hint}" if fix_hint else ""
+        super().__init__(
+            f"{prefix}{who}: {current!r} -> {target!r}{detail}{allowed_s}{hint_s}",
+            exit_code=exit_code,
+            details=details,
+        )
 
 
 @dataclass(frozen=True, slots=True)

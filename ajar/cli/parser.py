@@ -76,13 +76,15 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     # doctor
-    p_doc = sub.add_parser("doctor", help="Check local toolchains, sandbox, disk headroom, and optional target liveness.")
+    p_doc = sub.add_parser("doctor", help="Check local toolchains, sandbox, disk headroom, optional target liveness, and run health.")
     p_doc.add_argument("--target", help="Optional local path, `owner/repo` slug, or git URL to verify freshness and scope readiness.")
     p_doc.add_argument("--subdir", default="", help="Optional in-scope subdirectory inside `--target` monorepo.")
     p_doc.add_argument("--ref", default="", help="Optional remote branch, tag, or commit SHA to verify instead of default_branch.")
     p_doc.add_argument("--peer", action="append", help="Optional sibling reference/contract checkout path to verify.")
     p_doc.add_argument("--max-age-days", type=int, default=90, help="Maximum allowed git HEAD age in days (default: 90).")
     p_doc.add_argument("--no-remote", action="store_true", help="Skip live remote `gh api` / `git ls-remote` upstream checks.")
+    p_doc.add_argument("--run", help="Optional run ID to diagnose SQLite integrity, stale leases, and repro slot health.")
+    p_doc.add_argument("--prune-slots", action="store_true", help="With `--run`, safely remove unlocked `repro/slot-*` worktree directories.")
     p_doc.add_argument("--json", action="store_true", default=True)
     p_doc.set_defaults(func=cmd_doctor)
 

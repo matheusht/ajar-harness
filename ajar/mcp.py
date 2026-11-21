@@ -427,6 +427,21 @@ def handle_jsonrpc_message(
                     "isError": False,
                 },
             }
+        except AjarError as exc:
+            err_payload = {
+                "error": scrub_text(str(exc)),
+                "error_type": type(exc).__name__,
+                "exit_code": int(exc.exit_code),
+                "details": json.loads(scrub_text(json.dumps(exc.details, sort_keys=True, default=str))),
+            }
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "content": [{"type": "text", "text": json.dumps(err_payload, indent=2, sort_keys=True)}],
+                    "isError": True,
+                },
+            }
         except Exception as exc:
             return {
                 "jsonrpc": "2.0",

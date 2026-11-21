@@ -14,16 +14,18 @@ Read this file before modifying `ajar/`, `skills/`, `benchmarks/`, `docs/`, or `
 
 | Module | Responsibility |
 | --- | --- |
-| `ajar/domain/` | Pure zero-IO `StrEnum`s for all state machines (`enums.py`), frozen models & `AjarError`/`InvalidTransitionError` (`models.py`), explicit transition graphs & `derive_claim_axes` (`transitions.py`) |
-| `ajar/store/` | Schema version constant (`CURRENT_SCHEMA_VERSION`), `immediate_tx(conn)` (`BEGIN IMMEDIATE` + nested `SAVEPOINT`), and `assert_run_mutable(conn)` (`tx.py`) |
-| `ajar/services/` | Unified transactional workflow mutations (`workflow.py`: surfaces, tasks, anomalies, claims, phase advance, run finish) shared identically by `cli.py` and `mcp.py`, plus startup proof helpers (`proof.py`: `DEC-0132` economics export and `P0-3` SHA-256 ledger preimages) |
-| `ajar/db.py` | SQLite WAL schema (`v3.3` + `PRAGMA user_version` fast-path + auto-migration), `O_NOFOLLOW` run dirs, portfolio-balanced task leases, `hunt`/`remediate` phase split, `calibrate_finding`, `mark_primitive_dry`, prefix-stable `< 4 KB` context, `steers`, pulse |
+| `ajar/domain/` | Pure zero-IO `StrEnum`s for all state machines (`enums.py`), frozen models & self-healing `AjarError`/`InvalidTransitionError` (`models.py`), explicit transition graphs & `derive_claim_axes` (`transitions.py`) |
+| `ajar/store/` | `CURRENT_SCHEMA_VERSION`, `immediate_tx(conn)` (`BEGIN IMMEDIATE` + nested `SAVEPOINT`), `assert_run_mutable(conn)` (`tx.py`); `SCHEMA_SQL` & `_ensure_v31..v33_schema` (`migrations.py`); `open_run_db`, `O_NOFOLLOW`, `log_event`, `parse_tag_list`, and salience utilities (`util.py`) |
+| `ajar/services/` | Unified transactional workflow mutations (`workflow.py`: surfaces, drivers, tasks, anomalies, primitives, claims, repro outcomes, chains, phase advance, touches, spend, run finish) shared identically by `ajar/cli/` and `mcp.py`, plus startup proof helpers (`proof.py`: `DEC-0132` economics export and `P0-3` SHA-256 ledger preimages) |
+| `ajar/db.py` | Portfolio-balanced task leases (`immediate_tx`), `hunt`/`remediate` phase split, `calibrate_finding`, `mark_primitive_dry`, prefix-stable `< 4 KB` context, `steers`, `pulse`, threat model, and backwards-compatible re-exports of `ajar/store/` |
 | `ajar/chain_planner.py` | Suspended Open Doors (`crown_jewels`, `parked_doors`, `door_fts`), tri-modal reactive wakeup, `<= 2` bounded `bridge` hunters, $2..10$-hop middle-unicorn percolation (`detect_percolated_multi_hop_paths`), `compute_chain_frontier`, and `evaluate_precondition_realism` |
 | `ajar/epistemic_hooks.py` | Event-driven `H1`–`H8` epistemic micro-hooks (`0` overhead on clean code, mandatory `Kill Rule`, `stepping_stone` `H5` escalation) and `provides_tags <-> requires_tags` capability bridges |
-| `ajar/repro_compose.py` | Zero-boilerplate `fnd-*`/`clm-*`/`prim-*`/`anom-*` chain composition with auto-inherited micropatches, `run_snapshot_chain_probe` (`--from-snapshot`), optional `StageContext` helpers, and container loopback socket guard |
-| `ajar/repro_source.py` | Bare-shared `repo.git` mirror, `slot-<k>` worktrees, `--build-cmd`, non-strike `build_or_env_error`/`preflight_error` separation, `--save-post-state` snapshots, strike-free `run_repro_try`, and 4-arm + Arms `5A`/`5B` runner |
+| `ajar/reactions.py` | Cross-module event reaction orchestrators (`on_primitive_added`, `on_anomaly_or_claim_recorded`, `on_finding_confirmed`) sitting strictly above `store`, `epistemic_hooks`, `chain_planner`, and `db` |
+| `ajar/repro_helpers.py` | Pure-stdlib leaf runtime provisioning (`StageContext`, `sitecustomize.py` loopback guard, `ajar-helper-exec`) and AST validation for capability helpers |
+| `ajar/repro_compose.py` | Zero-boilerplate `fnd-*`/`clm-*`/`prim-*`/`anom-*` chain composition with auto-inherited micropatches, `run_snapshot_chain_probe` (`--from-snapshot`), and optional `StageContext` helpers |
+| `ajar/repro_source.py` | Bare-shared `repo.git` mirror, shared 8-slot `slot-<k>` pool (with stale `.git/index.lock` auto-heal), replayable `repro/failures/<claim_id>-<n>.json` receipts, `--build-cmd`, non-strike `build_or_env_error`/`preflight_error` separation, `--save-post-state` snapshots, strike-free `run_repro_try`, and 4-arm + Arms `5A`/`5B` runner |
 | `ajar/patch_verify.py` | Hardened 9-Arm Production Remediation Gate (`remediate`-phase gated, warm `.o` preservation, `1800s` `--suite-timeout`, `verified_local` state, and Arm 9 `git apply -R` revert proof) |
-| `ajar/swarm.py` | Stage-split `"Swarm Worker"` packet generator (`investigate`, `bridge`, `falsify`, `reproduce`, `chain`, `portfolio`), `direct -> swarm_patch_first -> regression_tdd` fallback ladder, and cross-VM `ajar reopen` |
+| `ajar/swarm.py` | Stage-split `"Swarm Worker"` packet generator with inline scrubbed claim/task records (`investigate`, `bridge`, `falsify`, `reproduce`, `chain`, `portfolio`), `direct -> swarm_patch_first -> regression_tdd` fallback ladder, and cross-VM `ajar reopen` |
 | `ajar/target_check.py` | Offline target archival/freshness checks on `ajar init` (`--allow-historical-target`) and `ajar doctor --target` upstream/branch/subdir/peer/disk probes |
 | `ajar/diff_sync.py` | Incremental PR differential state sync (`ajar init --diff <base..head> --parent-run <id>`) classifying `kept | closed | invalidated_guard | new` |
 | `ajar/gates.py` | Pure-SQL closeout gates `G1–G5`, `crown-jewel` non-satisficing & bounded-exhaustion gate, `ready`-door `G5` gate, guarded-primitive `dry` gate, and `35%` COGS margin gates |
@@ -31,13 +33,13 @@ Read this file before modifying `ajar/`, `skills/`, `benchmarks/`, `docs/`, or `
 | `ajar/repomap.py` | Pure-Python symbol extraction (excluding C/C++ file-local `static` helpers from cross-file edges), Personalized PageRank map, `--slice-cap` splitter, and `ajar quote` calculator |
 | `ajar/graph.py` | Deterministic `Platform` component, hook, helper, coverage, and attack-flow JSON exporter (`ajar-platform-graph/1`) |
 | `ajar/oracles.py` | SQLite FTS5 indexing and queries for `intent` (`[UNTRUSTED_TARGET_DOC]` tagged), `reachability`, and `precedent` |
-| `ajar/hooks.py` | Host Mode `claude-stop` hook and `codex`/`omp` continuation loop with 3-stall circuit breaker |
-| `ajar/mcp.py` | Thin STDIO JSON-RPC MCP wrapper delegating all mutations to `ajar/services/` (0 inline SQL writes) |
+| `ajar/hooks.py` | Host Mode `claude-stop` hook and `codex`/`omp` continuation loop with semantic-progress 3-stall circuit breaker |
+| `ajar/mcp.py` | Thin STDIO JSON-RPC MCP wrapper delegating all mutations to `ajar/services/` (0 inline SQL writes, structured JSON error payloads) |
 | `ajar/runner.py` | Standalone Mode (`ajar run`) scheduler with `--until crown-jewel`, `--phase`, `--discover-passes N`, role-tier model routing, `detect_soliloquy_transcript`, and `80% / 20%` verify reserve |
 | `ajar/report.py` | Markdown and JSON report compiler including `realism_tier`, `ub_divergence_class`, `ablation_matrix_json`, `patch_verifications`, and `CLOSEOUT_RECEIPT` |
-| `ajar/redact.py` | Secret scanner/redactor and `scrubbed_subprocess_env` preserving `SDKROOT`/macOS `xcrun`, offline `rustup`/`cargo` toolchains, `$AJAR_RUN_DIR`, and dangling-symlink-clean `PATH` |
-| `ajar/cli.py` | Command-line interface entrypoint (`ajar`) delegating core workflow mutations to `ajar/services/` |
-| `tools/arch_lint.py` | Mechanical architecture & invariant linter with self-healing `fix_hint` diagnostics |
+| `ajar/redact.py` | Pure-stdlib secret scanner/redactor and `scrubbed_subprocess_env` preserving `SDKROOT`/macOS `xcrun`, offline `rustup`/`cargo` toolchains, `$AJAR_RUN_DIR`, and dangling-symlink-clean `PATH` |
+| `ajar/cli/` | Cohesive CLI package (`__init__.py`, `__main__.py`, `common.py`, `hunt.py`, `claims.py`, `ops.py`, `parser.py`) delegating all state mutations to `ajar/services/` (`0` inline SQL writes) |
+| `tools/arch_lint.py` | Mechanical architecture & invariant linter (9 rules, AST-cached, self-healing `fix_hint` diagnostics) |
 
 ## Rule-to-Enforcer Map
 
@@ -46,8 +48,9 @@ Every durable engineering rule is mechanically enforced in CI (never prose-only)
 | Rule | Mechanical Enforcer |
 | --- | --- |
 | Zero LLM SDKs in `ajar/` & no `tools/legacy/` imports | `tools/arch_lint.py` (`ZERO_LLM_ENGINE`, `LAYER_DAG_BOUNDARY`) |
-| Strict layer DAG (`domain -> store -> services -> cli/mcp`) | `tools/arch_lint.py` (`LAYER_DAG_BOUNDARY`) + `mypy --strict` |
-| Single mutation path across CLI & MCP (0 raw SQL writes in `mcp.py`, ratcheted `cli.py`) | `tools/arch_lint.py` (`NO_RAW_SQL_IN_MCP`, `CLI_RAW_SQL_RATCHET`) + `tests/test_arch_and_service_parity.py` |
+| Strict acyclic module DAG (`0` circular imports across `ajar/`) | `tools/arch_lint.py` (`LAYER_DAG_BOUNDARY`, `NO_CIRCULAR_IMPORTS`) + `mypy --strict ajar tools/arch_lint.py` |
+| Single mutation path across CLI & MCP (`0` raw SQL writes in `ajar/cli/` and `ajar/mcp.py`) | `tools/arch_lint.py` (`NO_RAW_SQL_IN_MCP`, `CLI_RAW_SQL_RATCHET`) + `tests/test_arch_and_service_parity.py` |
+| Transactional SQLite atomicity (zero `.commit()` no-ops, multi-write `immediate_tx`) | `tools/arch_lint.py` (`NO_COMMIT_NOOP`, `MULTI_WRITE_REQUIRES_IMMEDIATE_TX`) + `tests/dst/test_state_machine_sim.py` |
 | No hardcoded developer paths or ambient `HOME`/`PATH` mutation in tests | `tools/arch_lint.py` (`NO_HARDCODED_DEVBOX_PATH`, `NO_AMBIENT_ENV_MUTATION`) |
 | Explicit `filter=` on every `tarfile` extraction | `tools/arch_lint.py` (`NO_UNFILTERED_TAR_EXTRACT`) |
 | Enum-to-SQL CHECK & `HookCode` parity + explicit state transitions | `tests/test_domain_and_migrations.py` |
@@ -58,7 +61,7 @@ Every durable engineering rule is mechanically enforced in CI (never prose-only)
 Use the canonical repository verification driver (fast inner loop during development, full suite before opening a PR):
 
 ```bash
-scripts/verify-repo.sh --fast    # Inner loop: AGENTS.md, ruff, arch_lint, mypy, unit + parity + DST
+scripts/verify-repo.sh --fast    # Inner loop: AGENTS.md, ruff, arch_lint, mypy --strict, unit + parity + DST
 scripts/verify-repo.sh --full    # Pre-PR outer loop: adds integration tests + archived legacy checks
 ```
 
@@ -68,7 +71,7 @@ Equivalent explicit commands run in CI:
 test "$(wc -l < AGENTS.md)" -le 50 && cmp -s AGENTS.md CLAUDE.md
 ruff check ajar tests tools/arch_lint.py
 python3 tools/arch_lint.py
-mypy --strict ajar/domain ajar/store ajar/services tools/arch_lint.py && mypy ajar --ignore-missing-imports
+mypy --strict ajar tools/arch_lint.py
 pytest -q
 for t in tools/legacy/*-test.py; do python3 "$t"; done
 ```

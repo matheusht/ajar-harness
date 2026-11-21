@@ -208,13 +208,19 @@ def _select_stage_items(
         if clean_explicit:
             placeholders = ",".join("?" for _ in clean_explicit)
             rows = conn.execute(
-                f"SELECT claim_id, severity, locus, status FROM claims WHERE claim_id IN ({placeholders})",
+                f"""
+                SELECT claim_id, severity, locus, status, title, mechanism,
+                       falsification_prediction, falsification_test
+                FROM claims WHERE claim_id IN ({placeholders})
+                """,
                 tuple(clean_explicit),
             ).fetchall()
         elif stage == "falsify":
             rows = conn.execute(
                 """
-                SELECT claim_id, severity, locus, status FROM claims
+                SELECT claim_id, severity, locus, status, title, mechanism,
+                       falsification_prediction, falsification_test
+                FROM claims
                 WHERE status = 'proposed'
                 ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at ASC
                 LIMIT ?
@@ -224,7 +230,9 @@ def _select_stage_items(
         else:
             rows = conn.execute(
                 """
-                SELECT claim_id, severity, locus, status FROM claims
+                SELECT claim_id, severity, locus, status, title, mechanism,
+                       falsification_prediction, falsification_test
+                FROM claims
                 WHERE status IN ('survived_falsify', 'needs_instrumentation')
                 ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at ASC
                 LIMIT ?
@@ -236,8 +244,13 @@ def _select_stage_items(
                 {
                     "id": str(r["claim_id"]),
                     "priority": str(r["severity"]),
-                    "locus": str(r["locus"]),
+                    "severity": str(r["severity"]),
+                    "locus": scrub_text(str(r["locus"])),
                     "status": str(r["status"]),
+                    "title": scrub_text(str(r["title"] or ""))[:180],
+                    "mechanism": scrub_text(str(r["mechanism"] or ""))[:320],
+                    "falsification_prediction": scrub_text(str(r["falsification_prediction"] or ""))[:220],
+                    "falsification_test": scrub_text(str(r["falsification_test"] or ""))[:220],
                 }
             )
         return items
@@ -245,55 +258,100 @@ def _select_stage_items(
     if stage == "portfolio":
         # Multi-lane portfolio reservation: 1 woken chain + 1 verify + 1 bridge + greenfield investigate.
         woken_ch = conn.execute(
-            "SELECT task_id, priority, locus, title, status FROM tasks WHERE kind = 'chain' AND status = 'open' ORDER BY salience_score DESC LIMIT 1"
+            "SELECT task_id, priority, locus, title, summary, status FROM tasks WHERE kind = 'chain' AND status = 'open' ORDER BY salience_score DESC LIMIT 1"
         ).fetchone()
         if woken_ch is not None and len(items) < cap:
-            items.append({"id": str(woken_ch["task_id"]), "priority": f"chain:{woken_ch['priority']}", "locus": str(woken_ch["locus"] or woken_ch["title"]), "status": "open"})
+            items.append(
+                {
+                    "id": str(woken_ch["task_id"]),
+                    "priority": f"chain:{woken_ch['priority']}",
+                    "locus": scrub_text(str(woken_ch["locus"] or woken_ch["title"])),
+                    "title": scrub_text(str(woken_ch["title"] or ""))[:180],
+                    "summary": scrub_text(str(woken_ch["summary"] or ""))[:240],
+                    "status": "open",
+                }
+            )
 
         ver_clm = conn.execute(
-            "SELECT claim_id, severity, locus, status FROM claims WHERE status IN ('proposed', 'survived_falsify') ORDER BY created_at ASC LIMIT 1"
+            "SELECT claim_id, severity, locus, status, title, mechanism FROM claims WHERE status IN ('proposed', 'survived_falsify') ORDER BY created_at ASC LIMIT 1"
         ).fetchone()
         if ver_clm is not None and len(items) < cap:
             lane = "falsify" if str(ver_clm["status"]) == "proposed" else "reproduce"
-            items.append({"id": str(ver_clm["claim_id"]), "priority": f"{lane}:{ver_clm['severity']}", "locus": str(ver_clm["locus"]), "status": str(ver_clm["status"])})
+            items.append(
+                {
+                    "id": str(ver_clm["claim_id"]),
+                    "priority": f"{lane}:{ver_clm['severity']}",
+                    "locus": scrub_text(str(ver_clm["locus"])),
+                    "title": scrub_text(str(ver_clm["title"] or ""))[:180],
+                    "mechanism": scrub_text(str(ver_clm["mechanism"] or ""))[:240],
+                    "status": str(ver_clm["status"]),
+                }
+            )
 
         br_task = conn.execute(
-            "SELECT task_id, priority, locus, title, status FROM tasks WHERE kind = 'bridge' AND status = 'open' ORDER BY salience_score DESC LIMIT 1"
+            "SELECT task_id, priority, locus, title, summary, status FROM tasks WHERE kind = 'bridge' AND status = 'open' ORDER BY salience_score DESC LIMIT 1"
         ).fetchone()
         if br_task is not None and len(items) < cap:
-            items.append({"id": str(br_task["task_id"]), "priority": f"bridge:{br_task['priority']}", "locus": str(br_task["locus"] or br_task["title"]), "status": "open"})
+            items.append(
+                {
+                    "id": str(br_task["task_id"]),
+                    "priority": f"bridge:{br_task['priority']}",
+                    "locus": scrub_text(str(br_task["locus"] or br_task["title"])),
+                    "title": scrub_text(str(br_task["title"] or ""))[:180],
+                    "summary": scrub_text(str(br_task["summary"] or ""))[:240],
+                    "status": "open",
+                }
+            )
 
         inv_rows = conn.execute(
-            "SELECT task_id, priority, locus, title, status FROM tasks WHERE kind IN ('investigate', 'map') AND status = 'open' ORDER BY salience_score DESC, created_at ASC LIMIT ?",
+            "SELECT task_id, priority, locus, title, summary, status FROM tasks WHERE kind IN ('investigate', 'map') AND status = 'open' ORDER BY salience_score DESC, created_at ASC LIMIT ?",
             (cap,),
         ).fetchall()
         for ir in inv_rows:
             if len(items) >= cap:
                 break
-            items.append({"id": str(ir["task_id"]), "priority": f"investigate:{ir['priority']}", "locus": str(ir["locus"] or ir["title"]), "status": "open"})
+            items.append(
+                {
+                    "id": str(ir["task_id"]),
+                    "priority": f"investigate:{ir['priority']}",
+                    "locus": scrub_text(str(ir["locus"] or ir["title"])),
+                    "title": scrub_text(str(ir["title"] or ""))[:180],
+                    "summary": scrub_text(str(ir["summary"] or ""))[:240],
+                    "status": "open",
+                }
+            )
         return items
 
     if stage == "bridge":
         if clean_explicit:
             placeholders = ",".join("?" for _ in clean_explicit)
             brows = conn.execute(
-                f"SELECT task_id, priority, locus, title, status FROM tasks WHERE task_id IN ({placeholders})",
+                f"SELECT task_id, priority, locus, title, summary, status FROM tasks WHERE task_id IN ({placeholders})",
                 tuple(clean_explicit),
             ).fetchall()
         else:
             brows = conn.execute(
-                "SELECT task_id, priority, locus, title, status FROM tasks WHERE kind = 'bridge' AND status IN ('open', 'leased') ORDER BY salience_score DESC, created_at ASC LIMIT ?",
+                "SELECT task_id, priority, locus, title, summary, status FROM tasks WHERE kind = 'bridge' AND status IN ('open', 'leased') ORDER BY salience_score DESC, created_at ASC LIMIT ?",
                 (cap,),
             ).fetchall()
         for r in brows:
-            items.append({"id": str(r["task_id"]), "priority": str(r["priority"]), "locus": str(r["locus"] or r["title"]), "status": str(r["status"])})
+            items.append(
+                {
+                    "id": str(r["task_id"]),
+                    "priority": str(r["priority"]),
+                    "locus": scrub_text(str(r["locus"] or r["title"])),
+                    "title": scrub_text(str(r["title"] or ""))[:180],
+                    "summary": scrub_text(str(r["summary"] or ""))[:240],
+                    "status": str(r["status"]),
+                }
+            )
         if not items:
             drows = conn.execute(
                 "SELECT door_id, status, anchor_locus FROM parked_doors WHERE status IN ('bridging', 'parked') ORDER BY updated_at DESC LIMIT ?",
                 (cap,),
             ).fetchall()
             for dr in drows:
-                items.append({"id": str(dr["door_id"]), "priority": "high", "locus": str(dr["anchor_locus"]), "status": str(dr["status"])})
+                items.append({"id": str(dr["door_id"]), "priority": "high", "locus": scrub_text(str(dr["anchor_locus"])), "status": str(dr["status"])})
         return items
 
     if stage == "chain":
@@ -301,34 +359,43 @@ def _select_stage_items(
             for eid in clean_explicit[:cap]:
                 prow = conn.execute("SELECT primitive_id, kind, locus FROM primitives WHERE primitive_id = ?", (eid,)).fetchone()
                 if prow:
-                    items.append({"id": str(prow["primitive_id"]), "priority": str(prow["kind"]), "locus": str(prow["locus"]), "status": "unchained"})
+                    items.append({"id": str(prow["primitive_id"]), "priority": str(prow["kind"]), "locus": scrub_text(str(prow["locus"])), "status": "unchained"})
                     continue
                 frow = conn.execute("SELECT finding_id, severity, locus FROM findings WHERE finding_id = ?", (eid,)).fetchone()
                 if frow:
-                    items.append({"id": str(frow["finding_id"]), "priority": str(frow["severity"]), "locus": str(frow["locus"]), "status": "reproduced"})
+                    items.append({"id": str(frow["finding_id"]), "priority": str(frow["severity"]), "locus": scrub_text(str(frow["locus"])), "status": "reproduced"})
                     continue
                 drow = conn.execute("SELECT door_id, status, anchor_locus FROM parked_doors WHERE door_id = ?", (eid,)).fetchone()
                 if drow:
-                    items.append({"id": str(drow["door_id"]), "priority": "door", "locus": str(drow["anchor_locus"]), "status": str(drow["status"])})
+                    items.append({"id": str(drow["door_id"]), "priority": "door", "locus": scrub_text(str(drow["anchor_locus"])), "status": str(drow["status"])})
                     continue
                 arow = conn.execute("SELECT anomaly_id, locus, status FROM anomalies WHERE anomaly_id = ?", (eid,)).fetchone()
                 if arow:
-                    items.append({"id": str(arow["anomaly_id"]), "priority": "anomaly", "locus": str(arow["locus"]), "status": str(arow["status"])})
+                    items.append({"id": str(arow["anomaly_id"]), "priority": "anomaly", "locus": scrub_text(str(arow["locus"])), "status": str(arow["status"])})
                     continue
-                trow = conn.execute("SELECT task_id, priority, locus, title, status FROM tasks WHERE task_id = ?", (eid,)).fetchone()
+                trow = conn.execute("SELECT task_id, priority, locus, title, summary, status FROM tasks WHERE task_id = ?", (eid,)).fetchone()
                 if trow:
-                    items.append({"id": str(trow["task_id"]), "priority": str(trow["priority"]), "locus": str(trow["locus"] or trow["title"]), "status": str(trow["status"])})
+                    items.append(
+                        {
+                            "id": str(trow["task_id"]),
+                            "priority": str(trow["priority"]),
+                            "locus": scrub_text(str(trow["locus"] or trow["title"])),
+                            "title": scrub_text(str(trow["title"] or ""))[:180],
+                            "summary": scrub_text(str(trow["summary"] or ""))[:240],
+                            "status": str(trow["status"]),
+                        }
+                    )
             return items
 
         for rd in conn.execute("SELECT door_id, anchor_locus FROM parked_doors WHERE status = 'ready' ORDER BY updated_at DESC LIMIT ?", (cap,)).fetchall():
             if len(items) < cap:
-                items.append({"id": str(rd["door_id"]), "priority": "ready_door", "locus": str(rd["anchor_locus"]), "status": "ready"})
+                items.append({"id": str(rd["door_id"]), "priority": "ready_door", "locus": scrub_text(str(rd["anchor_locus"])), "status": "ready"})
         for r in conn.execute("SELECT primitive_id, kind, locus FROM primitives WHERE chained = 0 AND status != 'dry' ORDER BY created_at ASC LIMIT ?", (cap,)).fetchall():
             if len(items) < cap:
-                items.append({"id": str(r["primitive_id"]), "priority": str(r["kind"]), "locus": str(r["locus"]), "status": "unchained"})
+                items.append({"id": str(r["primitive_id"]), "priority": str(r["kind"]), "locus": scrub_text(str(r["locus"])), "status": "unchained"})
         for f in conn.execute("SELECT finding_id, severity, locus FROM findings ORDER BY created_at ASC LIMIT ?", (cap,)).fetchall():
             if len(items) < cap:
-                items.append({"id": str(f["finding_id"]), "priority": str(f["severity"]), "locus": str(f["locus"]), "status": "reproduced"})
+                items.append({"id": str(f["finding_id"]), "priority": str(f["severity"]), "locus": scrub_text(str(f["locus"])), "status": "reproduced"})
         if items:
             return items
 
@@ -336,13 +403,13 @@ def _select_stage_items(
     if clean_explicit:
         placeholders = ",".join("?" for _ in clean_explicit)
         trows = conn.execute(
-            f"SELECT task_id, priority, locus, title, status FROM tasks WHERE task_id IN ({placeholders})",
+            f"SELECT task_id, priority, locus, title, summary, status FROM tasks WHERE task_id IN ({placeholders})",
             tuple(clean_explicit),
         ).fetchall()
     else:
         trows = conn.execute(
             """
-            SELECT task_id, priority, locus, title, status FROM tasks
+            SELECT task_id, priority, locus, title, summary, status FROM tasks
             WHERE kind = ? AND status IN ('open', 'leased')
             ORDER BY salience_score DESC, created_at ASC
             LIMIT ?
@@ -354,7 +421,9 @@ def _select_stage_items(
             {
                 "id": str(r["task_id"]),
                 "priority": str(r["priority"]),
-                "locus": str(r["locus"] or r["title"]),
+                "locus": scrub_text(str(r["locus"] or r["title"])),
+                "title": scrub_text(str(r["title"] or ""))[:180],
+                "summary": scrub_text(str(r["summary"] or ""))[:240],
                 "status": str(r["status"]),
             }
         )
@@ -378,7 +447,22 @@ def _render_packet_markdown(
     )
     skill_rel = STAGE_SKILL_PATHS.get(stage, f"skills/ajar-{stage}/SKILL.md")
     id_csv = ", ".join(f"'{it['id']}'" for it in items)
-    bullets = "\n".join(f"- `{it['id']}` (`{it['priority']}`, `{it['locus']}`)" for it in items)
+
+    bullet_lines: list[str] = []
+    for it in items:
+        head = f"- `{it['id']}` (`{it['priority']}`, `{it['locus']}`, status=`{it['status']}`)"
+        if it.get("title"):
+            head += f" — {it['title']}"
+        bullet_lines.append(head)
+        if it.get("mechanism"):
+            bullet_lines.append(f"  - mechanism: {it['mechanism']}")
+        if it.get("falsification_prediction"):
+            bullet_lines.append(f"  - falsification_prediction: {it['falsification_prediction']}")
+        if it.get("falsification_test"):
+            bullet_lines.append(f"  - falsification_test: {it['falsification_test']}")
+        if it.get("summary"):
+            bullet_lines.append(f"  - summary: {it['summary']}")
+    bullets = "\n".join(bullet_lines)
 
     lines: list[str] = [
         f"You are {role_title} (`worker_id = {worker_id}`, `dispatch_id = {dispatch_id}`) on Ajar campaign `{run_id}` targeting `{target_path}`.",
@@ -395,7 +479,7 @@ def _render_packet_markdown(
 
     if stage in ("falsify", "reproduce"):
         lines.append(
-            f"Query `run.db` (`SELECT claim_id, title, locus, mechanism, falsification_prediction, falsification_test FROM claims WHERE claim_id IN ({id_csv})`) and inspect the exact source lines in `{target_path}`."
+            f"Inspect the exact source lines in `{target_path}` for the assigned claim record(s) above (`{id_csv}`) and record verdicts via `ajar claim` CLI / MCP tools (never query `run.db` directly)."
         )
     elif stage == "chain":
         lines.append(
@@ -560,6 +644,7 @@ def build_swarm_packet(
         "stage": stage,
         "wire_profile": resolved_profile,
         "item_ids": selected_ids,
+        "items": selected,
         "line_count": len(packet_md.splitlines()),
         "packet_markdown": packet_md,
     }

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import json
 import os
 import pathlib
 import re
@@ -874,6 +875,20 @@ def _acquire_slot(repro_dir: pathlib.Path, max_slots: int = 8) -> tuple[int, Any
     return (0, fh0)
 
 
+def _clear_stale_slot_git_locks(slot_dir: pathlib.Path) -> list[str]:
+    """Remove stale git index/shallow lock files inside a slot worktree while holding `slot-<k>.lock`."""
+    git_dir = slot_dir / ".git"
+    if not git_dir.is_dir():
+        return []
+    cleared: list[str] = []
+    for lock_name in ("index.lock", "shallow.lock"):
+        lock_file = git_dir / lock_name
+        if lock_file.is_file() and not lock_file.is_symlink():
+            lock_file.unlink(missing_ok=True)
+            cleared.append(lock_name)
+    return cleared
+
+
 def _prepare_slot_worktree(mirror_dir: pathlib.Path, slot_dir: pathlib.Path) -> None:
     env = scrubbed_subprocess_env()
     if not (slot_dir / ".git").exists():
@@ -892,9 +907,63 @@ def _prepare_slot_worktree(mirror_dir: pathlib.Path, slot_dir: pathlib.Path) -> 
             check=True,
         )
     else:
+        _clear_stale_slot_git_locks(slot_dir)
         subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, env=env, check=True)
         _clean_slot_preserving_objects(slot_dir, check=True)
     _neutralize_python_pth_escapes(slot_dir)
+
+
+def _persist_repro_failure_artifact(
+    *,
+    run_dir: pathlib.Path,
+    claim_id: str,
+    poc_cmd: str,
+    control_cmd: str,
+    build_cmd: str,
+    micropatch_path: pathlib.Path,
+    result: dict[str, Any],
+) -> str:
+    """Persist a scrubbed, replayable JSON failure receipt under `repro/failures/<claim_id>-<n>.json`."""
+    failures_dir = run_dir / "repro" / "failures"
+    failures_dir.mkdir(parents=True, exist_ok=True)
+    safe_cid = re.sub(r"[^A-Za-z0-9_.-]+", "_", (claim_id or "claim").strip())[:64] or "claim"
+    receipt = {
+        "schema": "ajar-repro-failure/1",
+        "recorded_at": utc_now_iso(),
+        "claim_id": claim_id,
+        "error_class": str(result.get("error_class") or ""),
+        "reason": scrub_text(str(result.get("reason") or "")),
+        "observation_hash": str(result.get("observation_hash") or ""),
+        "replay": {
+            "poc_cmd": scrub_text(poc_cmd),
+            "control_cmd": scrub_text(control_cmd),
+            "build_cmd": scrub_text(build_cmd),
+            "micropatch_path": scrub_text(str(micropatch_path)),
+        },
+        "arms": {
+            "arm1_clean_poc": result.get("arm1_clean_poc") or {},
+            "arm2_clean_control": result.get("arm2_clean_control") or {},
+            "arm3_patch_poc": result.get("arm3_patch_poc") or {},
+            "arm4_patch_control": result.get("arm4_patch_control") or {},
+            "arm5a_release_poc": result.get("arm5a_release_poc") or {},
+            "arm5b_release_control": result.get("arm5b_release_control") or {},
+        },
+    }
+    encoded = (scrub_text(json.dumps(receipt, indent=2, sort_keys=True, default=str)) + "\n").encode("utf-8")
+    seq = 1
+    while True:
+        fname = f"{safe_cid}-{seq}.json"
+        dest = failures_dir / fname
+        try:
+            fd = os.open(str(dest), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            seq += 1
+            continue
+        try:
+            os.write(fd, encoded)
+        finally:
+            os.close(fd)
+        return f"repro/failures/{fname}"
 
 
 def run_source_reproduction(
@@ -920,6 +989,62 @@ def run_source_reproduction(
     save_post_state: str | None = None,
 ) -> dict[str, Any]:
     """Execute 4-arm counterfactual source reproduction (+ optional Arm 5A/5B Release UB Differential & post-state snapshot)."""
+    res = _run_source_reproduction_impl(
+        run_dir=run_dir,
+        target_dir=target_dir,
+        claim_id=claim_id,
+        poc_cmd=poc_cmd,
+        control_cmd=control_cmd,
+        micropatch_path=micropatch_path,
+        oracle=oracle,
+        determinism=determinism,
+        trials=trials,
+        timeout_sec=timeout_sec,
+        warm_cross_kill_claims=warm_cross_kill_claims,
+        claim_locus=claim_locus,
+        shared_guard_locus=shared_guard_locus,
+        max_changed_lines=max_changed_lines,
+        release_cmd=release_cmd,
+        release_control_cmd=release_control_cmd,
+        surface_kind=surface_kind,
+        build_cmd=build_cmd,
+        save_post_state=save_post_state,
+    )
+    if not res.get("passed"):
+        res["failure_artifact"] = _persist_repro_failure_artifact(
+            run_dir=run_dir,
+            claim_id=claim_id,
+            poc_cmd=poc_cmd,
+            control_cmd=control_cmd,
+            build_cmd=build_cmd,
+            micropatch_path=micropatch_path,
+            result=res,
+        )
+    return res
+
+
+def _run_source_reproduction_impl(
+    *,
+    run_dir: pathlib.Path,
+    target_dir: pathlib.Path,
+    claim_id: str,
+    poc_cmd: str,
+    control_cmd: str,
+    micropatch_path: pathlib.Path,
+    oracle: dict[str, Any] | None = None,
+    determinism: str = "deterministic",
+    trials: int = 8,
+    timeout_sec: int = 60,
+    warm_cross_kill_claims: list[dict[str, str]] | None = None,
+    claim_locus: str = "",
+    shared_guard_locus: str = "",
+    max_changed_lines: int = 16,
+    release_cmd: str = "",
+    release_control_cmd: str = "",
+    surface_kind: str = "",
+    build_cmd: str = "",
+    save_post_state: str | None = None,
+) -> dict[str, Any]:
     ep_ok, ep_msg = validate_entrypoint_fidelity(poc_cmd, surface_kind=surface_kind)
     if not ep_ok:
         return {
@@ -1376,6 +1501,7 @@ def run_source_reproduction(
             snap_file = raw_snap if raw_snap.is_absolute() else (run_dir / raw_snap)
             snap_file.unlink(missing_ok=True)
         if (slot_dir / ".git").exists():
+            _clear_stale_slot_git_locks(slot_dir)
             subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
             _clean_slot_preserving_objects(slot_dir, check=False)
             _bump_files_mtime(slot_dir, touched_files, watermark_file)
@@ -1393,15 +1519,13 @@ def run_repro_try(
     oracle: dict[str, Any] | None = None,
     timeout_sec: int = 60,
 ) -> dict[str, Any]:
-    """Execute a strike-free exploratory build/PoC smoke test inside scratch `slot-inst`."""
+    """Execute a strike-free exploratory build/PoC smoke test inside the shared 8-slot pool (`slot-<k>`)."""
     helpers_dir = ensure_helpers_runtime(run_dir)
     mirror_dir = init_source_mirror(run_dir, target_dir)
     repro_dir = run_dir / "repro"
-    repro_dir.mkdir(parents=True, exist_ok=True)
-    lock_fh = open(repro_dir / "slot-inst.lock", "a+", encoding="utf-8")
-    fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
-    slot_dir = repro_dir / "slot-inst"
-    cache_dir = resolve_local_build_cache_dir(run_dir, "cache-inst")
+    slot_idx, lock_fh = _acquire_slot(repro_dir)
+    slot_dir = repro_dir / f"slot-{slot_idx}"
+    cache_dir = resolve_local_build_cache_dir(run_dir, f"cache-{slot_idx}")
     watermark_file = cache_dir / "watermark_ns"
     touched: list[str] = []
 
@@ -1411,6 +1535,7 @@ def run_repro_try(
             if not patch_path.is_file():
                 return {
                     "ok": False,
+                    "slot_index": slot_idx,
                     "error_class": "preflight_error",
                     "reason": f"Patch file not found: {patch_path}",
                 }
@@ -1424,6 +1549,7 @@ def run_repro_try(
             if ap.returncode != 0:
                 return {
                     "ok": False,
+                    "slot_index": slot_idx,
                     "error_class": "preflight_error",
                     "reason": f"Patch failed `git apply`: {scrub_text(ap.stderr[:240])}",
                 }
@@ -1445,6 +1571,7 @@ def run_repro_try(
             if build_res["exit_code"] != 0 or build_res["timed_out"]:
                 return {
                     "ok": False,
+                    "slot_index": slot_idx,
                     "error_class": "build_or_env_error",
                     "reason": f"--build-cmd failed (exit={build_res['exit_code']})",
                     "build": build_res,
@@ -1461,6 +1588,7 @@ def run_repro_try(
         is_bld = (not fired) and _detect_build_or_env_failure(res["exit_code"], res["stdout"], res["stderr"])
         return {
             "ok": True,
+            "slot_index": slot_idx,
             "defect_fired": fired,
             "error_class": "build_or_env_error" if is_bld else "",
             "build": build_res,
@@ -1468,6 +1596,7 @@ def run_repro_try(
         }
     finally:
         if (slot_dir / ".git").exists():
+            _clear_stale_slot_git_locks(slot_dir)
             subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
             _clean_slot_preserving_objects(slot_dir, check=False)
             if touched:

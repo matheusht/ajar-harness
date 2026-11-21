@@ -22,6 +22,8 @@ from ajar.swarm import (
     sync_run_to_shared_mirror,
 )
 
+pytestmark = pytest.mark.integration
+
 
 def _run_ajar(
     args: list[str],

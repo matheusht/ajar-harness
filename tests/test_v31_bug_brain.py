@@ -10,6 +10,8 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
+import pytest
+
 from ajar import EXIT_GATE_BLOCKED, EXIT_OK
 from ajar.cli import main as cli_main
 from ajar.db import open_run_db, render_task_context
@@ -20,6 +22,8 @@ from ajar.gates import (
 )
 from ajar.runner import run_autonomous_schedule, select_model_for_task
 from ajar.workspace import init_run_workspace
+
+pytestmark = pytest.mark.integration
 
 
 def _run_cli(argv: list[str], ajar_home: pathlib.Path) -> tuple[int, dict[str, object]]:

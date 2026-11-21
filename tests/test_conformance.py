@@ -76,9 +76,12 @@ def _iter_active_text_files() -> list[pathlib.Path]:
     active: list[pathlib.Path] = []
     skip_dirs = {
         ".git",
+        ".mypy_cache",
         ".pytest_cache",
         ".ruff_cache",
         "__pycache__",
+        "build",
+        "dist",
         "node_modules",
         "target",
         ".venv",
@@ -89,6 +92,7 @@ def _iter_active_text_files() -> list[pathlib.Path]:
             d
             for d in dirs
             if d not in skip_dirs
+            and not d.endswith(".egg-info")
             and not (rel_root == pathlib.Path(".") and d == "engagements")
             and not (rel_root == pathlib.Path("tools") and d == "legacy")
             and not (rel_root == pathlib.Path("docs") and d == "archive")

@@ -8,6 +8,8 @@ import stat
 import tempfile
 import unittest
 
+import pytest
+
 from ajar.db import open_run_db, utc_now_iso
 from ajar.hooks import evaluate_claude_stop_hook
 from ajar.mcp import handle_jsonrpc_message, serve_mcp_stdio
@@ -15,6 +17,8 @@ from ajar.oracles import query_oracle
 from ajar.repomap import build_repomap
 from ajar.runner import run_autonomous_schedule
 from ajar.workspace import init_run_workspace, unlock_run_dir_permissions
+
+pytestmark = pytest.mark.integration
 
 
 class TestMcpHooksRunner(unittest.TestCase):

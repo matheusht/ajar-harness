@@ -8,7 +8,11 @@ import pathlib
 import subprocess
 import sys
 
+import pytest
+
 from ajar.workspace import unlock_run_dir_permissions
+
+pytestmark = pytest.mark.integration
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 

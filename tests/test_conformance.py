@@ -198,10 +198,12 @@ class TestConformance(unittest.TestCase):
         self.assertEqual(leaks, [], "Unredacted secret patterns found:\n" + "\n".join(leaks))
 
     def test_archived_legacy_reader_closure_passes(self) -> None:
-        venv_py = pathlib.Path("/tmp/ajar-venv/bin/python")
-        py_bin = str(venv_py) if venv_py.is_file() else sys.executable
+        import importlib.util
+
+        if importlib.util.find_spec("jsonschema") is None:
+            self.skipTest("Optional dev dependency `jsonschema==4.26.0` not installed in active interpreter.")
         proc = subprocess.run(
-            [py_bin, str(REPO_ROOT / "tools" / "legacy" / "dossier-inspector-test.py")],
+            [sys.executable, str(REPO_ROOT / "tools" / "legacy" / "dossier-inspector-test.py")],
             cwd=str(REPO_ROOT),
             capture_output=True,
             text=True,

@@ -13,8 +13,17 @@ Use this skill to build the initial component and attack-surface map, record ope
    ```bash
    ajar doctor --target <target_dir> [--subdir <rel_path>] [--peer <sibling_repo>]
    ajar quote <target_dir> [--diff <base..head>]
-   ajar init <target_dir> [--diff <base..head>] [--brief-file <brief.md>] [--uncapped] [--parent-run <baseline_run_id>]
+   ajar init <target_dir> [--stopping exhaustive-high|first-high|crown-jewel] [--phase hunt|remediate] [--diff <base..head>] [--brief-file <brief.md>] [--uncapped] [--parent-run <baseline_run_id>]
    ajar brief
+   ```
+   When pursuing end-to-end multi-stage chains (`--stopping crown-jewel --phase hunt`), register concrete terminal sinks (`crown_jewels`) so backward sink cones and Open Doors anchor on real execution/state boundaries without closing out on early multi-step stepping stones:
+   ```bash
+   ajar door jewel-add \
+     --name "<sink_name>" \
+     --locus "<file:line>" \
+     --impact-class <rce|arbitrary_write|auth_bypass|fund_drain|sandbox_escape|state_corruption> \
+     --symbols "<fn_or_sink_symbol_1,symbol_2>" \
+     --max-steps 2
    ```
 2. Inspect the Personalized PageRank symbol graph and cohesive subsystem call cones (`--slice-cap 15000` soft focus target; workers may still inspect any caller or callee across the repository):
    ```bash

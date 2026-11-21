@@ -38,7 +38,7 @@ from ajar.redact import scrub_text
 from ajar.report import build_report_data, render_markdown_report
 from ajar.workspace import init_run_workspace
 
-REASON_TASK_KINDS: frozenset[str] = frozenset({"map", "falsify", "chain", "patch", "escalate"})
+REASON_TASK_KINDS: frozenset[str] = frozenset({"map", "falsify", "chain", "bridge", "patch", "escalate"})
 REFUSAL_MARKERS: tuple[str, ...] = (
     "i cannot assist",
     "i can't assist",
@@ -72,7 +72,7 @@ def detect_soliloquy_transcript(text: str, *, state_mutations_recorded: int = 0)
 
 
 def select_model_for_task(task: dict[str, Any], *, fallback: bool = False) -> str:
-    """Route tasks across reasoning (`map`/`falsify`/`chain`/`patch`/`escalate` + `zero_skill` `investigate`), hunting, and refusal fallback tiers."""
+    """Route tasks across reasoning (`map`/`falsify`/`chain`/`bridge`/`patch`/`escalate` + `zero_skill` `investigate`), hunting, and refusal fallback tiers."""
     default_model = os.environ.get("AJAR_MODEL", "gpt-4.1-mini").strip() or "gpt-4.1-mini"
     if fallback:
         return os.environ.get("AJAR_MODEL_FALLBACK", "").strip() or default_model
@@ -279,6 +279,7 @@ def run_autonomous_schedule(
     target_mode: str = "source",
     goal: str = "Identify, falsify, and reproduce high-severity software vulnerabilities.",
     stopping_criterion: str = "exhaustive-high",
+    campaign_phase: str = "hunt",
     budget_usd: float | None = None,
     workers: int = 2,
     discover_passes: int = 1,
@@ -297,6 +298,7 @@ def run_autonomous_schedule(
             workspace_mode="envelope",
             goal=goal,
             stopping_criterion=stopping_criterion,
+            campaign_phase=campaign_phase,
             budget_usd=budget_usd,
             run_id=run_id,
             ajar_home=ajar_home,

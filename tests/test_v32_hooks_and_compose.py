@@ -740,6 +740,9 @@ class TestV32HooksAndComposableRepro(unittest.TestCase):
         self.assertEqual(rc, EXIT_OK)
         fid = str(rep["finding_id"])
 
+        rc_ph, _ = _run_cli(["phase", "advance", "--to", "remediate", "--run", "run-fix"], self.ajar_home)
+        self.assertEqual(rc_ph, EXIT_OK)
+
         # 1) Variants that NEVER trigger on clean HEAD (noop commands) MUST fail Arm 6!
         rc_noop, res_noop = _run_cli(
             [
@@ -799,7 +802,7 @@ class TestV32HooksAndComposableRepro(unittest.TestCase):
         )
         self.assertEqual(rc_pass, EXIT_OK, str(res_pass))
         self.assertTrue(res_pass["passed"])
-        self.assertEqual(res_pass["remediation_state"], "maintainer_patched")
+        self.assertEqual(res_pass["remediation_state"], "verified_local")
         arms = res_pass["arms"]  # type: ignore[index]
         self.assertEqual(arms["arm5_full_suite"]["baseline_exit_code"], 1)  # type: ignore[index]
         self.assertEqual(arms["arm5_full_suite"]["new_regressions"], [])  # type: ignore[index]

@@ -74,6 +74,8 @@ def build_report_data(
         "run_id": run.get("run_id", ""),
         "target_path": run.get("target_path", ""),
         "target_mode": run.get("target_mode", "source"),
+        "campaign_phase": run.get("campaign_phase", "hunt"),
+        "stopping_criterion": run.get("stopping_criterion", "exhaustive-high"),
         "diff_range": run.get("diff_range", ""),
         "goal": run.get("goal", ""),
         "status": run.get("status", ""),
@@ -82,6 +84,8 @@ def build_report_data(
         "finished_at": run.get("finished_at"),
         "threat_model": dict(tm_row) if (tm_row := conn.execute("SELECT * FROM threat_models LIMIT 1").fetchone()) else None,
         "threat_assumptions": list_rows(conn, "SELECT * FROM threat_assumptions ORDER BY created_at ASC"),
+        "crown_jewels": list_rows(conn, "SELECT * FROM crown_jewels ORDER BY created_at ASC"),
+        "open_doors": list_rows(conn, "SELECT * FROM parked_doors ORDER BY created_at ASC"),
         "findings": findings,
         "verified_chains": chains,
         "patch_verifications": patch_verifications,
@@ -95,6 +99,7 @@ def build_report_data(
         "claim_summary_counts": claim_counts,
         "gates": gates["gates"],
         "gates_passed": gates["passed"],
+        "crown_jewel_reached": gates["crown_jewel_reached"],
         "economics": gates["economics"],
     }
     if include_rejected_appendix:

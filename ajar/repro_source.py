@@ -23,6 +23,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import tarfile
 import tempfile
 import time
 from typing import Any, Mapping
@@ -417,7 +418,11 @@ def _run_shell_in_slot(
         for k, v in extra_env.items():
             overrides[str(k)] = str(v)
 
-    env = scrubbed_subprocess_env(overrides=overrides, tmp_dir=tmp_dir)
+    env = scrubbed_subprocess_env(
+        overrides=overrides,
+        tmp_dir=tmp_dir,
+        run_dir=slot_dir.parent.parent.resolve(),
+    )
     env["PATH"] = f"{eff_helpers / 'bin'}{os.pathsep}{env.get('PATH', '/usr/bin:/bin')}"
     argv = ["unshare", "-rn", "bash", "-c", cmd] if has_netns else ["bash", "-c", cmd]
 
@@ -703,9 +708,13 @@ def validate_no_static_source_cheat(
         for cb in compiled_basenames:
             if cb not in text:
                 continue
-            # Allow scripts that only pass `src/foo.c` into a compiler argv without reading source text.
+            # Allow scripts that only pass `src/foo.c` into a compiler argv or mention filenames in comments/headers.
             non_compiler_mentions = [
-                ln for ln in text.splitlines() if cb in ln and not COMPILER_TOKEN_RE.search(ln)
+                ln
+                for ln in text.splitlines()
+                if cb in ln
+                and not ln.lstrip().startswith(("#", "--- ", "+++ "))
+                and not COMPILER_TOKEN_RE.search(ln)
             ]
             if non_compiler_mentions and (".read_text(" in text or ".read_bytes(" in text or not COMPILER_TOKEN_RE.search(text)):
                 return (
@@ -714,6 +723,137 @@ def validate_no_static_source_cheat(
                     "Execute the compiled binary or test harness on concrete runtime inputs.",
                 )
     return (True, "ok")
+
+
+BUILD_OR_ENV_ERROR_RE = re.compile(
+    r"(?:"
+    r"command not found"
+    r"|No such file or directory.*\b(?:cargo|rustc|clang|gcc|cc|make|cmake|go|solc|forge)\b"
+    r"|fatal error:\s*['\"<][^'\">\n]+['\">]\s*file not found"
+    r"|cannot find -l[A-Za-z0-9_+-]+"
+    r"|No rule to make target"
+    r"|error:\s*failed to get `[^`]+` as a dependency"
+    r"|error:\s*no matching package named"
+    r"|error:\s*attempting to make an HTTP request,\s*but --offline was specified"
+    r"|xcrun:\s*error:"
+    r"|error\[E0463\]:\s*can't find crate"
+    r"|collect2:\s*error:\s*ld returned"
+    r"|clang(?:\+\+)?:\s*error:\s*linker command failed"
+    r"|CMake Error"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _detect_build_or_env_failure(exit_code: int, stdout: str, stderr: str) -> bool:
+    """Distinguish compiler/linker/SDK/toolchain failures from genuine target-negative runs."""
+    combined = f"{stdout or ''}\n{stderr or ''}"
+    if DEBUG_ABORT_SIGNAL_RE.search(combined):
+        return False
+    if int(exit_code) == 127:
+        return True
+    return bool(BUILD_OR_ENV_ERROR_RE.search(combined))
+
+
+SNAPSHOT_SKIP_NAMES: frozenset[str] = frozenset(
+    {".deps", "CMakeFiles", "__pycache__", ".pytest_cache", "node_modules"}
+)
+SNAPSHOT_SKIP_SUFFIXES: frozenset[str] = frozenset(
+    {".o", ".lo", ".a", ".la", ".d"}
+)
+
+
+def capture_slot_post_state_snapshot(
+    *,
+    run_dir: pathlib.Path,
+    slot_dir: pathlib.Path,
+    rel_dir: str,
+    claim_id: str = "",
+    source_cmd: str = "",
+) -> dict[str, Any]:
+    """Archive a relative directory/file produced by Arm 1 inside `slot-<k>` into `repro/snapshots/<snp_id>.tar.gz`."""
+    from ajar.db import new_id, utc_now_iso
+
+    raw_rel = (rel_dir or ".").strip() or "."
+    norm_rel = pathlib.PurePosixPath(raw_rel)
+    if norm_rel.is_absolute() or ".." in norm_rel.parts:
+        return {"ok": False, "reason": f"Invalid --save-post-state relative path: {raw_rel!r}"}
+
+    slot_real = slot_dir.resolve()
+    rel_str = "" if str(norm_rel) == "." else str(norm_rel)
+    root_target = slot_dir / rel_str if rel_str else slot_dir
+    if not root_target.exists() and not root_target.is_symlink():
+        return {"ok": False, "reason": f"--save-post-state path {raw_rel!r} does not exist after Arm 1."}
+
+    snap_dir = run_dir / "repro" / "snapshots"
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    snap_id = new_id("snp")
+    archive_path = snap_dir / f"{snap_id}.tar.gz"
+
+    entries: list[str] = []
+    skipped_symlinks = 0
+
+    def _safe_arcname(p: pathlib.Path) -> str:
+        return p.relative_to(slot_dir).as_posix()
+
+    def _add_path(tar: tarfile.TarFile, p: pathlib.Path) -> None:
+        nonlocal skipped_symlinks
+        arc = _safe_arcname(p)
+        if not arc or arc == ".":
+            return
+        parts = pathlib.PurePosixPath(arc).parts
+        if any(pt in SNAPSHOT_SKIP_NAMES for pt in parts):
+            return
+        if len(parts) >= 2 and parts[0] == ".git" and parts[1] == "objects":
+            return
+        if p.suffix.lower() in SNAPSHOT_SKIP_SUFFIXES and not p.is_symlink():
+            return
+        if p.is_symlink():
+            link_dest = os.readlink(p)
+            if os.path.isabs(link_dest):
+                skipped_symlinks += 1
+                return
+            joined = os.path.normpath(os.path.join(os.path.dirname(arc), link_dest))
+            if joined == ".." or joined.startswith("../"):
+                skipped_symlinks += 1
+                return
+            tar.add(str(p), arcname=arc, recursive=False)
+            entries.append(f"{arc} -> {link_dest}")
+            return
+        if p.is_dir():
+            tar.add(str(p), arcname=arc, recursive=False)
+            for child in sorted(p.iterdir(), key=lambda x: x.name):
+                _add_path(tar, child)
+        elif p.is_file():
+            try:
+                resolved = p.resolve()
+                resolved.relative_to(slot_real)
+            except ValueError:
+                return
+            tar.add(str(p), arcname=arc, recursive=False)
+            entries.append(arc)
+
+    with tarfile.open(archive_path, "w:gz") as tar:
+        if root_target == slot_dir:
+            for child in sorted(slot_dir.iterdir(), key=lambda x: x.name):
+                _add_path(tar, child)
+        else:
+            _add_path(tar, root_target)
+
+    raw_bytes = archive_path.read_bytes()
+    sha256_hex = hashlib.sha256(raw_bytes).hexdigest()
+    return {
+        "ok": True,
+        "snapshot_id": snap_id,
+        "claim_id": claim_id,
+        "rel_dir": raw_rel,
+        "archive_path": str(archive_path),
+        "sha256": sha256_hex,
+        "size_bytes": len(raw_bytes),
+        "manifest": {"entry_count": len(entries), "sample_entries": entries[:24], "skipped_external_symlinks": skipped_symlinks},
+        "source_cmd": scrub_text(source_cmd[:500]),
+        "created_at": utc_now_iso(),
+    }
 
 
 def _acquire_slot(repro_dir: pathlib.Path, max_slots: int = 8) -> tuple[int, Any]:
@@ -774,12 +914,15 @@ def run_source_reproduction(
     release_cmd: str = "",
     release_control_cmd: str = "",
     surface_kind: str = "",
+    build_cmd: str = "",
+    save_post_state: str | None = None,
 ) -> dict[str, Any]:
-    """Execute 4-arm counterfactual source reproduction (+ optional Arm 5A/5B Release UB Differential)."""
+    """Execute 4-arm counterfactual source reproduction (+ optional Arm 5A/5B Release UB Differential & post-state snapshot)."""
     ep_ok, ep_msg = validate_entrypoint_fidelity(poc_cmd, surface_kind=surface_kind)
     if not ep_ok:
         return {
             "passed": False,
+            "error_class": "preflight_error",
             "reason": ep_msg,
             "observation_hash": hashlib.sha256(ep_msg.encode("utf-8")).hexdigest()[:16],
             "micropatch_diff": "",
@@ -796,6 +939,7 @@ def run_source_reproduction(
     if not micropatch_path.is_file():
         return {
             "passed": False,
+            "error_class": "preflight_error",
             "reason": f"Micro-patch file not found: {micropatch_path}",
             "observation_hash": hashlib.sha256(b"missing_patch").hexdigest()[:16],
             "micropatch_diff": "",
@@ -819,6 +963,7 @@ def run_source_reproduction(
     if not valid_diff:
         return {
             "passed": False,
+            "error_class": "preflight_error",
             "reason": f"Pre-flight micro-patch validation failed: {diff_msg}",
             "claim_mismatch": diff_msg.startswith("claim_mismatch:"),
             "observation_hash": hashlib.sha256(diff_msg.encode("utf-8")).hexdigest()[:16],
@@ -842,6 +987,7 @@ def run_source_reproduction(
     if not cheat_ok:
         return {
             "passed": False,
+            "error_class": "preflight_error",
             "reason": cheat_msg,
             "observation_hash": hashlib.sha256(cheat_msg.encode("utf-8")).hexdigest()[:16],
             "micropatch_diff": scrub_text(diff_text[:4000]),
@@ -867,9 +1013,37 @@ def run_source_reproduction(
 
     n_trials = max(4, int(trials)) if determinism == "probabilistic_race" else 1
     min_race_hits = max(3, n_trials // 2) if determinism == "probabilistic_race" else 1
+    captured_snapshot: dict[str, Any] | None = None
+    verified_success = False
 
     try:
         _prepare_slot_worktree(mirror_dir, slot_dir)
+
+        if build_cmd.strip():
+            bld_clean = _run_shell_in_slot(
+                build_cmd.strip(),
+                slot_dir=slot_dir,
+                cache_dir=cache_dir,
+                timeout_sec=max(int(timeout_sec), 180),
+                helpers_dir=helpers_dir,
+            )
+            if bld_clean["exit_code"] != 0 or bld_clean["timed_out"]:
+                return {
+                    "passed": False,
+                    "error_class": "build_or_env_error",
+                    "reason": f"Clean-HEAD --build-cmd failed (exit={bld_clean['exit_code']}): {bld_clean['stderr'][:240]}",
+                    "observation_hash": hashlib.sha256(f"bld1:{bld_clean['exit_code']}".encode("utf-8")).hexdigest()[:16],
+                    "micropatch_diff": scrub_text(diff_text[:4000]),
+                    "build_clean": bld_clean,
+                    "arm1_clean_poc": {"arm_passed": False},
+                    "arm2_clean_control": {"arm_passed": False},
+                    "arm3_patch_poc": {"arm_passed": False},
+                    "arm4_patch_control": {"arm_passed": False},
+                    "arm5a_release_poc": {},
+                    "arm5b_release_control": {},
+                    "ub_divergence_class": "",
+                    "cross_killed_claim_ids": [],
+                }
 
         # Arm 1: Clean baseline + PoC -> MUST fire defect.
         arm1 = _run_trials(
@@ -885,9 +1059,15 @@ def run_source_reproduction(
         obs_seed = f"a1:{arm1['exit_code']}:{arm1['stdout'][:240]}:{arm1['stderr'][:240]}"
 
         if not arm1["arm_passed"]:
+            is_build_err = _detect_build_or_env_failure(
+                int(arm1["exit_code"]), str(arm1.get("stdout", "")), str(arm1.get("stderr", ""))
+            )
+            err_cls = "build_or_env_error" if is_build_err else "target_negative"
+            prefix = "Build/toolchain error during Arm 1" if is_build_err else "Arm 1 (clean + PoC) did not trigger defect"
             return {
                 "passed": False,
-                "reason": f"Arm 1 (clean + PoC) did not trigger defect ({arm1['defect_hits']}/{n_trials} hits, exit={arm1['exit_code']}).",
+                "error_class": err_cls,
+                "reason": f"{prefix} ({arm1['defect_hits']}/{n_trials} hits, exit={arm1['exit_code']}).",
                 "observation_hash": hashlib.sha256(obs_seed.encode("utf-8")).hexdigest()[:16],
                 "micropatch_diff": scrub_text(diff_text[:4000]),
                 "arm1_clean_poc": arm1,
@@ -900,9 +1080,45 @@ def run_source_reproduction(
                 "cross_killed_claim_ids": [],
             }
 
+        # Capture post-state snapshot right after Arm 1 succeeds (before `git reset --hard`) when requested!
+        if save_post_state is not None and save_post_state.strip():
+            snap_res = capture_slot_post_state_snapshot(
+                run_dir=run_dir,
+                slot_dir=slot_dir,
+                rel_dir=save_post_state.strip(),
+                claim_id=claim_id,
+                source_cmd=poc_cmd,
+            )
+            if snap_res.get("ok"):
+                captured_snapshot = snap_res
+
         # Reset working tree between Arm 1 and Arm 2 in case PoC wrote scratch files.
         subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
         _clean_slot_preserving_objects(slot_dir, check=True)
+        if build_cmd.strip():
+            bld_arm2 = _run_shell_in_slot(
+                build_cmd.strip(),
+                slot_dir=slot_dir,
+                cache_dir=cache_dir,
+                timeout_sec=max(int(timeout_sec), 180),
+                helpers_dir=helpers_dir,
+            )
+            if bld_arm2["exit_code"] != 0 or bld_arm2["timed_out"]:
+                return {
+                    "passed": False,
+                    "error_class": "build_or_env_error",
+                    "reason": f"Arm-2 --build-cmd failed after reset (exit={bld_arm2['exit_code']}): {bld_arm2['stderr'][:240]}",
+                    "observation_hash": hashlib.sha256(f"bld2:{bld_arm2['exit_code']}".encode("utf-8")).hexdigest()[:16],
+                    "micropatch_diff": scrub_text(diff_text[:4000]),
+                    "arm1_clean_poc": arm1,
+                    "arm2_clean_control": {"arm_passed": False},
+                    "arm3_patch_poc": {"arm_passed": False},
+                    "arm4_patch_control": {"arm_passed": False},
+                    "arm5a_release_poc": {},
+                    "arm5b_release_control": {},
+                    "ub_divergence_class": "",
+                    "cross_killed_claim_ids": [],
+                }
 
         # Arm 2: Clean baseline + benign control -> MUST pass cleanly with 0 defect hits.
         arm2 = _run_trials(
@@ -916,8 +1132,12 @@ def run_source_reproduction(
         )
         arm2["arm_passed"] = arm2["defect_hits"] == 0 and arm2["clean_passes"] == n_trials
         if not arm2["arm_passed"]:
+            is_build_err = _detect_build_or_env_failure(
+                int(arm2["exit_code"]), str(arm2.get("stdout", "")), str(arm2.get("stderr", ""))
+            )
             return {
                 "passed": False,
+                "error_class": "build_or_env_error" if is_build_err else "target_negative",
                 "reason": f"Arm 2 (clean + benign control) failed or triggered defect (exit={arm2['exit_code']}).",
                 "observation_hash": hashlib.sha256((obs_seed + f"|a2:{arm2['exit_code']}").encode("utf-8")).hexdigest()[:16],
                 "micropatch_diff": scrub_text(diff_text[:4000]),
@@ -945,6 +1165,7 @@ def run_source_reproduction(
             err = scrub_text(apply_proc.stderr.strip()[:300])
             return {
                 "passed": False,
+                "error_class": "preflight_error",
                 "reason": f"Micro-patch failed `git apply` cleanly: {err}",
                 "observation_hash": hashlib.sha256((obs_seed + "|apply_fail").encode("utf-8")).hexdigest()[:16],
                 "micropatch_diff": scrub_text(diff_text[:4000]),
@@ -961,6 +1182,32 @@ def run_source_reproduction(
         _neutralize_python_pth_escapes(slot_dir)
         _bump_files_mtime(slot_dir, touched_files, watermark_file)
 
+        if build_cmd.strip():
+            bld_patch = _run_shell_in_slot(
+                build_cmd.strip(),
+                slot_dir=slot_dir,
+                cache_dir=cache_dir,
+                timeout_sec=max(int(timeout_sec), 180),
+                helpers_dir=helpers_dir,
+            )
+            if bld_patch["exit_code"] != 0 or bld_patch["timed_out"]:
+                return {
+                    "passed": False,
+                    "error_class": "build_or_env_error",
+                    "reason": f"Patched --build-cmd failed to compile micro-patch (exit={bld_patch['exit_code']}): {bld_patch['stderr'][:240]}",
+                    "observation_hash": hashlib.sha256(f"bld3:{bld_patch['exit_code']}".encode("utf-8")).hexdigest()[:16],
+                    "micropatch_diff": scrub_text(diff_text[:4000]),
+                    "build_patched": bld_patch,
+                    "arm1_clean_poc": arm1,
+                    "arm2_clean_control": arm2,
+                    "arm3_patch_poc": {"arm_passed": False},
+                    "arm4_patch_control": {"arm_passed": False},
+                    "arm5a_release_poc": {},
+                    "arm5b_release_control": {},
+                    "ub_divergence_class": "",
+                    "cross_killed_claim_ids": [],
+                }
+
         # Arm 3: Micro-patched target + PoC -> defect MUST stop firing (0 hits).
         arm3 = _run_trials(
             poc_cmd,
@@ -975,6 +1222,7 @@ def run_source_reproduction(
         if not arm3["arm_passed"]:
             return {
                 "passed": False,
+                "error_class": "target_negative",
                 "reason": (
                     f"Arm 3 (micro-patch + PoC) still triggered defect ({arm3['defect_hits']}/{n_trials} hits). "
                     "Micro-patch did not fix the root cause triggered by the PoC."
@@ -1003,8 +1251,12 @@ def run_source_reproduction(
         )
         arm4["arm_passed"] = arm4["defect_hits"] == 0 and arm4["clean_passes"] == n_trials
         if not arm4["arm_passed"]:
+            is_build_err = _detect_build_or_env_failure(
+                int(arm4["exit_code"]), str(arm4.get("stdout", "")), str(arm4.get("stderr", ""))
+            )
             return {
                 "passed": False,
+                "error_class": "build_or_env_error" if is_build_err else "target_negative",
                 "reason": (
                     f"Arm 4 (micro-patch + benign control) broke normal behavior (exit={arm4['exit_code']}). "
                     "Destructive or over-broad micro-patches are rejected."
@@ -1079,6 +1331,7 @@ def run_source_reproduction(
             if ub_divergence_class == "release_control_failed":
                 return {
                     "passed": False,
+                    "error_class": "target_negative",
                     "reason": f"Arm 5B (release-profile benign control) failed (exit={arm5b['exit_code']}).",
                     "observation_hash": hashlib.sha256((obs_seed + "|a5b_fail").encode("utf-8")).hexdigest()[:16],
                     "micropatch_diff": scrub_text(diff_text[:4000]),
@@ -1098,8 +1351,10 @@ def run_source_reproduction(
         if ub_divergence_class:
             reason_msg += f" Release UB differential={ub_divergence_class}."
 
+        verified_success = True
         return {
             "passed": True,
+            "error_class": "",
             "reason": reason_msg,
             "observation_hash": hashlib.sha256((obs_seed + "|verified").encode("utf-8")).hexdigest()[:16],
             "slot_index": slot_idx,
@@ -1113,11 +1368,109 @@ def run_source_reproduction(
             "arm5b_release_control": arm5b,
             "ub_divergence_class": ub_divergence_class,
             "cross_killed_claim_ids": cross_killed,
+            "post_state_snapshot": captured_snapshot,
+        }
+    finally:
+        if not verified_success and captured_snapshot and captured_snapshot.get("archive_path"):
+            pathlib.Path(str(captured_snapshot["archive_path"])).unlink(missing_ok=True)
+        if (slot_dir / ".git").exists():
+            subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
+            _clean_slot_preserving_objects(slot_dir, check=False)
+            _bump_files_mtime(slot_dir, touched_files, watermark_file)
+        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+        lock_fh.close()
+
+
+def run_repro_try(
+    *,
+    run_dir: pathlib.Path,
+    target_dir: pathlib.Path,
+    cmd: str,
+    patch_path: pathlib.Path | None = None,
+    build_cmd: str = "",
+    oracle: dict[str, Any] | None = None,
+    timeout_sec: int = 60,
+) -> dict[str, Any]:
+    """Execute a strike-free exploratory build/PoC smoke test inside scratch `slot-inst`."""
+    from ajar.repro_compose import ensure_helpers_runtime
+
+    helpers_dir = ensure_helpers_runtime(run_dir)
+    mirror_dir = init_source_mirror(run_dir, target_dir)
+    repro_dir = run_dir / "repro"
+    repro_dir.mkdir(parents=True, exist_ok=True)
+    lock_fh = open(repro_dir / "slot-inst.lock", "a+", encoding="utf-8")
+    fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+    slot_dir = repro_dir / "slot-inst"
+    cache_dir = resolve_local_build_cache_dir(run_dir, "cache-inst")
+    watermark_file = cache_dir / "watermark_ns"
+    touched: list[str] = []
+
+    try:
+        _prepare_slot_worktree(mirror_dir, slot_dir)
+        if patch_path is not None:
+            if not patch_path.is_file():
+                return {
+                    "ok": False,
+                    "error_class": "preflight_error",
+                    "reason": f"Patch file not found: {patch_path}",
+                }
+            ap = subprocess.run(
+                ["git", "-C", str(slot_dir), "apply", "--whitespace=nowarn", str(patch_path.resolve())],
+                capture_output=True,
+                text=True,
+                env=scrubbed_subprocess_env(),
+                check=False,
+            )
+            if ap.returncode != 0:
+                return {
+                    "ok": False,
+                    "error_class": "preflight_error",
+                    "reason": f"Patch failed `git apply`: {scrub_text(ap.stderr[:240])}",
+                }
+            for ln in patch_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                if ln.startswith("+++ ") and ln[4:].strip() != "/dev/null":
+                    touched.append(re.sub(r"^b/", "", ln[4:].split("\t", 1)[0].strip()))
+            _neutralize_python_pth_escapes(slot_dir)
+            _bump_files_mtime(slot_dir, touched, watermark_file)
+
+        build_res: dict[str, Any] = {}
+        if build_cmd.strip():
+            build_res = _run_shell_in_slot(
+                build_cmd.strip(),
+                slot_dir=slot_dir,
+                cache_dir=cache_dir,
+                timeout_sec=max(int(timeout_sec), 180),
+                helpers_dir=helpers_dir,
+            )
+            if build_res["exit_code"] != 0 or build_res["timed_out"]:
+                return {
+                    "ok": False,
+                    "error_class": "build_or_env_error",
+                    "reason": f"--build-cmd failed (exit={build_res['exit_code']})",
+                    "build": build_res,
+                }
+
+        res = _run_shell_in_slot(
+            cmd,
+            slot_dir=slot_dir,
+            cache_dir=cache_dir,
+            timeout_sec=timeout_sec,
+            helpers_dir=helpers_dir,
+        )
+        fired = _evaluate_defect_fired(res["exit_code"], res["stdout"], res["stderr"], res["timed_out"], oracle)
+        is_bld = (not fired) and _detect_build_or_env_failure(res["exit_code"], res["stdout"], res["stderr"])
+        return {
+            "ok": True,
+            "defect_fired": fired,
+            "error_class": "build_or_env_error" if is_bld else "",
+            "build": build_res,
+            "result": res,
         }
     finally:
         if (slot_dir / ".git").exists():
             subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
             _clean_slot_preserving_objects(slot_dir, check=False)
-            _bump_files_mtime(slot_dir, touched_files, watermark_file)
+            if touched:
+                _bump_files_mtime(slot_dir, touched, watermark_file)
         fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
         lock_fh.close()

@@ -364,6 +364,10 @@ class TestV31BugBrainAndEconomics(unittest.TestCase):
         self.assertEqual(rc_rep, EXIT_OK, out_rep)
         fid = str(out_rep["finding_id"])
 
+        # Advance campaign phase from default `hunt` -> `remediate` to enable 9-arm `patch verify`.
+        rc_ph, out_ph = _run_cli(["phase", "advance", "--to", "remediate", "--run", "run-fix"], self.ajar_home)
+        self.assertEqual(rc_ph, EXIT_OK, out_ph)
+
         # 8-Arm `ajar patch verify`: < 3 variants MUST be rejected!
         rc_few, _ = _run_cli(
             [
@@ -389,7 +393,7 @@ class TestV31BugBrainAndEconomics(unittest.TestCase):
         )
         self.assertEqual(rc_few, EXIT_GATE_BLOCKED)
 
-        # 8-Arm `ajar patch verify` with 3 distinct bypass variants + full suite -> PASSES & sets maintainer_patched!
+        # 9-Arm `ajar patch verify` with 3 distinct bypass variants + full suite -> PASSES & sets verified_local!
         rc_pv, out_pv = _run_cli(
             [
                 "patch",
@@ -415,7 +419,7 @@ class TestV31BugBrainAndEconomics(unittest.TestCase):
             self.ajar_home,
         )
         self.assertEqual(rc_pv, EXIT_OK, out_pv)
-        self.assertEqual(out_pv["remediation_state"], "maintainer_patched")
+        self.assertEqual(out_pv["remediation_state"], "verified_local")
 
     def test_steers_attribution_prefix_caching_graph_and_dry_breaker(self) -> None:
         repo = self._create_sample_git_target()

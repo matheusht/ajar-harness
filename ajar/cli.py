@@ -17,10 +17,21 @@ import time
 from typing import Any, Sequence
 
 from ajar import EXIT_GATE_BLOCKED, EXIT_OK, EXIT_USER_ERROR, __version__
+from ajar.chain_planner import (
+    VALID_DOOR_DIRECTIONS,
+    VALID_IMPACT_CLASSES,
+    _parse_symbol_list,
+    add_crown_jewel,
+    compute_chain_frontier,
+    evaluate_precondition_realism,
+    list_crown_jewels,
+    park_open_door,
+)
 from ajar.db import (
     AjarError,
     add_steer,
     add_threat_assumption,
+    calibrate_finding,
     check_dead_end_repetition,
     checkpoint_task,
     compute_task_salience,
@@ -29,10 +40,12 @@ from ajar.db import (
     list_rows,
     list_steers,
     log_event,
+    mark_primitive_dry,
     maybe_auto_pulse,
     new_id,
     normalize_mechanism_key,
     open_run_db,
+    recompute_all_open_salience,
     record_coverage_span,
     record_repro_failure,
     render_task_context,
@@ -78,8 +91,14 @@ from ajar.repro_compose import (
     promote_primitive_helper,
     run_chain_reproduction,
     run_claim_instrumentation,
+    run_snapshot_chain_probe,
 )
-from ajar.repro_source import run_source_reproduction, unshare_netns_available
+from ajar.repro_source import (
+    run_repro_try,
+    run_source_reproduction,
+    unshare_netns_available,
+    validate_micropatch_diff,
+)
 from ajar.runner import run_autonomous_schedule
 from ajar.swarm import (
     ENV_BLOCKER_KINDS,
@@ -174,6 +193,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         workspace_mode=ws_mode,
         goal=args.goal,
         stopping_criterion=args.until,
+        campaign_phase=getattr(args, "phase", "hunt") or "hunt",
         budget_usd=args.budget,
         uncapped=bool(args.uncapped),
         brief_file=args.brief_file,
@@ -196,6 +216,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         print(f"Initialized Ajar run: {info['run_id']}")
         print(f"  Workspace ({info['workspace_mode']}): {info['workspace_path']}")
         print(f"  Target ({info['target_mode']}):    {info['target_path']}")
+        print(f"  Phase / Stopping:       {info['campaign_phase']} / {info['stopping_criterion']}")
         print(f"  In-scope LoC:           {info['in_scope_loc']} (Code quote: ${info['code_quote_usd']:.2f}, COGS cap: {cap_str})")
         if info.get("brief_path"):
             print(f"  Campaign Brief:         {info['brief_path']}")
@@ -253,6 +274,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         tm_row = conn.execute("SELECT revision FROM threat_models LIMIT 1").fetchone()
         payload = {
             "run": run,
+            "campaign_phase": str(run.get("campaign_phase", "hunt")),
+            "crown_jewel_reached": gates["crown_jewel_reached"],
             "has_campaign_brief": bpath.is_file(),
             "brief_path": str(bpath) if bpath.is_file() else "",
             "has_threat_model": tm_row is not None,
@@ -261,6 +284,10 @@ def cmd_status(args: argparse.Namespace) -> int:
                 "SELECT COUNT(*) AS c FROM threat_assumptions WHERE status = 'violated'"
             ).fetchone()["c"],
             "surfaces_count": conn.execute("SELECT COUNT(*) AS c FROM surfaces").fetchone()["c"],
+            "open_doors_by_status": {
+                r["status"]: int(r["c"])
+                for r in conn.execute("SELECT status, COUNT(*) AS c FROM parked_doors GROUP BY status").fetchall()
+            },
             "tasks_by_status": {
                 r["status"]: int(r["c"])
                 for r in conn.execute("SELECT status, COUNT(*) AS c FROM tasks GROUP BY status").fetchall()
@@ -823,6 +850,24 @@ def cmd_primitive(args: argparse.Namespace) -> int:
         if args.primitive_cmd == "add":
             pid = new_id("prim")
             sub = infer_subsystem(args.locus)
+            role = (getattr(args, "role", None) or "capability").strip()
+            if role not in ("capability", "trust_gadget"):
+                raise AjarError(f"Unsupported --role {role!r}; choose 'capability' or 'trust_gadget'.", EXIT_USER_ERROR)
+            trusted_inv = scrub_text((getattr(args, "trusted_invariant", None) or "").strip())
+            syms = _parse_symbol_list(getattr(args, "symbols", None))
+            snap_id = (getattr(args, "snapshot", None) or "").strip()
+            mp_diff = ""
+            mp_arg = (getattr(args, "micropatch", None) or "").strip()
+            if mp_arg:
+                mp_file = pathlib.Path(mp_arg).expanduser().resolve()
+                if not mp_file.is_file():
+                    raise AjarError(f"Primitive --micropatch file not found: {mp_file}", EXIT_USER_ERROR)
+                raw_mp = mp_file.read_text(encoding="utf-8", errors="replace")
+                ok_mp, mp_msg, _ = validate_micropatch_diff(raw_mp, max_changed_lines=24, claim_locus=args.locus)
+                if not ok_mp:
+                    raise AjarError(f"Primitive --micropatch invalid: {mp_msg}", EXIT_GATE_BLOCKED)
+                mp_diff = scrub_text(raw_mp[:4000])
+
             guarded_by = (getattr(args, "guarded_by", None) or "").strip()
             guard_assumption = scrub_text(getattr(args, "guard_assumption", None) or "")
             prov_tags = parse_tag_list(getattr(args, "provides_tags", None))
@@ -830,10 +875,11 @@ def cmd_primitive(args: argparse.Namespace) -> int:
             conn.execute(
                 """
                 INSERT INTO primitives(
-                    primitive_id, surface_id, subsystem, locus, kind, preconditions, postconditions,
-                    guarded_by_locus, guard_assumption, provides_tags_json, requires_tags_json,
-                    evidence_cmd, evidence_output, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    primitive_id, surface_id, subsystem, locus, kind, role, trusted_invariant,
+                    symbols_json, preconditions, postconditions, guarded_by_locus, guard_assumption,
+                    provides_tags_json, requires_tags_json, micropatch_diff, snapshot_id,
+                    evidence_cmd, evidence_output, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
                 """,
                 (
                     pid,
@@ -841,12 +887,17 @@ def cmd_primitive(args: argparse.Namespace) -> int:
                     sub,
                     args.locus,
                     args.kind,
+                    role,
+                    trusted_inv,
+                    json.dumps(syms),
                     scrub_text(args.preconditions),
                     scrub_text(args.postconditions),
                     guarded_by,
                     guard_assumption,
                     json.dumps(prov_tags),
                     json.dumps(req_tags),
+                    mp_diff,
+                    snap_id,
                     scrub_text(args.evidence_cmd),
                     scrub_text(args.evidence_output or ""),
                     utc_now_iso(),
@@ -861,7 +912,19 @@ def cmd_primitive(args: argparse.Namespace) -> int:
                 guarded_by_locus=guarded_by,
                 provides_tags=prov_tags,
                 requires_tags=req_tags,
+                role=role,
+                trusted_invariant=trusted_inv,
+                symbols=syms,
+                snapshot_id=snap_id,
+                postconditions=args.postconditions,
             )
+            woken_doors = [
+                str(r["door_id"])
+                for r in conn.execute(
+                    "SELECT door_id FROM parked_doors WHERE status = 'ready' AND matched_by_json LIKE '%' || ? || '%'",
+                    (pid,),
+                ).fetchall()
+            ]
             log_event(
                 conn,
                 "worker",
@@ -870,22 +933,43 @@ def cmd_primitive(args: argparse.Namespace) -> int:
                 {
                     "locus": args.locus,
                     "kind": args.kind,
+                    "role": role,
                     "guarded_by_locus": guarded_by,
                     "provides_tags": prov_tags,
                     "requires_tags": req_tags,
+                    "woken_doors": woken_doors,
                 },
             )
             _emit(
                 {
                     "primitive_id": pid,
+                    "role": role,
                     "subsystem": sub,
                     "guarded_by_locus": guarded_by,
                     "provides_tags": prov_tags,
                     "requires_tags": req_tags,
+                    "symbols": syms,
+                    "woken_doors": woken_doors,
                     "hooks_triggered": [h["hook_code"] for h in hooks],
                 },
                 True,
             )
+            return EXIT_OK
+
+        if args.primitive_cmd == "dry":
+            run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
+            tpath = pathlib.Path(run["target_path"]) if run else pathlib.Path(".")
+            tmode = str(run["target_mode"]) if run else "source"
+            res = mark_primitive_dry(
+                conn,
+                target_dir=tpath,
+                target_mode=tmode,
+                primitive_id=args.primitive_id,
+                worker_id=args.worker,
+                locus=args.locus,
+                reason=args.reason,
+            )
+            _emit(res, True)
             return EXIT_OK
 
         if args.primitive_cmd == "promote-helper":
@@ -1220,6 +1304,19 @@ def cmd_claim(args: argparse.Namespace) -> int:
 
             eff_mode = args.mode or tmode
             oracle_dict = json.loads(args.oracle_json) if args.oracle_json else None
+            decl_steps = getattr(args, "declared_steps", None)
+            prov_tags = parse_tag_list(getattr(args, "provides_tags", None))
+
+            # Pre-flight realism check (blocks self-override CLI/env flags in `< 1 ms` with zero strike burn).
+            evaluate_precondition_realism(
+                conn,
+                poc_cmd=args.poc_cmd,
+                control_cmd=args.control_cmd,
+                severity=str(clm["severity"]),
+                config_gate=str(clm["config_gate"] if "config_gate" in clm.keys() else ""),
+                declared_steps=decl_steps,
+                target_locus=str(clm["locus"]),
+            )
 
             if eff_mode == "source":
                 if not args.micropatch:
@@ -1276,6 +1373,8 @@ def cmd_claim(args: argparse.Namespace) -> int:
                     release_cmd=rel_cmd,
                     release_control_cmd=rel_ctrl_cmd,
                     surface_kind=surf_kind,
+                    build_cmd=str(getattr(args, "build_cmd", None) or ""),
+                    save_post_state=getattr(args, "save_post_state", None),
                 )
             elif eff_mode == "binary":
                 bin_p = pathlib.Path(args.binary) if args.binary else tpath
@@ -1315,13 +1414,31 @@ def cmd_claim(args: argparse.Namespace) -> int:
                 raise AjarError(f"Unsupported reproduction mode: {eff_mode}", EXIT_USER_ERROR)
 
             if not res["passed"]:
-                pivot = record_repro_failure(
-                    conn,
-                    claim=clm,
-                    worker_id=args.worker,
-                    observation_hash=str(res.get("observation_hash", "")),
-                    reason=str(res.get("reason", "")),
-                )
+                err_cls = str(res.get("error_class") or "target_negative")
+                if err_cls == "target_negative":
+                    pivot = record_repro_failure(
+                        conn,
+                        claim=clm,
+                        worker_id=args.worker,
+                        observation_hash=str(res.get("observation_hash", "")),
+                        reason=str(res.get("reason", "")),
+                    )
+                else:
+                    log_event(
+                        conn,
+                        args.worker,
+                        "claim_repro_non_strike_error",
+                        args.claim_id,
+                        {"error_class": err_cls, "reason": str(res.get("reason", ""))[:200]},
+                    )
+                    pivot = {
+                        "claim_id": args.claim_id,
+                        "status": str(clm["status"]),
+                        "error_class": err_cls,
+                        "strike_recorded": False,
+                        "failed_repro_count": int(clm["failed_repro_count"] or 0),
+                        "pivoted_to_instrumentation": False,
+                    }
                 _emit({"reproduction": res, "claim_update": pivot}, True)
                 return EXIT_GATE_BLOCKED
 
@@ -1333,6 +1450,44 @@ def cmd_claim(args: argparse.Namespace) -> int:
                     "via `ajar claim rescope` before confirming.",
                     EXIT_GATE_BLOCKED,
                 )
+
+            # Persist optional Arm-1 post-state snapshot (`repro_snapshots`).
+            snap_meta = res.get("post_state_snapshot")
+            snap_id = ""
+            if isinstance(snap_meta, dict) and snap_meta.get("ok") and snap_meta.get("snapshot_id"):
+                snap_id = str(snap_meta["snapshot_id"])
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO repro_snapshots(
+                        snapshot_id, claim_id, rel_dir, archive_path, sha256,
+                        size_bytes, manifest_json, source_cmd, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        snap_id,
+                        args.claim_id,
+                        str(snap_meta["rel_dir"]),
+                        str(snap_meta["archive_path"]),
+                        str(snap_meta["sha256"]),
+                        int(snap_meta["size_bytes"]),
+                        json.dumps(snap_meta.get("manifest") or {}, sort_keys=True),
+                        str(snap_meta.get("source_cmd") or ""),
+                        str(snap_meta.get("created_at") or utc_now_iso()),
+                    ),
+                )
+
+            arm1_obj = res.get("arm1_clean_poc") or {}
+            realism = evaluate_precondition_realism(
+                conn,
+                poc_cmd=args.poc_cmd,
+                control_cmd=args.control_cmd,
+                stdout=str(arm1_obj.get("stdout", "")),
+                stderr=str(arm1_obj.get("stderr", "")),
+                severity=str(clm["severity"]),
+                config_gate=str(clm["config_gate"] if "config_gate" in clm.keys() else ""),
+                declared_steps=decl_steps,
+                target_locus=str(clm["locus"]),
+            )
 
             # Promote to `findings`!
             now_iso = utc_now_iso()
@@ -1364,8 +1519,9 @@ def cmd_claim(args: argparse.Namespace) -> int:
                     micropatch_path, micropatch_diff, arm1_clean_poc_json, arm2_clean_ctrl_json,
                     arm3_patch_poc_json, arm4_patch_ctrl_json, oracle_json,
                     arm5a_release_poc_json, arm5b_release_ctrl_json, ub_divergence_class,
+                    provides_tags_json, snapshot_id, realism_tier, realism_json,
                     attribution, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     fid,
@@ -1386,10 +1542,19 @@ def cmd_claim(args: argparse.Namespace) -> int:
                     json.dumps(res.get("arm5a_release_poc") or {}, sort_keys=True),
                     json.dumps(res.get("arm5b_release_control") or {}, sort_keys=True),
                     ub_div,
+                    json.dumps(prov_tags),
+                    snap_id,
+                    str(realism["realism_tier"]),
+                    json.dumps(realism, sort_keys=True),
                     attr,
                     now_iso,
                 ),
             )
+            if realism["realism_tier"] == "crown_jewel" and realism.get("jewel_id"):
+                conn.execute(
+                    "UPDATE crown_jewels SET status = 'reached', reached_by_id = ?, updated_at = ? WHERE jewel_id = ?",
+                    (fid, now_iso, str(realism["jewel_id"])),
+                )
             # Mark warm cross-killed sibling claims as `duplicate_root_cause`.
             for dup_id in res.get("cross_killed_claim_ids") or []:
                 conn.execute(
@@ -1401,17 +1566,36 @@ def cmd_claim(args: argparse.Namespace) -> int:
                     """,
                     (args.claim_id, now_iso, dup_id),
                 )
-            esc = on_finding_confirmed(conn, finding_id=fid, claim_row=clm)
+            esc = on_finding_confirmed(
+                conn,
+                finding_id=fid,
+                claim_row=clm,
+                provides_tags=prov_tags,
+                snapshot_id=snap_id,
+                realism_tier=str(realism["realism_tier"]),
+            )
             log_event(
                 conn,
                 args.worker,
                 "finding_reproduced",
                 fid,
-                {"claim_id": args.claim_id, "attribution": attr, "ub_divergence_class": ub_div},
+                {
+                    "claim_id": args.claim_id,
+                    "attribution": attr,
+                    "realism_tier": realism["realism_tier"],
+                    "snapshot_id": snap_id,
+                    "ub_divergence_class": ub_div,
+                },
             )
             conn.commit()
             sync_run_to_shared_mirror(rid)
-            out_payload: dict[str, Any] = {"finding_id": fid, "attribution": attr, "reproduction": res}
+            out_payload: dict[str, Any] = {
+                "finding_id": fid,
+                "attribution": attr,
+                "realism_tier": realism["realism_tier"],
+                "snapshot_id": snap_id,
+                "reproduction": res,
+            }
             if esc is not None:
                 out_payload["post_confirm_escalation"] = esc
             _emit(out_payload, True)
@@ -1429,6 +1613,29 @@ def cmd_chain(args: argparse.Namespace) -> int:
     rdir = run_dir_for(rid)
     conn = open_run_db(rid)
     try:
+        if args.chain_cmd == "frontier":
+            _emit(compute_chain_frontier(conn), True)
+            return EXIT_OK
+
+        if args.chain_cmd == "probe":
+            run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
+            tpath = pathlib.Path(run["target_path"])
+            oracle_dict = json.loads(args.oracle_json) if getattr(args, "oracle_json", None) else None
+            patch_p = pathlib.Path(args.patch) if getattr(args, "patch", None) else None
+            res = run_snapshot_chain_probe(
+                conn,
+                run_dir=rdir,
+                target_dir=tpath,
+                snapshot_id=args.from_snapshot,
+                cmd=args.cmd,
+                patch_path=patch_p,
+                oracle=oracle_dict,
+                timeout_sec=int(getattr(args, "timeout", 60)),
+                worker_id=str(getattr(args, "worker", "worker")),
+            )
+            _emit(res, True)
+            return EXIT_OK
+
         if args.chain_cmd == "propose":
             run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
             tmode = str(run["target_mode"]) if run else "source"
@@ -1449,6 +1656,9 @@ def cmd_chain(args: argparse.Namespace) -> int:
                     oracle=oracle_dict,
                     step_micropatches=patch_map,
                     ablate_steps=not bool(getattr(args, "no_ablate", False)),
+                    door_id=str(getattr(args, "door", None) or ""),
+                    jewel_id=str(getattr(args, "jewel", None) or ""),
+                    declared_steps=getattr(args, "declared_steps", None),
                     timeout_sec=int(getattr(args, "timeout", 60)),
                     worker_id=str(getattr(args, "worker", "worker")),
                 )
@@ -1486,7 +1696,7 @@ def cmd_chain(args: argparse.Namespace) -> int:
             )
             if verified:
                 for sid in steps:
-                    conn.execute("UPDATE primitives SET chained = 1 WHERE primitive_id = ?", (sid,))
+                    conn.execute("UPDATE primitives SET chained = 1, status = 'chained' WHERE primitive_id = ?", (sid,))
                     conn.execute(
                         "UPDATE anomalies SET status = 'consumed_by_chain', consumed_by_id = ?, updated_at = ? WHERE anomaly_id = ?",
                         (cid, now_iso, sid),
@@ -1630,6 +1840,7 @@ def cmd_patch(args: argparse.Namespace) -> int:
                 shared_guard_locus=args.shared_guard_locus or "",
                 max_changed_lines=args.max_changed_lines,
                 timeout_sec=args.timeout,
+                suite_timeout_sec=int(getattr(args, "suite_timeout", 1800)),
                 worker_id=args.worker,
             )
             _emit(res, True)
@@ -1637,6 +1848,155 @@ def cmd_patch(args: argparse.Namespace) -> int:
 
         rows = list_rows(conn, "SELECT * FROM patch_verifications ORDER BY created_at ASC")
         _emit({"patch_verifications": rows}, True)
+        return EXIT_OK
+    finally:
+        conn.close()
+
+
+def cmd_phase(args: argparse.Namespace) -> int:
+    rid = resolve_run_id(args.run)
+    conn = open_run_db(rid)
+    try:
+        run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
+        if run is None:
+            raise AjarError("Run metadata missing in run.db.", EXIT_USER_ERROR)
+        prev_phase = str(run["campaign_phase"] if "campaign_phase" in run.keys() else "hunt") or "hunt"
+        if args.phase_cmd == "show":
+            _emit({"run_id": rid, "campaign_phase": prev_phase}, True)
+            return EXIT_OK
+
+        new_phase = str(args.to).strip()
+        if new_phase not in ("hunt", "remediate", "full"):
+            raise AjarError(f"Unsupported phase {new_phase!r}; choose hunt, remediate, or full.", EXIT_USER_ERROR)
+        conn.execute("UPDATE runs SET campaign_phase = ? WHERE run_id = ?", (new_phase, rid))
+        recompute_all_open_salience(conn)
+        log_event(
+            conn,
+            "operator",
+            "campaign_phase_advanced",
+            rid,
+            {"previous_phase": prev_phase, "campaign_phase": new_phase, "notes": scrub_text(args.notes or "")},
+        )
+        _emit({"run_id": rid, "previous_phase": prev_phase, "campaign_phase": new_phase}, True)
+        return EXIT_OK
+    finally:
+        conn.close()
+
+
+def cmd_door(args: argparse.Namespace) -> int:
+    rid = resolve_run_id(args.run)
+    conn = open_run_db(rid)
+    try:
+        if args.door_cmd == "jewel-add":
+            res = add_crown_jewel(
+                conn,
+                name=args.name,
+                locus=args.locus,
+                subsystem=args.subsystem or "",
+                impact_class=args.impact_class,
+                symbols=args.symbols,
+                max_interaction_steps=int(args.max_steps),
+                require_default_config=not bool(args.allow_nondefault_config),
+                forbid_visible_error=not bool(args.allow_visible_error),
+                worker_id=args.worker,
+            )
+            _emit(res, True)
+            return EXIT_OK
+
+        if args.door_cmd == "jewel-list":
+            _emit({"crown_jewels": list_crown_jewels(conn)}, True)
+            return EXIT_OK
+
+        if args.door_cmd == "park":
+            res = park_open_door(
+                conn,
+                anchor_locus=args.anchor_locus,
+                missing_link_summary=args.missing,
+                wishlist_query=args.wishlist or "",
+                jewel_id=args.jewel or "",
+                direction=args.direction,
+                blocker_locus=args.blocker_locus or "",
+                subsystem=args.subsystem or "",
+                held_ids=args.held_ids,
+                snapshot_id=args.snapshot or "",
+                wanted_tags=args.wanted_tags,
+                wanted_symbols=args.wanted_symbols,
+                max_bridge_attempts=int(args.max_bridge_attempts),
+                spawn_hunters=not bool(args.no_spawn_hunters),
+                worker_id=args.worker,
+            )
+            _emit(res, True)
+            return EXIT_OK
+
+        if getattr(args, "status", None):
+            rows = list_rows(
+                conn,
+                "SELECT * FROM parked_doors WHERE status = ? ORDER BY updated_at DESC",
+                (args.status,),
+            )
+        else:
+            rows = list_rows(conn, "SELECT * FROM parked_doors ORDER BY updated_at DESC")
+        _emit({"open_doors": rows}, True)
+        return EXIT_OK
+    finally:
+        conn.close()
+
+
+def cmd_repro(args: argparse.Namespace) -> int:
+    rid = resolve_run_id(args.run)
+    rdir = run_dir_for(rid)
+    conn = open_run_db(rid)
+    try:
+        if args.repro_cmd == "try":
+            run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
+            tpath = pathlib.Path(run["target_path"])
+            oracle_dict = json.loads(args.oracle_json) if getattr(args, "oracle_json", None) else None
+            patch_p = pathlib.Path(args.patch) if getattr(args, "patch", None) else None
+            res = run_repro_try(
+                run_dir=rdir,
+                target_dir=tpath,
+                cmd=args.cmd,
+                patch_path=patch_p,
+                build_cmd=args.build_cmd or "",
+                oracle=oracle_dict,
+                timeout_sec=int(args.timeout),
+            )
+            _emit(res, True)
+            return EXIT_OK
+
+        rows = list_rows(conn, "SELECT * FROM repro_snapshots ORDER BY created_at DESC")
+        _emit({"snapshots": rows}, True)
+        return EXIT_OK
+    finally:
+        conn.close()
+
+
+def cmd_finding(args: argparse.Namespace) -> int:
+    rid = resolve_run_id(args.run)
+    conn = open_run_db(rid)
+    try:
+        if args.finding_cmd == "calibrate":
+            res = calibrate_finding(
+                conn,
+                finding_id=args.finding_id,
+                reason=args.reason,
+                severity=args.severity,
+                title=args.title,
+                worker_id=args.worker,
+            )
+            _emit(res, True)
+            return EXIT_OK
+
+        rows = list_rows(
+            conn,
+            """
+            SELECT f.*, c.remediation_state
+            FROM findings f
+            JOIN claims c ON f.claim_id = c.claim_id
+            ORDER BY f.created_at ASC
+            """,
+        )
+        _emit({"findings": rows}, True)
         return EXIT_OK
     finally:
         conn.close()
@@ -1771,6 +2131,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         target_mode=args.mode,
         goal=args.goal,
         stopping_criterion=args.until,
+        campaign_phase=getattr(args, "phase", "hunt") or "hunt",
         budget_usd=args.budget,
         workers=args.workers,
         discover_passes=args.discover_passes,
@@ -1863,6 +2224,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_qt.add_argument("--json", action="store_true", default=True)
     p_qt.set_defaults(func=cmd_quote)
 
+    stopping_choices = ("exhaustive-high", "first-verified-high", "crown-jewel")
+    phase_choices = ("hunt", "remediate", "full")
+
     # init
     p_init = sub.add_parser("init", help="Initialize a new verification run in --envelope or --in-place mode.")
     p_init.add_argument("target", help="Target directory, binary path, or URL.")
@@ -1872,7 +2236,9 @@ def build_parser() -> argparse.ArgumentParser:
     grp_ws.add_argument("--in-place", action="store_true", help="Write zero files into target directory.")
     p_init.add_argument("--goal", default="Identify, falsify, and reproduce high-severity software vulnerabilities.")
     p_init.add_argument("--brief-file", help="Optional Markdown campaign brief persisted for the Lead Orchestrator (`brief.md`, omitted from worker contexts).")
-    p_init.add_argument("--until", choices=("exhaustive-high", "first-verified-high"), default="exhaustive-high")
+    p_init.add_argument("--until", choices=stopping_choices, default="exhaustive-high")
+    p_init.add_argument("--stopping", dest="until", choices=stopping_choices, help="Alias for --until (`exhaustive-high`, `first-verified-high`, `crown-jewel`).")
+    p_init.add_argument("--phase", choices=phase_choices, default="hunt", help="Campaign phase (`hunt` defers 9-arm `patch verify` until `remediate`).")
     p_init.add_argument("--budget", type=float, default=None, help="Explicit COGS cap override in USD (defaults to 0.35 * Code quote).")
     p_init.add_argument("--cogs-cap", dest="budget", type=float, help="Alias for --budget explicit COGS cap override in USD.")
     p_init.add_argument("--uncapped", action="store_true", help="Disable finite COGS budget caps and 25%%/80%% budget throttles (`uncapped_research`).")
@@ -1885,6 +2251,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument("--run-id", help="Optional explicit run identifier.")
     p_init.add_argument("--json", action="store_true")
     p_init.set_defaults(func=cmd_init)
+
+    # phase
+    p_phs = sub.add_parser("phase", help="Inspect or advance campaign phase (`hunt` -> `remediate` -> `full`).")
+    phs_sub = p_phs.add_subparsers(dest="phase_cmd", required=True)
+    pph_s = phs_sub.add_parser("show")
+    pph_s.add_argument("--run")
+    pph_a = phs_sub.add_parser("advance")
+    pph_a.add_argument("--to", choices=phase_choices, required=True)
+    pph_a.add_argument("--notes", default="")
+    pph_a.add_argument("--run")
+    p_phs.set_defaults(func=cmd_phase)
 
     # brief
     p_brf = sub.add_parser("brief", help="Read or update the Lead Orchestrator campaign brief (`brief.md`) without bloating worker task prefixes.")
@@ -1980,6 +2357,43 @@ def build_parser() -> argparse.ArgumentParser:
     ptm_inv.add_argument("--run")
     p_tm.set_defaults(func=cmd_threat_model)
 
+    # door (`Crown Jewels` + suspended `Open Doors`)
+    p_dr = sub.add_parser("door", help="Manage Crown-Jewel terminal sinks and suspended Open-Door chain subgoals.")
+    dr_sub = p_dr.add_subparsers(dest="door_cmd", required=True)
+    pdr_ja = dr_sub.add_parser("jewel-add", help="Register a target-derived Crown-Jewel terminal sink.")
+    pdr_ja.add_argument("--name", required=True)
+    pdr_ja.add_argument("--locus", required=True)
+    pdr_ja.add_argument("--subsystem", default="")
+    pdr_ja.add_argument("--impact-class", choices=VALID_IMPACT_CLASSES, default="rce")
+    pdr_ja.add_argument("--symbols", default="", help="Comma-separated sink function/symbol/tag identifiers.")
+    pdr_ja.add_argument("--max-steps", type=int, default=1, help="Max victim interaction steps for Crown-Jewel realism.")
+    pdr_ja.add_argument("--allow-nondefault-config", action="store_true")
+    pdr_ja.add_argument("--allow-visible-error", action="store_true")
+    pdr_ja.add_argument("--worker", default="mapper")
+    pdr_ja.add_argument("--run")
+    pdr_jl = dr_sub.add_parser("jewel-list", help="List Crown-Jewel terminal sinks.")
+    pdr_jl.add_argument("--run")
+    pdr_pk = dr_sub.add_parser("park", help="Park a blocked deep chain lead as an Open Door and spawn bounded bridge hunters.")
+    pdr_pk.add_argument("--anchor-locus", required=True, help="Target sink or partial-chain locus (`file:lines`).")
+    pdr_pk.add_argument("--missing", required=True, help="Concise description of the missing upstream/downstream link.")
+    pdr_pk.add_argument("--wishlist", default="", help="Optional lexical/symbol FTS5 query describing what unlocks this door.")
+    pdr_pk.add_argument("--jewel", default="", help="Optional Crown-Jewel ID (`cjw-...`).")
+    pdr_pk.add_argument("--direction", choices=VALID_DOOR_DIRECTIONS, default="sink_to_source")
+    pdr_pk.add_argument("--blocker-locus", default="", help="Upstream guard locus (`file:lines`) currently blocking the door.")
+    pdr_pk.add_argument("--subsystem", default="")
+    pdr_pk.add_argument("--held-ids", default="", help="Comma-separated `fnd-*` / `prim-*` IDs already held on this chain.")
+    pdr_pk.add_argument("--snapshot", default="", help="Optional `snp-*` post-state snapshot ID.")
+    pdr_pk.add_argument("--wanted-tags", default="", help="Comma-separated capability tags (`ns:name`) that unlock this door.")
+    pdr_pk.add_argument("--wanted-symbols", default="", help="Comma-separated code symbols or file paths that unlock this door.")
+    pdr_pk.add_argument("--max-bridge-attempts", type=int, default=2)
+    pdr_pk.add_argument("--no-spawn-hunters", action="store_true")
+    pdr_pk.add_argument("--worker", default="worker")
+    pdr_pk.add_argument("--run")
+    pdr_ls = dr_sub.add_parser("list", help="List Open Doors (`ready`, `bridging`, `parked`, `chained`, `exhausted_locked`).")
+    pdr_ls.add_argument("--status", choices=("parked", "bridging", "ready", "chained", "exhausted_locked"))
+    pdr_ls.add_argument("--run")
+    p_dr.set_defaults(func=cmd_door)
+
     # surface
     p_surf = sub.add_parser("surface", help="Manage target entrypoints and trust-boundary surfaces.")
     surf_sub = p_surf.add_subparsers(dest="surface_cmd", required=True)
@@ -2011,7 +2425,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_drv.set_defaults(func=cmd_driver)
 
     # task
-    task_kinds = ("map", "investigate", "falsify", "reproduce", "instrument", "chain", "patch", "escalate")
+    task_kinds = ("map", "investigate", "bridge", "falsify", "reproduce", "instrument", "chain", "patch", "escalate")
     p_tsk = sub.add_parser("task", help="Coordinate bounded work tasks (`lease`, `checkpoint`, `done`, `dry`, `block`).")
     tsk_sub = p_tsk.add_subparsers(dest="task_cmd", required=True)
     pt_add = tsk_sub.add_parser("add")
@@ -2101,21 +2515,33 @@ def build_parser() -> argparse.ArgumentParser:
     p_an.set_defaults(func=cmd_anomaly)
 
     # primitive
-    p_pr = sub.add_parser("primitive", help="Register verified non-standalone behaviors and promote composable helpers.")
+    p_pr = sub.add_parser("primitive", help="Register capabilities or trust-laundering gadgets and promote composable helpers.")
     pr_sub = p_pr.add_subparsers(dest="primitive_cmd", required=True)
     pp_add = pr_sub.add_parser("add")
     pp_add.add_argument("--locus", required=True)
     pp_add.add_argument("--kind", required=True)
+    pp_add.add_argument("--role", choices=("capability", "trust_gadget"), default="capability", help="`capability` (invariant-breaking quirk) or `trust_gadget` (normal code trusting an upstream invariant).")
+    pp_add.add_argument("--trusted-invariant", default="", help="Upstream invariant trusted by a `trust_gadget` step.")
+    pp_add.add_argument("--symbols", default="", help="Comma-separated code symbols or file paths touched by this primitive.")
     pp_add.add_argument("--preconditions", required=True)
     pp_add.add_argument("--postconditions", required=True)
     pp_add.add_argument("--evidence-cmd", required=True)
     pp_add.add_argument("--evidence-output", default="")
+    pp_add.add_argument("--micropatch", default="", help="Optional counterfactual unified diff file stored for zero-ceremony `ajar chain propose` ablation.")
+    pp_add.add_argument("--snapshot", default="", help="Optional associated `snp-*` post-state snapshot ID.")
     pp_add.add_argument("--surface", help="Optional associated surface ID.")
     pp_add.add_argument("--guarded-by", help="Upstream guard locus (`file:lines`) blocking standalone exploitation.")
     pp_add.add_argument("--guard-assumption", default="", help="Invariant assumed by the upstream guard.")
     pp_add.add_argument("--provides-tags", default="", help="Comma-separated capability tags provided by this primitive (`ns:name`).")
     pp_add.add_argument("--requires-tags", default="", help="Comma-separated capability tags required by this primitive (`ns:name`).")
     pp_add.add_argument("--run")
+
+    pp_dry = pr_sub.add_parser("dry", help="Close an unchained guarded primitive as `dry` with a verified guard locus.")
+    pp_dry.add_argument("primitive_id")
+    pp_dry.add_argument("--worker", default="worker")
+    pp_dry.add_argument("--locus", required=True)
+    pp_dry.add_argument("--reason", required=True)
+    pp_dry.add_argument("--run")
 
     pp_prm = pr_sub.add_parser("promote-helper", help="Verify and mount a read-only `StageContext` Python helper outside `slot-<k>`.")
     pp_prm.add_argument("primitive_id")
@@ -2216,7 +2642,11 @@ def build_parser() -> argparse.ArgumentParser:
     pc_rep.add_argument("--mode", choices=("source", "binary", "live"))
     pc_rep.add_argument("--poc-cmd", default="")
     pc_rep.add_argument("--control-cmd", default="")
-    pc_rep.add_argument("--micropatch", help="Path to 1-5 line counterfactual unified diff (source mode).")
+    pc_rep.add_argument("--build-cmd", default="", help="Optional compile command run on clean and micropatched trees without burning PoC strikes on build errors.")
+    pc_rep.add_argument("--micropatch", help="Path to 1-16 line counterfactual unified diff (source mode).")
+    pc_rep.add_argument("--save-post-state", default="", help="Optional relative directory/file inside `slot-<k>` to snapshot into `repro/snapshots/<snp_id>.tar.gz` after Arm 1.")
+    pc_rep.add_argument("--provides-tags", default="", help="Optional comma-separated capability tags emitted by this confirmed finding (`ns:name`).")
+    pc_rep.add_argument("--declared-steps", type=int, default=None, help="Optional explicit victim interaction step count for realism scoring.")
     pc_rep.add_argument("--shared-guard-locus", default="", help="Optional shared upstream guard locus when micropatch fixes a shared chokepoint.")
     pc_rep.add_argument("--release-cmd", default="", help="Arm 5A release-profile PoC command (`-O2` / `--release` without debug asserts).")
     pc_rep.add_argument("--release-control-cmd", default="", help="Arm 5B release-profile benign control command.")
@@ -2239,21 +2669,65 @@ def build_parser() -> argparse.ArgumentParser:
     pc_lst.add_argument("--run")
     p_cl.set_defaults(func=cmd_claim)
 
+    # repro (Strike-free smoke-test & snapshots)
+    p_rpr = sub.add_parser("repro", help="Run strike-free build/PoC smoke tests (`ajar repro try`) and inspect post-state snapshots.")
+    rpr_sub = p_rpr.add_subparsers(dest="repro_cmd", required=True)
+    prp_t = rpr_sub.add_parser("try", help="Run a strike-free command inside scratch `slot-inst` without incrementing `failed_repro_count`.")
+    prp_t.add_argument("--cmd", required=True)
+    prp_t.add_argument("--patch", default="", help="Optional candidate diff applied temporarily inside `slot-inst`.")
+    prp_t.add_argument("--build-cmd", default="", help="Optional compile command run before `--cmd`.")
+    prp_t.add_argument("--oracle-json", help="Optional JSON oracle rules.")
+    prp_t.add_argument("--timeout", type=int, default=60)
+    prp_t.add_argument("--run")
+    prp_s = rpr_sub.add_parser("snapshots", help="List captured Arm-1 post-state snapshots (`snp-*`).")
+    prp_s.add_argument("--run")
+    p_rpr.set_defaults(func=cmd_repro)
+
+    # finding (Operator calibration & listing)
+    p_fnd = sub.add_parser("finding", help="Inspect confirmed findings and calibrate severity/titles without raw SQL.")
+    fnd_sub = p_fnd.add_subparsers(dest="finding_cmd", required=True)
+    pfn_c = fnd_sub.add_parser("calibrate", help="Calibrate severity or title on a confirmed finding.")
+    pfn_c.add_argument("finding_id")
+    pfn_c.add_argument("--severity", choices=("critical", "high", "medium", "low"))
+    pfn_c.add_argument("--title")
+    pfn_c.add_argument("--reason", required=True)
+    pfn_c.add_argument("--worker", default="operator")
+    pfn_c.add_argument("--run")
+    pfn_l = fnd_sub.add_parser("list", help="List confirmed findings.")
+    pfn_l.add_argument("--run")
+    p_fnd.set_defaults(func=cmd_finding)
+
     # chain
-    p_ch = sub.add_parser("chain", help="Compose verified primitives and findings into ablated multi-step chains.")
+    p_ch = sub.add_parser("chain", help="Compose verified findings, capabilities, and trust gadgets into ablated multi-step chains.")
     ch_sub = p_ch.add_subparsers(dest="chain_cmd", required=True)
     pch_p = ch_sub.add_parser("propose")
     pch_p.add_argument("--title", required=True)
-    pch_p.add_argument("--steps", required=True, help="Comma-separated primitive/anomaly/finding IDs.")
+    pch_p.add_argument("--steps", required=True, help="Comma-separated `fnd-*`, `clm-*`, `prim-*`, or `anom-*` IDs.")
     pch_p.add_argument("--poc-cmd", required=True)
     pch_p.add_argument("--control-cmd", required=True)
     pch_p.add_argument("--severity", choices=("critical", "high", "medium", "low"), default="critical")
     pch_p.add_argument("--oracle-json", help="Optional JSON oracle rules (`expect_regex`, `expect_exit_code`).")
-    pch_p.add_argument("--step-micropatch", action="append", help="Per-step counterfactual patch `<step_id>:<path/to/step.diff>` for compiled causal ablation.")
+    pch_p.add_argument("--step-micropatch", action="append", help="Per-step counterfactual patch `<step_id>:<path/to/step.diff>` (auto-inherited for `fnd-*` and `prim-*` with `--micropatch`).")
+    pch_p.add_argument("--door", default="", help="Optional Open Door ID (`door-*`) resolved by this chain.")
+    pch_p.add_argument("--jewel", default="", help="Optional Crown Jewel ID (`cjw-*`) reached by this chain.")
+    pch_p.add_argument("--declared-steps", type=int, default=None, help="Optional explicit victim interaction step count.")
     pch_p.add_argument("--no-ablate", action="store_true", help="Skip automated per-step ablation (single-anomaly chains only).")
     pch_p.add_argument("--timeout", type=int, default=60)
     pch_p.add_argument("--worker", default="worker")
     pch_p.add_argument("--run")
+
+    pch_pr = ch_sub.add_parser("probe", help="Hydrate a Stage-1 post-state snapshot (`snp-*`) into `slot-inst` (`< 50 ms`) and probe Stage 2.")
+    pch_pr.add_argument("--from-snapshot", required=True, help="Snapshot ID (`snp-*`) from `ajar claim reproduce --save-post-state`.")
+    pch_pr.add_argument("--cmd", required=True, help="Stage-2 probe command executed inside hydrated `slot-inst`.")
+    pch_pr.add_argument("--patch", default="", help="Optional temporary diff applied inside `slot-inst`.")
+    pch_pr.add_argument("--oracle-json", help="Optional JSON oracle rules.")
+    pch_pr.add_argument("--timeout", type=int, default=60)
+    pch_pr.add_argument("--worker", default="worker")
+    pch_pr.add_argument("--run")
+
+    pch_fr = ch_sub.add_parser("frontier", help="Compile Crown-Jewel, Open-Door, multi-hop Percolation, and Unicorn-Gap frontier.")
+    pch_fr.add_argument("--run")
+
     pch_l = ch_sub.add_parser("list")
     pch_l.add_argument("--run")
     p_ch.set_defaults(func=cmd_chain)
@@ -2282,6 +2756,7 @@ def build_parser() -> argparse.ArgumentParser:
     ppt_v.add_argument("--shared-guard-locus", default="", help="Optional shared guard locus when patching a common chokepoint.")
     ppt_v.add_argument("--max-changed-lines", type=int, default=120)
     ppt_v.add_argument("--timeout", type=int, default=90)
+    ppt_v.add_argument("--suite-timeout", type=int, default=1800, help="Timeout in seconds for Arm 5 full project test suite (default: 1800).")
     ppt_v.add_argument("--worker", default="worker")
     ppt_v.add_argument("--run")
     ppt_l = ptc_sub.add_parser("list")
@@ -2397,7 +2872,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--run-id")
     p_run.add_argument("--mode", choices=("source", "binary", "live"), default="source")
     p_run.add_argument("--goal", default="Identify, falsify, and reproduce high-severity software vulnerabilities.")
-    p_run.add_argument("--until", choices=("exhaustive-high", "first-verified-high"), default="exhaustive-high")
+    p_run.add_argument("--until", choices=stopping_choices, default="exhaustive-high")
+    p_run.add_argument("--stopping", dest="until", choices=stopping_choices, help="Alias for --until.")
+    p_run.add_argument("--phase", choices=phase_choices, default="hunt", help="Campaign phase (`hunt` defers 9-arm `patch verify` until `remediate`).")
     p_run.add_argument("--budget", type=float, default=None, help="Explicit COGS cap override in USD (defaults to 0.35 * Code quote).")
     p_run.add_argument("--cogs-cap", dest="budget", type=float, help="Alias for --budget explicit COGS cap override in USD.")
     p_run.add_argument("--workers", type=int, default=2)
@@ -2421,7 +2898,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
         help="Wire framing tier (`auto` defaults to `direct` Swarm Worker and honors prior fallback escalations).",
     )
-    psw_p.add_argument("--items", default="", help="Optional comma-separated task/claim/primitive IDs.")
+    psw_p.add_argument("--items", default="", help="Optional comma-separated task/claim/primitive/finding/door IDs.")
     psw_p.add_argument("--limit", type=int, default=4, help="Max items per packet (`regression_tdd` forces 1, `swarm_patch_first` <= 2).")
     psw_p.add_argument("--worker", default="", help="Explicit worker ID override.")
     psw_p.add_argument("--json", action="store_true", help="Emit JSON metadata + packet_markdown instead of raw Markdown.")

@@ -11,6 +11,7 @@ This directory records architectural decisions for Ajar.
 | [0019](0019-ajar-v3-2-hooks-and-composable-repro.md) | Ajar v3.2 Event-Driven Epistemic Hooks, Composable Stage Builders, and 9-Arm Fixes Gate | **Accepted (Active)** | Adds zero-overhead epistemic micro-hooks (`H1`–`H8`) with mandatory `Kill Rule` lines, cross-subsystem `provides_tags <-> requires_tags` bridges, `StageContext` helpers + $N$-step chain ablation, Arm 5A/5B `--release-cmd` UB differential, 9-arm `ajar patch verify` (`git apply -R`), `<= 3,500` LoC call slices, and PR `--diff` state sync. |
 | [0020](0020-ajar-v3-2-2-swarm-wire-profiles-and-reopen.md) | Ajar v3.2.2 Stage-Split Swarm Wire Profiles, Runtime Anti-Cheat Gates, Hybrid Storage, and Cross-VM Reopen | **Accepted (Active)** | Adds `ajar swarm {packet,fallback,complete,status}` (`direct -> swarm_patch_first -> regression_tdd` + batch splitting), structural claim prose & `--env-blocker` gates, entrypoint fidelity + anti-source-grep enforcement, `/tmp/ajar-build-cache` + compact shared mirror sync, and cross-VM `ajar reopen`. |
 | [0021](0021-ajar-v3-2-3-exogenous-target-checks-and-retro-routing.md) | Ajar v3.2.3 Exogenous Target-Readiness Checks and Reviewer-Skill Retro Routing | **Accepted (Active)** | Adds offline archival/stale-`HEAD` blocking on `ajar init` (`--allow-historical-target`), `ajar doctor --target` upstream/branch/subdir/peer/PVR/disk checks, `CLAUDE.md`/`AGENTS.md` target-snapshot stripping, and reviewer-skill external-validity checks while keeping `run.db` schema unchanged during active Wave-1 runs. |
+| [0022](0022-ajar-v3-3-reactive-open-doors-and-phase-split.md) | Ajar v3.3 Reactive Open Doors, Multi-Hop Middle-Unicorn Percolation, and Hunt/Remediate Phase Split | **Accepted (Active)** | Adds `hunt` vs `remediate` campaign phases (`verified_local`), suspended Open Doors (`crown_jewels`, `parked_doors`, `door_fts`) with tri-modal wakeup + bounded `bridge` hunters, $N$-hop middle-unicorn percolation + `trust_gadget`, `crown-jewel` realism gates, direct `fnd-*`/`clm-*`/`prim-*` chain composition, post-state snapshots + `ajar repro try`, and non-strike `build_or_env_error` separation. |
 
 ## Superseded Historical Decisions
 
@@ -19,7 +20,7 @@ This directory records architectural decisions for Ajar.
 
 ## Authoring Rules
 
-1. Read [ADR-0017](0017-ajar-v3-dual-mode-architecture.md), [ADR-0018](0018-ajar-v3-1-bug-brain-and-platform-economics.md), [ADR-0019](0019-ajar-v3-2-hooks-and-composable-repro.md), [ADR-0020](0020-ajar-v3-2-2-swarm-wire-profiles-and-reopen.md), [ADR-0021](0021-ajar-v3-2-3-exogenous-target-checks-and-retro-routing.md), and [docs/architecture.md](../architecture.md) before proposing any structural change.
-2. Number new decision records sequentially starting at `0022`.
+1. Read [ADR-0017](0017-ajar-v3-dual-mode-architecture.md), [ADR-0018](0018-ajar-v3-1-bug-brain-and-platform-economics.md), [ADR-0019](0019-ajar-v3-2-hooks-and-composable-repro.md), [ADR-0020](0020-ajar-v3-2-2-swarm-wire-profiles-and-reopen.md), [ADR-0021](0021-ajar-v3-2-3-exogenous-target-checks-and-retro-routing.md), [ADR-0022](0022-ajar-v3-3-reactive-open-doors-and-phase-split.md), and [docs/architecture.md](../architecture.md) before proposing any structural change.
+2. Number new decision records sequentially starting at `0023`.
 3. Write in concise ASD-STE100 technical prose and include explicit Context, Decision, Consequences, Risks, and Revisit Triggers sections.
 4. Never delete or rewrite historical ADR files; mark superseded records with a pointer to the replacing ADR.

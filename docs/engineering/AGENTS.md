@@ -16,7 +16,7 @@ Read this file before modifying `ajar/`, `skills/`, `benchmarks/`, `docs/`, or `
 | --- | --- |
 | `ajar/domain/` | Pure zero-IO `StrEnum`s for all state machines (`enums.py`), frozen models & `AjarError`/`InvalidTransitionError` (`models.py`), explicit transition graphs & `derive_claim_axes` (`transitions.py`) |
 | `ajar/store/` | Schema version constant (`CURRENT_SCHEMA_VERSION`), `immediate_tx(conn)` (`BEGIN IMMEDIATE` + nested `SAVEPOINT`), and `assert_run_mutable(conn)` (`tx.py`) |
-| `ajar/services/` | Unified transactional workflow mutations (`workflow.py`: surfaces, tasks, anomalies, claims, phase advance, run finish) shared identically by `cli.py` and `mcp.py` |
+| `ajar/services/` | Unified transactional workflow mutations (`workflow.py`: surfaces, tasks, anomalies, claims, phase advance, run finish) shared identically by `cli.py` and `mcp.py`, plus startup proof helpers (`proof.py`: `DEC-0132` economics export and `P0-3` SHA-256 ledger preimages) |
 | `ajar/db.py` | SQLite WAL schema (`v3.3` + `PRAGMA user_version` fast-path + auto-migration), `O_NOFOLLOW` run dirs, portfolio-balanced task leases, `hunt`/`remediate` phase split, `calibrate_finding`, `mark_primitive_dry`, prefix-stable `< 4 KB` context, `steers`, pulse |
 | `ajar/chain_planner.py` | Suspended Open Doors (`crown_jewels`, `parked_doors`, `door_fts`), tri-modal reactive wakeup, `<= 2` bounded `bridge` hunters, $2..10$-hop middle-unicorn percolation (`detect_percolated_multi_hop_paths`), `compute_chain_frontier`, and `evaluate_precondition_realism` |
 | `ajar/epistemic_hooks.py` | Event-driven `H1`–`H8` epistemic micro-hooks (`0` overhead on clean code, mandatory `Kill Rule`, `stepping_stone` `H5` escalation) and `provides_tags <-> requires_tags` capability bridges |
@@ -55,7 +55,14 @@ Every durable engineering rule is mechanically enforced in CI (never prose-only)
 
 ## Required Verification Before Opening a PR
 
-Run all checks from the repository root and disclose results in the PR description:
+Use the canonical repository verification driver (fast inner loop during development, full suite before opening a PR):
+
+```bash
+scripts/verify-repo.sh --fast    # Inner loop: AGENTS.md, ruff, arch_lint, mypy, unit + parity + DST
+scripts/verify-repo.sh --full    # Pre-PR outer loop: adds integration tests + archived legacy checks
+```
+
+Equivalent explicit commands run in CI:
 
 ```bash
 test "$(wc -l < AGENTS.md)" -le 50 && cmp -s AGENTS.md CLAUDE.md

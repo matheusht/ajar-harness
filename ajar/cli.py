@@ -97,14 +97,17 @@ from ajar.services import (
     advance_phase,
     block_claim,
     block_task,
+    build_commit_preimage,
     close_task_done,
     close_task_dry,
     explain_anomaly,
+    export_run_economics,
     falsify_claim,
     finish_run,
     propose_claim,
     rescope_claim_service,
     survive_claim,
+    write_restricted_json,
 )
 from ajar.store import assert_run_mutable, immediate_tx
 from ajar.swarm import (
@@ -1851,6 +1854,44 @@ def cmd_run(args: argparse.Namespace) -> int:
     return EXIT_OK if res["gates_passed"] else EXIT_GATE_BLOCKED
 
 
+def cmd_economics(args: argparse.Namespace) -> int:
+    rid = resolve_run_id(args.run)
+    conn = open_run_db(rid)
+    try:
+        res = export_run_economics(conn)
+    finally:
+        conn.close()
+    if getattr(args, "output", None):
+        out_p = pathlib.Path(args.output)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        out_p.write_text(json.dumps(res, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _emit(res, True)
+    return EXIT_OK
+
+
+def cmd_ledger(args: argparse.Namespace) -> int:
+    rid = resolve_run_id(args.run)
+    conn = open_run_db(rid)
+    try:
+        res = build_commit_preimage(
+            conn,
+            finding_id=args.finding_id,
+            commit_sha=str(args.commit_sha or ""),
+            target_slug=str(args.target_slug or ""),
+            salt=args.salt,
+        )
+    finally:
+        conn.close()
+    if args.public_out:
+        pub_p = pathlib.Path(args.public_out)
+        pub_p.parent.mkdir(parents=True, exist_ok=True)
+        pub_p.write_text(json.dumps(res["public_record"], indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if args.preimage_out:
+        write_restricted_json(pathlib.Path(args.preimage_out), res["private_preimage"], mode=0o600)
+    _emit(res, True)
+    return EXIT_OK
+
+
 def cmd_swarm(args: argparse.Namespace) -> int:
     rid = resolve_run_id(args.run)
     conn = open_run_db(rid)
@@ -2643,6 +2684,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_reo.add_argument("--from-shared", default=None, help="Explicit shared mirror directory override.")
     p_reo.add_argument("--json", action="store_true", default=True)
     p_reo.set_defaults(func=cmd_reopen)
+
+    # economics (DEC-0132 empirical COGS/LoC calibration telemetry export)
+    p_eco = sub.add_parser("economics", help="Export advisory DEC-0132 COGS/LoC calibration telemetry.")
+    eco_sub = p_eco.add_subparsers(dest="economics_cmd", required=True)
+    peco_exp = eco_sub.add_parser("export", help="Export structured per-run COGS and gross-margin telemetry JSON.")
+    peco_exp.add_argument("--run")
+    peco_exp.add_argument("--output", help="Optional output path for calibration JSON.")
+    p_eco.set_defaults(func=cmd_economics)
+
+    # ledger (P0-3 commit-before-submit SHA-256 preimage helper)
+    p_ldg = sub.add_parser("ledger", help="Build commit-before-submit SHA-256 ledger preimages.")
+    ldg_sub = p_ldg.add_subparsers(dest="ledger_cmd", required=True)
+    pldg_cp = ldg_sub.add_parser("commit-preimage", help="Compute SHA-256 commitment and redacted preimage for a finding.")
+    pldg_cp.add_argument("finding_id", help="Confirmed finding ID (for example `fnd-1234abcd`).")
+    pldg_cp.add_argument("--run")
+    pldg_cp.add_argument("--target-slug", default="", help="Optional public target identifier (defaults to target dir name).")
+    pldg_cp.add_argument("--commit-sha", default="", help="Optional git commit SHA override.")
+    pldg_cp.add_argument("--salt", default=None, help="Optional explicit hex salt for deterministic reproduction.")
+    pldg_cp.add_argument("--public-out", help="Optional path to write the public commitment JSON record.")
+    pldg_cp.add_argument("--preimage-out", help="Optional path to write the private reveal preimage JSON (mode 0600).")
+    p_ldg.set_defaults(func=cmd_ledger)
 
     return p
 

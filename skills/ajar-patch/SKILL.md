@@ -14,7 +14,7 @@ Ajar strictly separates active vulnerability/chain hunting from heavy 9-arm test
 - **Default `hunt` Phase:** `ajar patch verify` is blocked (`EXIT_GATE_BLOCKED`) and `ajar task lease` skips `patch` tasks while discovery, Open-Door bridge hunts, and Stage-5 chain synthesis remain underway.
 - **Advancing to `remediate`:** Advance only when explicitly running a `Fixes` workflow or after discovery and chain synthesis have finished:
   ```bash
-  ajar phase status
+  ajar phase show
   ajar phase advance --to remediate
   ```
 

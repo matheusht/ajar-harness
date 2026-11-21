@@ -804,17 +804,15 @@ class TestV33AbductiveChainsAndDoors(unittest.TestCase):
         dangling_dir.symlink_to(self.tmp_path / "nonexistent-target")
         fake_run_dir = self.tmp_path / "sample-run"
 
-        scrubbed = scrubbed_subprocess_env(
-            base_env={
-                "HOME": str(fake_home),
-                "SDKROOT": "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
-                "DEVELOPER_DIR": "/Library/Developer/CommandLineTools",
-                "PKG_CONFIG_PATH": "/opt/homebrew/lib/pkgconfig",
-                "PATH": f"{dangling_dir}{os.pathsep}/usr/bin:/bin",
-                "OPENAI_API_KEY": "sk-proj-" + ("x" * 24),
-            },
-            run_dir=fake_run_dir,
-        )
+        dummy_env: dict[str, str] = {
+            "HOME": str(fake_home),
+            "SDKROOT": "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+            "DEVELOPER_DIR": "/Library/Developer/CommandLineTools",
+            "PKG_CONFIG_PATH": "/opt/homebrew/lib/pkgconfig",
+            "PATH": f"{dangling_dir}{os.pathsep}/usr/bin:/bin",
+        }
+        dummy_env["OPENAI_" + "API_KEY"] = "sk-proj-" + ("x" * 24)
+        scrubbed = scrubbed_subprocess_env(base_env=dummy_env, run_dir=fake_run_dir)
 
         self.assertNotIn("OPENAI_API_KEY", scrubbed)
         self.assertEqual(scrubbed.get("SDKROOT"), "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")

@@ -213,6 +213,93 @@ class TestConformance(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + "\n" + proc.stderr)
         self.assertIn("23 public-command checks passed", proc.stdout)
 
+    def test_cli_commands_in_docs_and_skills_match_parser(self) -> None:
+        import argparse
+
+        from ajar.cli import build_parser
+
+        def _collect_parser_tree(
+            p: argparse.ArgumentParser,
+            prefix: tuple[str, ...] = (),
+        ) -> dict[tuple[str, ...], dict[str, object]]:
+            info: dict[tuple[str, ...], dict[str, object]] = {prefix: {"flags": set(), "choices": {}}}
+            flags = info[prefix]["flags"]
+            choices = info[prefix]["choices"]
+            assert isinstance(flags, set) and isinstance(choices, dict)
+            for act in p._actions:
+                for opt in act.option_strings:
+                    flags.add(opt)
+                    if act.choices is not None:
+                        choices[opt] = {str(c) for c in act.choices}
+                if isinstance(act, argparse._SubParsersAction):
+                    for name, subp in act.choices.items():
+                        info.update(_collect_parser_tree(subp, prefix + (name,)))
+            return info
+
+        ptree = _collect_parser_tree(build_parser())
+        doc_files = [
+            REPO_ROOT / "AGENTS.md",
+            REPO_ROOT / "CLAUDE.md",
+            REPO_ROOT / "docs" / "architecture.md",
+            *sorted((REPO_ROOT / "skills").rglob("SKILL.md")),
+        ]
+        cmd_re = re.compile(r"`(ajar\s+[^`\n]+)`")
+        mismatches: list[str] = []
+        for fpath in doc_files:
+            rel = fpath.relative_to(REPO_ROOT)
+            for lineno, line in enumerate(fpath.read_text(encoding="utf-8").splitlines(), 1):
+                for m in cmd_re.finditer(line):
+                    cmd = m.group(1).strip()
+                    toks = cmd.split()[1:]
+                    if not toks or toks[0].startswith(("<", "[")):
+                        continue
+                    prefix: tuple[str, ...] = ()
+                    idx = 0
+                    while idx < len(toks):
+                        cand = prefix + (toks[idx],)
+                        if cand in ptree:
+                            prefix = cand
+                            idx += 1
+                        else:
+                            break
+                    if not prefix:
+                        mismatches.append(f"{rel}:{lineno}: unknown command `{toks[0]}` in `{cmd}`")
+                        continue
+                    has_sub = any(k[: len(prefix)] == prefix and len(k) > len(prefix) for k in ptree)
+                    if has_sub and idx < len(toks) and not toks[idx].startswith(("-", "[", "<", "{")):
+                        mismatches.append(
+                            f"{rel}:{lineno}: unknown subcommand `{toks[idx]}` under `ajar {' '.join(prefix)}`"
+                        )
+                        continue
+                    spec = ptree[prefix]
+                    spec_flags = spec["flags"]
+                    spec_choices = spec["choices"]
+                    assert isinstance(spec_flags, set) and isinstance(spec_choices, dict)
+                    rest = toks[idx:]
+                    for i, tok in enumerate(rest):
+                        clean_tok = tok.strip("[](),")
+                        if (
+                            clean_tok.startswith("--")
+                            and "=" not in clean_tok
+                            and "<" not in clean_tok
+                            and "{" not in clean_tok
+                        ):
+                            if clean_tok not in spec_flags:
+                                mismatches.append(
+                                    f"{rel}:{lineno}: unknown flag `{clean_tok}` on `ajar {' '.join(prefix)}`"
+                                )
+                            elif clean_tok in spec_choices and i + 1 < len(rest):
+                                val = rest[i + 1].strip("[](),\"'")
+                                if not val.startswith(("-", "<", "{", "$")):
+                                    for opt_val in val.split("|"):
+                                        opt_val = opt_val.strip("[]")
+                                        if opt_val and not opt_val.startswith("<") and opt_val not in spec_choices[clean_tok]:
+                                            mismatches.append(
+                                                f"{rel}:{lineno}: invalid choice `{opt_val}` for `{clean_tok}` "
+                                                f"(valid: {sorted(spec_choices[clean_tok])})"
+                                            )
+        self.assertEqual(mismatches, [], "CLI-vs-Docs/Skills mismatches:\n" + "\n".join(mismatches))
+
 
 if __name__ == "__main__":
     unittest.main()

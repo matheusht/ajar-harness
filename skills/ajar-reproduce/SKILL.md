@@ -63,7 +63,7 @@ Interrogate every PoC, control, and micro-patch against all 12 lenses before inv
      [--shared-guard-locus "<file:line>"] \
      --determinism deterministic
    ```
-3. **Single-Command Realism Calibration (`ajar finding calibrate`):** If post-confirm review finds that a reproduced finding requires multi-step caller interaction or carries a lower standalone ceiling (`stepping_stone`), calibrate it in one atomic command (`ajar finding calibrate <finding_id> --severity <sev> --declared-steps <N> --reason "..."`).
+3. **Single-Command Realism Calibration (`ajar finding calibrate`):** If post-confirm review finds that a reproduced finding requires multi-step caller interaction or carries a lower standalone ceiling (`stepping_stone`), calibrate it in one atomic command (`ajar finding calibrate <finding_id> --severity <sev> --reason "..."`).
 
 ### Stripped or Closed-Source Binaries (`--mode binary`)
 

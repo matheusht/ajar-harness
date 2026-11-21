@@ -39,12 +39,8 @@ from ajar.domain import (
 )
 from ajar.epistemic_hooks import (
     consume_hooks_for_locus,
-    on_anomaly_or_claim_recorded,
     on_claim_config_gated,
     on_claim_survived,
-    on_finding_confirmed,
-    on_primitive_added,
-    parse_tag_list,
     register_epistemic_hook,
     scan_source_for_epistemic_signals,
 )
@@ -53,9 +49,14 @@ from ajar.gates import (
     finding_attribution_for_claim,
     validate_dry_locus,
 )
+from ajar.reactions import (
+    on_anomaly_or_claim_recorded,
+    on_finding_confirmed,
+    on_primitive_added,
+)
 from ajar.redact import scrub_text
 from ajar.repro_source import validate_micropatch_diff
-from ajar.store import assert_run_mutable, immediate_tx
+from ajar.store import assert_run_mutable, immediate_tx, parse_tag_list
 from ajar.swarm import validate_claim_block_request, validate_structural_claim_prose
 
 

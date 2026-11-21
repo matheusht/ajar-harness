@@ -19,11 +19,14 @@ import pathlib
 import re
 import sys
 
-SQL_WRITE_RE = re.compile(r"\b(INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM)\b", re.IGNORECASE)
+SQL_WRITE_RE = re.compile(
+    r"\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|REPLACE\s+INTO|UPDATE\s+(?:OR\s+\w+\s+)?[\w.\"]+\s+SET|DELETE\s+FROM)\b",
+    re.IGNORECASE,
+)
 
 # Ratchet ceiling for remaining inline SQL mutations in `ajar/cli.py`.
 # Lower this whenever another CLI command moves into `ajar/services/`.
-MAX_CLI_RAW_SQL_WRITES = 12
+MAX_CLI_RAW_SQL_WRITES = 14
 
 FORBIDDEN_LLM_SDKS: frozenset[str] = frozenset(
     {
@@ -46,6 +49,9 @@ SERVICES_FORBIDDEN_AJAR_PREFIXES: tuple[str, ...] = (
     "ajar.runner",
     "ajar.hooks",
 )
+
+SAFE_TAR_FILTERS: frozenset[str] = frozenset({"tar", "data"})
+PROTECTED_ENV_KEYS: frozenset[str] = frozenset({"HOME", "PATH"})
 
 HARDCODED_PATH_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("devbox home path", re.compile(r"/home/antigravity\b")),
@@ -72,19 +78,68 @@ class LintViolation:
         }
 
 
-def _iter_imported_modules(tree: ast.AST) -> list[tuple[int, str]]:
+def _package_parts_for_rel(rel_posix: str) -> list[str]:
+    p = pathlib.PurePosixPath(rel_posix)
+    parts = list(p.with_suffix("").parts)
+    if parts and parts[-1] == "__init__":
+        return parts[:-1]
+    return parts[:-1]
+
+
+def _resolve_import_from(rel_posix: str, node: ast.ImportFrom) -> list[str]:
+    if node.level > 0:
+        pkg = _package_parts_for_rel(rel_posix)
+        up = node.level - 1
+        base_parts = pkg[:-up] if up > 0 else list(pkg)
+        if node.module:
+            base_parts = base_parts + node.module.split(".")
+        base = ".".join(base_parts)
+    else:
+        base = node.module or ""
+
+    resolved: list[str] = []
+    if base:
+        resolved.append(base)
+        for alias in node.names:
+            if alias.name != "*":
+                resolved.append(f"{base}.{alias.name}")
+    else:
+        for alias in node.names:
+            if alias.name != "*":
+                resolved.append(alias.name)
+    return resolved
+
+
+def _iter_imported_modules(tree: ast.AST, rel_posix: str) -> list[tuple[int, str]]:
     found: list[tuple[int, str]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 found.append((node.lineno, alias.name))
         elif isinstance(node, ast.ImportFrom):
-            mod = node.module or ""
-            if mod:
+            for mod in _resolve_import_from(rel_posix, node):
                 found.append((node.lineno, mod))
-                for alias in node.names:
-                    found.append((node.lineno, f"{mod}.{alias.name}"))
     return found
+
+
+def _extract_string_fragments(expr: ast.AST) -> str:
+    if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+        return expr.value
+    if isinstance(expr, ast.JoinedStr):
+        parts: list[str] = []
+        for val in expr.values:
+            if isinstance(val, ast.Constant) and isinstance(val.value, str):
+                parts.append(val.value)
+            else:
+                parts.append(" _expr_ ")
+        return "".join(parts)
+    if isinstance(expr, ast.BinOp) and isinstance(expr.op, (ast.Add, ast.Mod)):
+        left = _extract_string_fragments(expr.left)
+        right = _extract_string_fragments(expr.right)
+        return f"{left}{right}" if isinstance(expr.op, ast.Add) else left
+    if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute) and expr.func.attr == "format":
+        return _extract_string_fragments(expr.func.value)
+    return ""
 
 
 def _count_raw_sql_writes(path: pathlib.Path) -> list[tuple[int, str]]:
@@ -96,14 +151,13 @@ def _count_raw_sql_writes(path: pathlib.Path) -> list[tuple[int, str]]:
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
-            and node.func.attr in ("execute", "executemany")
+            and node.func.attr in ("execute", "executemany", "executescript")
             and node.args
-            and isinstance(node.args[0], ast.Constant)
-            and isinstance(node.args[0].value, str)
-            and SQL_WRITE_RE.search(node.args[0].value)
         ):
-            snippet = node.args[0].value.strip().splitlines()[0][:80]
-            hits.append((node.lineno, snippet))
+            sql_text = _extract_string_fragments(node.args[0])
+            if sql_text and SQL_WRITE_RE.search(sql_text):
+                snippet = sql_text.strip().splitlines()[0][:80]
+                hits.append((node.lineno, snippet))
     return hits
 
 
@@ -156,73 +210,73 @@ def check_layer_dag_boundaries(root: pathlib.Path) -> list[LintViolation]:
     for py_path in sorted(ajar_dir.rglob("*.py")):
         rel = py_path.relative_to(root).as_posix()
         tree = ast.parse(py_path.read_text(encoding="utf-8"), filename=rel)
-        imports = _iter_imported_modules(tree)
+        imports = _iter_imported_modules(tree, rel)
+        seen_line_rule: set[tuple[int, str]] = set()
+
+        def _record(
+            lineno: int,
+            rule: str,
+            msg: str,
+            hint: str,
+            *,
+            _rel: str = rel,
+            _seen: set[tuple[int, str]] = seen_line_rule,
+        ) -> None:
+            key = (lineno, rule)
+            if key in _seen:
+                return
+            _seen.add(key)
+            violations.append(LintViolation(rule=rule, path=_rel, line=lineno, message=msg, fix_hint=hint))
+
         for lineno, mod in imports:
             # 1. Global Zero-LLM & Frozen-Legacy boundaries for all of `ajar/`
             if _module_is_under(mod, "tools.legacy") or mod == "legacy":
-                violations.append(
-                    LintViolation(
-                        rule="LAYER_DAG_BOUNDARY",
-                        path=rel,
-                        line=lineno,
-                        message=f"Core package module `{rel}` imports archived legacy module `{mod}`.",
-                        fix_hint="Never import `tools/legacy/` from `ajar/`. Implement clean pure-stdlib code in `ajar/`.",
-                    )
+                _record(
+                    lineno,
+                    "LAYER_DAG_BOUNDARY",
+                    f"Core package module `{rel}` imports archived legacy module `{mod}`.",
+                    "Never import `tools/legacy/` from `ajar/`. Implement clean pure-stdlib code in `ajar/`.",
                 )
             for sdk in FORBIDDEN_LLM_SDKS:
                 if _module_is_under(mod, sdk):
-                    violations.append(
-                        LintViolation(
-                            rule="ZERO_LLM_ENGINE",
-                            path=rel,
-                            line=lineno,
-                            message=f"Zero-LLM invariant violated: `{rel}` imports LLM SDK `{mod}`.",
-                            fix_hint="Remove all LLM SDK imports from `ajar/`. Ajar's core engine must stay pure stdlib.",
-                        )
+                    _record(
+                        lineno,
+                        "ZERO_LLM_ENGINE",
+                        f"Zero-LLM invariant violated: `{rel}` imports LLM SDK `{mod}`.",
+                        "Remove all LLM SDK imports from `ajar/`. Ajar's core engine must stay pure stdlib.",
                     )
 
             # 2. Layer-specific DAG rules
             if rel.startswith("ajar/domain/") and mod.startswith("ajar."):
                 if not any(_module_is_under(mod, p) for p in DOMAIN_ALLOWED_AJAR_PREFIXES if p != "ajar"):
-                    # Allow importing top-level `ajar` constants (e.g. `from ajar import EXIT_GATE_BLOCKED`)
-                    # which yields `mod == "ajar"` and `mod == "ajar.<CONST>"`; disallow submodules.
                     top_sub = mod.split(".", 2)[1]
                     if (ajar_dir / f"{top_sub}.py").exists() or (ajar_dir / top_sub).is_dir():
-                        violations.append(
-                            LintViolation(
-                                rule="LAYER_DAG_BOUNDARY",
-                                path=rel,
-                                line=lineno,
-                                message=f"`ajar/domain/` must remain pure and cannot import `{mod}`.",
-                                fix_hint="Move pure types/enums/transitions into `ajar/domain/` or move SQL/IO logic to `ajar/store/` or `ajar/services/`.",
-                            )
+                        _record(
+                            lineno,
+                            "LAYER_DAG_BOUNDARY",
+                            f"`ajar/domain/` must remain pure and cannot import `{mod}`.",
+                            "Move pure types/enums/transitions into `ajar/domain/` or move SQL/IO logic to `ajar/store/` or `ajar/services/`.",
                         )
 
             elif rel.startswith("ajar/store/") and mod.startswith("ajar."):
                 if not any(_module_is_under(mod, p) for p in STORE_ALLOWED_AJAR_PREFIXES if p != "ajar"):
                     top_sub = mod.split(".", 2)[1]
                     if (ajar_dir / f"{top_sub}.py").exists() or (ajar_dir / top_sub).is_dir():
-                        violations.append(
-                            LintViolation(
-                                rule="LAYER_DAG_BOUNDARY",
-                                path=rel,
-                                line=lineno,
-                                message=f"`ajar/store/` cannot depend upward on `{mod}`.",
-                                fix_hint="`ajar/store/` may only import stdlib, top-level `ajar` constants, `ajar.domain`, and `ajar.store`.",
-                            )
+                        _record(
+                            lineno,
+                            "LAYER_DAG_BOUNDARY",
+                            f"`ajar/store/` cannot depend upward on `{mod}`.",
+                            "`ajar/store/` may only import stdlib, top-level `ajar` constants, `ajar.domain`, and `ajar.store`.",
                         )
 
             elif rel.startswith("ajar/services/") and any(
                 _module_is_under(mod, p) for p in SERVICES_FORBIDDEN_AJAR_PREFIXES
             ):
-                violations.append(
-                    LintViolation(
-                        rule="LAYER_DAG_BOUNDARY",
-                        path=rel,
-                        line=lineno,
-                        message=f"`ajar/services/` cannot import transport/driver module `{mod}`.",
-                        fix_hint="Transport layers (`cli.py`, `mcp.py`, `runner.py`) depend on `ajar/services/`, never the reverse.",
-                    )
+                _record(
+                    lineno,
+                    "LAYER_DAG_BOUNDARY",
+                    f"`ajar/services/` cannot import transport/driver module `{mod}`.",
+                    "Transport layers (`cli.py`, `mcp.py`, `runner.py`) depend on `ajar/services/`, never the reverse.",
                 )
     return violations
 
@@ -257,6 +311,18 @@ def check_no_hardcoded_devbox_paths(root: pathlib.Path) -> list[LintViolation]:
     return violations
 
 
+def _is_os_environ(node: ast.AST) -> bool:
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        return node.value.id == "os" and node.attr == "environ"
+    return isinstance(node, ast.Name) and node.id == "environ"
+
+
+def _protected_env_key(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in PROTECTED_ENV_KEYS:
+        return node.value
+    return None
+
+
 def check_no_ambient_env_mutation_in_tests(root: pathlib.Path) -> list[LintViolation]:
     tests_dir = root / "tests"
     if not tests_dir.is_dir():
@@ -267,31 +333,62 @@ def check_no_ambient_env_mutation_in_tests(root: pathlib.Path) -> list[LintViola
         src = py_path.read_text(encoding="utf-8")
         lines = src.splitlines()
         tree = ast.parse(src, filename=rel)
+
+        def _ignored(lineno: int, *, _lines: list[str] = lines) -> bool:
+            return 0 < lineno <= len(_lines) and "arch-lint: ignore-fixture" in _lines[lineno - 1]
+
+        def _add(lineno: int, msg: str, *, _rel: str = rel) -> None:
+            if _ignored(lineno):
+                return
+            violations.append(
+                LintViolation(
+                    rule="NO_AMBIENT_ENV_MUTATION",
+                    path=_rel,
+                    line=lineno,
+                    message=msg,
+                    fix_hint="Pass an explicit `base_env=` dict or use `unittest.mock.patch.dict(os.environ, ...)` so parallel tests never leak state.",
+                )
+            )
+
         for node in ast.walk(tree):
             if isinstance(node, (ast.Assign, ast.AugAssign)):
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
                 for target in targets:
-                    if (
-                        isinstance(target, ast.Subscript)
-                        and isinstance(target.value, ast.Attribute)
-                        and isinstance(target.value.value, ast.Name)
-                        and target.value.value.id == "os"
-                        and target.value.attr == "environ"
-                        and isinstance(target.slice, ast.Constant)
-                        and target.slice.value in ("HOME", "PATH")
-                    ):
-                        line_txt = lines[node.lineno - 1] if 0 < node.lineno <= len(lines) else ""
-                        if "arch-lint: ignore-fixture" in line_txt:
-                            continue
-                        violations.append(
-                            LintViolation(
-                                rule="NO_AMBIENT_ENV_MUTATION",
-                                path=rel,
-                                line=node.lineno,
-                                message=f"Test mutates ambient `os.environ[{target.slice.value!r}]` directly.",
-                                fix_hint="Pass an explicit `base_env=` dict or use `unittest.mock.patch.dict(os.environ, ...)` so parallel tests never leak state.",
-                            )
-                        )
+                    if isinstance(target, ast.Subscript) and _is_os_environ(target.value):
+                        key = _protected_env_key(target.slice)
+                        if key is not None:
+                            _add(node.lineno, f"Test mutates ambient `os.environ[{key!r}]` directly.")
+            elif isinstance(node, ast.Delete):
+                for target in node.targets:
+                    if isinstance(target, ast.Subscript) and _is_os_environ(target.value):
+                        key = _protected_env_key(target.slice)
+                        if key is not None:
+                            _add(node.lineno, f"Test deletes ambient `os.environ[{key!r}]` directly.")
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                if _is_os_environ(node.func.value):
+                    if node.func.attr in ("pop", "setdefault") and node.args:
+                        key = _protected_env_key(node.args[0])
+                        if key is not None:
+                            _add(node.lineno, f"Test mutates ambient `os.environ.{node.func.attr}({key!r}, ...)` directly.")
+                    elif node.func.attr == "update":
+                        for arg in node.args:
+                            if isinstance(arg, ast.Dict):
+                                for k in arg.keys:
+                                    key = _protected_env_key(k) if k is not None else None
+                                    if key is not None:
+                                        _add(node.lineno, f"Test mutates ambient `os.environ.update({{{key!r}: ...}})` directly.")
+                        for kw in node.keywords:
+                            if kw.arg in PROTECTED_ENV_KEYS:
+                                _add(node.lineno, f"Test mutates ambient `os.environ.update({kw.arg}=...)` directly.")
+                elif (
+                    isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "os"
+                    and node.func.attr in ("putenv", "unsetenv")
+                    and node.args
+                ):
+                    key = _protected_env_key(node.args[0])
+                    if key is not None:
+                        _add(node.lineno, f"Test mutates ambient env via `os.{node.func.attr}({key!r})` directly.")
     return violations
 
 
@@ -303,21 +400,38 @@ def check_no_unfiltered_tar_extract(root: pathlib.Path) -> list[LintViolation]:
     for py_path in sorted(ajar_dir.rglob("*.py")):
         rel = py_path.relative_to(root).as_posix()
         tree = ast.parse(py_path.read_text(encoding="utf-8"), filename=rel)
+        imported = {mod for _, mod in _iter_imported_modules(tree, rel)}
+        if not any(_module_is_under(mod, "tarfile") for mod in imported):
+            continue
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
                 and node.func.attr in ("extract", "extractall")
             ):
-                kw_names = {kw.arg for kw in node.keywords}
-                if "filter" not in kw_names:
+                filter_kw = next((kw for kw in node.keywords if kw.arg == "filter"), None)
+                if filter_kw is None:
                     violations.append(
                         LintViolation(
                             rule="NO_UNFILTERED_TAR_EXTRACT",
                             path=rel,
                             line=node.lineno,
-                            message=f"`{node.func.attr}()` called without explicit `filter=` argument.",
-                            fix_hint="Pass `filter='tar'` (or `filter='data'`) and validate member paths against archive root to prevent tar-slip.",
+                            message=f"`{node.func.attr}()` called without explicit safe `filter=` argument.",
+                            fix_hint="Pass `filter='tar'` or `filter='data'` and validate member paths against archive root to prevent tar-slip.",
+                        )
+                    )
+                elif not (
+                    isinstance(filter_kw.value, ast.Constant)
+                    and isinstance(filter_kw.value.value, str)
+                    and filter_kw.value.value in SAFE_TAR_FILTERS
+                ):
+                    violations.append(
+                        LintViolation(
+                            rule="NO_UNFILTERED_TAR_EXTRACT",
+                            path=rel,
+                            line=node.lineno,
+                            message=f"`{node.func.attr}()` passes unsafe or non-literal `filter=` value.",
+                            fix_hint="Use literal `filter='tar'` or `filter='data'` (never `None` or `'fully_trusted'`).",
                         )
                     )
     return violations

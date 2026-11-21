@@ -1,6 +1,4 @@
-"""Unified transactional workflow services shared identically by CLI and MCP."""
-
-from __future__ import annotations
+"""Unified transactional workflow services for Ajar (`ajar/services/`)."""
 
 from ajar.services.workflow import (
     add_anomaly,
@@ -14,6 +12,7 @@ from ajar.services.workflow import (
     falsify_claim,
     finish_run,
     propose_claim,
+    rescope_claim_service,
     survive_claim,
 )
 
@@ -29,5 +28,6 @@ __all__ = [
     "falsify_claim",
     "finish_run",
     "propose_claim",
+    "rescope_claim_service",
     "survive_claim",
 ]

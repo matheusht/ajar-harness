@@ -7,7 +7,7 @@ name = "ajar"
 version = "3.3.0"
 description = "Ajar finds, disproves, reproduces, and patches software vulnerabilities."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11.4"
 dependencies = []
 
 [project.optional-dependencies]

@@ -12,7 +12,7 @@ import pathlib
 import sys
 from typing import Any, BinaryIO
 
-from ajar import __version__
+from ajar import EXIT_USER_ERROR, __version__
 from ajar.db import (
     AjarError,
     lease_next_task,
@@ -20,7 +20,6 @@ from ajar.db import (
     list_steers,
     open_run_db,
     render_task_context,
-    rescope_claim,
     resolve_run_id,
 )
 from ajar.gates import check_all_gates
@@ -36,6 +35,7 @@ from ajar.services import (
     falsify_claim,
     finish_run,
     propose_claim,
+    rescope_claim_service,
     survive_claim,
 )
 
@@ -90,6 +90,13 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "subsystem": {"type": "string"},
                 "locus": {"type": "string"},
                 "priority": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
+                "trust_boundary": {"type": "string"},
+                "requires_tags": {
+                    "oneOf": [
+                        {"type": "string"},
+                        {"type": "array", "items": {"type": "string"}},
+                    ]
+                },
             },
             "required": ["name", "kind", "subsystem", "locus"],
         },
@@ -131,6 +138,8 @@ MCP_TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "locus": {"type": "string"},
                 "observation": {"type": "string"},
+                "surface_id": {"type": "string"},
+                "source_claim_id": {"type": "string"},
                 "repro_cmd": {"type": "string"},
             },
             "required": ["locus", "observation"],
@@ -146,6 +155,7 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "title": {"type": "string"},
                 "locus": {"type": "string"},
                 "mechanism": {"type": "string"},
+                "surface_id": {"type": "string"},
                 "severity": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
                 "falsification_prediction": {"type": "string"},
                 "falsification_test": {"type": "string"},
@@ -163,7 +173,7 @@ MCP_TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "ajar_claim_falsify",
-        "description": "Mark a claim disproved after running its falsification test.",
+        "description": "Mark a claim disproved (or `config_gated`) after running its falsification test.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -171,6 +181,7 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "worker_id": {"type": "string"},
                 "notes": {"type": "string"},
                 "control_locus": {"type": "string"},
+                "config_gate": {"type": "string"},
             },
             "required": ["claim_id", "worker_id", "notes"],
         },
@@ -201,6 +212,8 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "locus": {"type": "string"},
                 "mechanism": {"type": "string"},
                 "severity": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
+                "falsification_prediction": {"type": "string"},
+                "falsification_test": {"type": "string"},
             },
             "required": ["claim_id", "worker_id", "reason"],
         },
@@ -285,7 +298,7 @@ def dispatch_mcp_tool(
         if tool_name == "ajar_task_close":
             tid = str(args["task_id"])
             wid = str(args["worker_id"])
-            outcome = str(args["outcome"])
+            outcome = str(args["outcome"]).strip()
             if outcome == "dry":
                 return close_task_dry(
                     conn,
@@ -296,6 +309,8 @@ def dispatch_mcp_tool(
                     target_dir=tpath,
                     target_mode=str(run["target_mode"] if run else "source"),
                 )
+            if outcome != "done":
+                raise AjarError(f"Unsupported task close outcome {outcome!r}; choose 'done' or 'dry'.", EXIT_USER_ERROR)
             return close_task_done(
                 conn,
                 task_id=tid,
@@ -349,15 +364,18 @@ def dispatch_mcp_tool(
                 notes=str(args["notes"]),
             )
         if tool_name == "ajar_claim_rescope":
-            return rescope_claim(
+            wid = str(args.get("worker_id") or args.get("worker") or "")
+            return rescope_claim_service(
                 conn,
                 claim_id=str(args["claim_id"]),
-                worker_id=str(args["worker_id"]),
+                worker_id=wid,
                 reason=str(args["reason"]),
                 title=args.get("title"),
                 locus=args.get("locus"),
                 mechanism=args.get("mechanism"),
                 severity=args.get("severity"),
+                falsification_prediction=args.get("falsification_prediction"),
+                falsification_test=args.get("falsification_test"),
             )
         if tool_name == "ajar_steer_list":
             return {"steers": list_steers(conn, active_only=bool(args.get("active_only", True)))}

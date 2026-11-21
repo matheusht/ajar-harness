@@ -44,7 +44,6 @@ from ajar.db import (
     record_coverage_span,
     record_repro_failure,
     render_task_context,
-    rescope_claim,
     resolve_run_id,
     revoke_steer,
     run_dir_for,
@@ -103,6 +102,7 @@ from ajar.services import (
     falsify_claim,
     finish_run,
     propose_claim,
+    rescope_claim_service,
     survive_claim,
 )
 from ajar.store import assert_run_mutable, immediate_tx
@@ -116,7 +116,6 @@ from ajar.swarm import (
     escalate_swarm_fallback,
     reopen_run,
     sync_run_to_shared_mirror,
-    validate_structural_claim_prose,
 )
 from ajar.target_check import compute_disk_free_gib, evaluate_target_readiness
 from ajar.workspace import init_run_workspace
@@ -906,12 +905,7 @@ def cmd_claim(args: argparse.Namespace) -> int:
             return EXIT_OK
 
         if args.claim_cmd == "rescope":
-            ok_prose, prose_msg = validate_structural_claim_prose(
-                args.title, args.mechanism, args.falsification_prediction
-            )
-            if not ok_prose:
-                raise AjarError(prose_msg, EXIT_GATE_BLOCKED)
-            res = rescope_claim(
+            res = rescope_claim_service(
                 conn,
                 claim_id=args.claim_id,
                 worker_id=args.worker,

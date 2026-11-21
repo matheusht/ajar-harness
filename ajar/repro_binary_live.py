@@ -237,7 +237,7 @@ def _run_binary_once(
             }
 
     stdin_bytes = stdin_path.read_bytes() if stdin_path is not None else None
-    proc = subprocess.run(
+    raw_proc = subprocess.run(
         [str(binary_path), *args],
         input=stdin_bytes,
         capture_output=True,
@@ -245,7 +245,7 @@ def _run_binary_once(
         timeout=timeout_sec,
         check=False,
     )
-    rc = int(proc.returncode)
+    rc = int(raw_proc.returncode)
     crashed = rc < 0 or rc >= 128
     return {
         "crashed": crashed,
@@ -253,7 +253,7 @@ def _run_binary_once(
         "exit_code": rc,
         "normalized_fault_offset": "",
         "guard_fired": False,
-        "output": scrub_text((proc.stdout + proc.stderr).decode("utf-8", errors="replace"))[:4000],
+        "output": scrub_text((raw_proc.stdout + raw_proc.stderr).decode("utf-8", errors="replace"))[:4000],
     }
 
 
@@ -474,12 +474,11 @@ def run_live_reproduction(
     except (IndexError, json.JSONDecodeError):
         pass
 
-    # Probe environment WITHOUT `AJAR_CANARY_B`!
+    # Probe environment WITHOUT `AJAR_CANARY_B` or `AJAR_CRED_B`!
     probe_env = scrubbed_subprocess_env(
         overrides={
             "AJAR_TARGET_URL": target_url,
             "AJAR_CRED_A": cred_a,
-            "AJAR_CRED_B": cred_b,
             "AJAR_RESOURCE_A_ID": resource_a_id,
             "AJAR_RESOURCE_B_ID": resource_b_id,
         }

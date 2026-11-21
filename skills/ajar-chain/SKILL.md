@@ -26,7 +26,7 @@ Consult `skills/references/project-zero-zdi-chain-corpus.md` and `skills/referen
 
 1. **Middle-Unicorn Percolation (`percolated_paths` & `unicorn_gaps`):** A Low/Medium quirk (`role=capability`) plus normal trust-laundering code (`role=trust_gadget`) may sit disconnected from a Crown-Jewel sink until an intermediate link bridges the gap. Check `ajar chain frontier`:
    - If `percolated_paths` is non-empty, prioritize proving the full $N$-hop sequence immediately (`salience = 98`).
-   - If `unicorn_gaps` shows a 1-link gap (`forward_prefix -> [unmet_requires] -> backward_suffix`), either park an explicit `middle_bridge` Open Door (`ajar door park --direction middle_bridge ...`) or dispatch bounded hunters (`ajar swarm packet --stage bridge`).
+   - If `unicorn_gaps` shows a 1-link gap (`forward_prefix -> [unmet_requires] -> backward_suffix`), either park an explicit `bidirectional` Open Door (`ajar door park --direction bidirectional ...`) or dispatch bounded hunters (`ajar swarm packet --stage bridge`).
 2. **Post-State Snapshot Probing (`ajar chain probe --from-snapshot`):** When Stage 1 captured a filesystem snapshot (`snp-*` via `ajar claim reproduce --save-post-state`), test downstream Stage-2 consumers directly against that hydrated state inside `slot-inst` before writing the combined end-to-end command:
    ```bash
    ajar chain probe \

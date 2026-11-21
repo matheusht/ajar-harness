@@ -198,10 +198,12 @@ class TestConformance(unittest.TestCase):
         self.assertEqual(leaks, [], "Unredacted secret patterns found:\n" + "\n".join(leaks))
 
     def test_archived_legacy_reader_closure_passes(self) -> None:
-        venv_py = pathlib.Path("/tmp/ajar-venv/bin/python")
-        py_bin = str(venv_py) if venv_py.is_file() else sys.executable
+        import importlib.util
+
+        if importlib.util.find_spec("jsonschema") is None:
+            self.skipTest("Optional dev dependency `jsonschema==4.26.0` not installed in active interpreter.")
         proc = subprocess.run(
-            [py_bin, str(REPO_ROOT / "tools" / "legacy" / "dossier-inspector-test.py")],
+            [sys.executable, str(REPO_ROOT / "tools" / "legacy" / "dossier-inspector-test.py")],
             cwd=str(REPO_ROOT),
             capture_output=True,
             text=True,
@@ -210,6 +212,174 @@ class TestConformance(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stdout + "\n" + proc.stderr)
         self.assertIn("23 public-command checks passed", proc.stdout)
+
+    def test_cli_commands_in_docs_and_skills_match_parser(self) -> None:
+        import argparse
+        import shlex
+
+        from ajar.cli import build_parser
+
+        def _collect_parser_tree(
+            p: argparse.ArgumentParser,
+            prefix: tuple[str, ...] = (),
+        ) -> dict[tuple[str, ...], dict[str, object]]:
+            info: dict[tuple[str, ...], dict[str, object]] = {prefix: {"flags": set(), "choices": {}}}
+            flags = info[prefix]["flags"]
+            choices = info[prefix]["choices"]
+            assert isinstance(flags, set) and isinstance(choices, dict)
+            for act in p._actions:
+                for opt in act.option_strings:
+                    flags.add(opt)
+                    if act.choices is not None:
+                        choices[opt] = {str(c) for c in act.choices}
+                if isinstance(act, argparse._SubParsersAction):
+                    for name, subp in act.choices.items():
+                        info.update(_collect_parser_tree(subp, prefix + (name,)))
+            return info
+
+        def _extract_commands(text: str) -> list[tuple[int, str]]:
+            commands: list[tuple[int, str]] = []
+            lines = text.splitlines()
+            in_fence = False
+            fence_lang = ""
+            buf_start = 0
+            buf = ""
+            inline_re = re.compile(r"`(ajar\s+[^`\n]+)`")
+
+            for lineno, raw_line in enumerate(lines, 1):
+                stripped = raw_line.strip()
+                if stripped.startswith("```"):
+                    if not in_fence:
+                        in_fence = True
+                        fence_lang = stripped[3:].strip().lower()
+                        buf = ""
+                    else:
+                        if buf.strip():
+                            commands.append((buf_start, buf.strip()))
+                            buf = ""
+                        in_fence = False
+                        fence_lang = ""
+                    continue
+                if in_fence:
+                    if fence_lang not in ("", "bash", "sh", "shell", "zsh"):
+                        continue
+                    if not stripped or stripped.startswith("#"):
+                        if buf.strip():
+                            commands.append((buf_start, buf.strip()))
+                            buf = ""
+                        continue
+                    if not buf:
+                        if not stripped.startswith("ajar "):
+                            continue
+                        buf_start = lineno
+                    if stripped.endswith("\\"):
+                        buf += " " + stripped[:-1].strip()
+                    else:
+                        buf += " " + stripped
+                        commands.append((buf_start, buf.strip()))
+                        buf = ""
+                else:
+                    for m in inline_re.finditer(raw_line):
+                        commands.append((lineno, m.group(1).strip()))
+            if buf.strip():
+                commands.append((buf_start, buf.strip()))
+            return commands
+
+        def _tokenize(cmd: str) -> list[str]:
+            try:
+                return shlex.split(cmd)
+            except ValueError:
+                return cmd.split()
+
+        def _check_choice_values(val: str, valid: set[str], rel: pathlib.Path, lineno: int, flag: str) -> list[str]:
+            issues: list[str] = []
+            cleaned = val.strip("[](),\"'")
+            if not cleaned or cleaned.startswith(("-", "$", "{")):
+                return issues
+            if cleaned.startswith("<") and cleaned.endswith(">"):
+                inner = cleaned[1:-1].strip()
+                if "|" not in inner:
+                    return issues
+                candidates = [p.strip() for p in inner.split("|")]
+            elif "|" in cleaned:
+                candidates = [p.strip("[]<>") for p in cleaned.split("|")]
+            elif cleaned.startswith("<"):
+                return issues
+            else:
+                candidates = [cleaned]
+            for opt_val in candidates:
+                if opt_val and not opt_val.startswith("<") and opt_val not in valid:
+                    issues.append(
+                        f"{rel}:{lineno}: invalid choice `{opt_val}` for `{flag}` (valid: {sorted(valid)})"
+                    )
+            return issues
+
+        ptree = _collect_parser_tree(build_parser())
+        doc_files = [
+            REPO_ROOT / "AGENTS.md",
+            REPO_ROOT / "CLAUDE.md",
+            REPO_ROOT / "docs" / "architecture.md",
+            *sorted((REPO_ROOT / "skills").rglob("SKILL.md")),
+        ]
+        mismatches: list[str] = []
+        for fpath in doc_files:
+            rel = fpath.relative_to(REPO_ROOT)
+            for lineno, cmd in _extract_commands(fpath.read_text(encoding="utf-8")):
+                toks = _tokenize(cmd)[1:]
+                if not toks or toks[0].startswith(("<", "[")):
+                    continue
+                prefix: tuple[str, ...] = ()
+                idx = 0
+                while idx < len(toks):
+                    cand = prefix + (toks[idx],)
+                    if cand in ptree:
+                        prefix = cand
+                        idx += 1
+                    else:
+                        break
+                if not prefix:
+                    mismatches.append(f"{rel}:{lineno}: unknown command `{toks[0]}` in `{cmd}`")
+                    continue
+                has_sub = any(k[: len(prefix)] == prefix and len(k) > len(prefix) for k in ptree)
+                if has_sub and idx < len(toks) and not toks[idx].startswith(("-", "[", "<", "{")):
+                    mismatches.append(
+                        f"{rel}:{lineno}: unknown subcommand `{toks[idx]}` under `ajar {' '.join(prefix)}`"
+                    )
+                    continue
+                spec = ptree[prefix]
+                spec_flags = spec["flags"]
+                spec_choices = spec["choices"]
+                assert isinstance(spec_flags, set) and isinstance(spec_choices, dict)
+                rest = toks[idx:]
+                i = 0
+                while i < len(rest):
+                    raw_tok = rest[i]
+                    clean_tok = raw_tok.strip("[](),")
+                    if clean_tok in ("&&", "||", "|", ";"):
+                        break
+                    if clean_tok.startswith("--") and "<" not in clean_tok and "{" not in clean_tok:
+                        if "=" in clean_tok:
+                            flag_name, inline_val = clean_tok.split("=", 1)
+                            if flag_name not in spec_flags:
+                                mismatches.append(
+                                    f"{rel}:{lineno}: unknown flag `{flag_name}` on `ajar {' '.join(prefix)}`"
+                                )
+                            elif flag_name in spec_choices:
+                                mismatches.extend(
+                                    _check_choice_values(inline_val, spec_choices[flag_name], rel, lineno, flag_name)
+                                )
+                        else:
+                            if clean_tok not in spec_flags:
+                                mismatches.append(
+                                    f"{rel}:{lineno}: unknown flag `{clean_tok}` on `ajar {' '.join(prefix)}`"
+                                )
+                            elif clean_tok in spec_choices and i + 1 < len(rest):
+                                mismatches.extend(
+                                    _check_choice_values(rest[i + 1], spec_choices[clean_tok], rel, lineno, clean_tok)
+                                )
+                                i += 1
+                    i += 1
+        self.assertEqual(mismatches, [], "CLI-vs-Docs/Skills mismatches:\n" + "\n".join(mismatches))
 
 
 if __name__ == "__main__":

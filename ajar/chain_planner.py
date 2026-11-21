@@ -1068,8 +1068,6 @@ def evaluate_precondition_realism(
         err_ok = (not visible_err) or (not bool(jewel_row["forbid_visible_error"]))
         if max_steps_ok and cfg_ok and err_ok and sev_low in ("critical", "high"):
             tier = "crown_jewel"
-        elif sev_low in ("critical", "high") and cfg_ok:
-            tier = "stepping_stone"
         else:
             tier = "stepping_stone"
     else:

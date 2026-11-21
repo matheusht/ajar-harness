@@ -434,7 +434,7 @@ def evaluate_target_readiness(
         if agent_cfgs:
             warnings.append(
                 f"Target contains {len(agent_cfgs)} embedded agent config file(s) ({', '.join(pathlib.Path(p).name for p in agent_cfgs[:4])}); "
-                "run workers from `/home/antigravity` or `--envelope` so target coding rules do not override Ajar."
+                "run workers from a neutral workspace directory outside the target checkout or `--envelope` so target coding rules do not override Ajar."
             )
         if no_std_count > 0:
             warnings.append(

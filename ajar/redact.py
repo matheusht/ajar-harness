@@ -249,15 +249,16 @@ def _resolve_rustup_toolchain_bin(rhome: pathlib.Path, preferred_tc: str = "") -
         )
         if m:
             resolved_tc = m.group(1).strip()
-    if resolved_tc and (tdir / resolved_tc / "bin").is_dir():
-        return resolved_tc, tdir / resolved_tc / "bin"
+    if resolved_tc and (tdir / resolved_tc).is_dir():
+        bin_dir = tdir / resolved_tc / "bin"
+        return resolved_tc, (bin_dir if bin_dir.is_dir() else None)
     if tdir.is_dir():
         tchains = sorted(d.name for d in tdir.iterdir() if d.is_dir())
         if tchains:
             stable = [n for n in tchains if n.startswith("stable")]
             picked = stable[0] if stable else tchains[0]
-            if (tdir / picked / "bin").is_dir():
-                return picked, tdir / picked / "bin"
+            bin_dir = tdir / picked / "bin"
+            return picked, (bin_dir if bin_dir.is_dir() else None)
     return "", None
 
 
@@ -272,10 +273,10 @@ def _preserve_rust_toolchain_env(
     home_rustup = (pathlib.Path(caller_home) / ".rustup") if caller_home else None
 
     candidates: list[pathlib.Path] = []
-    if home_rustup is not None:
-        candidates.append(home_rustup)
     if "RUSTUP_HOME" in clean:
         candidates.append(pathlib.Path(clean["RUSTUP_HOME"]))
+    if home_rustup is not None:
+        candidates.append(home_rustup)
     candidates.extend([pathlib.Path("/usr/local/rustup"), pathlib.Path("/usr/share/rust/.rustup")])
 
     seen_rhomes: set[str] = set()
@@ -295,21 +296,21 @@ def _preserve_rust_toolchain_env(
             if "RUSTUP_HOME" not in clean:
                 clean["RUSTUP_HOME"] = cand_str
         tc_name, tc_bin = _resolve_rustup_toolchain_bin(cand, preferred_tc)
+        if tc_name and not clean.get("RUSTUP_TOOLCHAIN"):
+            clean["RUSTUP_TOOLCHAIN"] = tc_name
         if tc_bin is not None:
             extra_bins.append(tc_bin)
             if cand == home_rustup and "RUSTUP_HOME" not in src:
                 clean["RUSTUP_HOME"] = cand_str
-            if tc_name and not clean.get("RUSTUP_TOOLCHAIN"):
-                clean["RUSTUP_TOOLCHAIN"] = tc_name
 
-    cargo_bin_dir: pathlib.Path | None = None
     if "CARGO_HOME" in clean:
         cbin = pathlib.Path(clean["CARGO_HOME"]) / "bin"
         if cbin.is_dir():
-            cargo_bin_dir = cbin
+            extra_bins.append(cbin)
     elif caller_home:
         src_cargo = pathlib.Path(caller_home) / ".cargo"
         if src_cargo.is_dir():
+            home_cargo_bin: pathlib.Path | None = None
             if isolated_home is not None:
                 iso_cargo = isolated_home / ".cargo"
                 iso_cargo.mkdir(parents=True, exist_ok=True)
@@ -324,12 +325,12 @@ def _preserve_rust_toolchain_env(
                         except OSError:
                             pass
                 if (iso_cargo / "bin").is_dir():
-                    cargo_bin_dir = iso_cargo / "bin"
-            if cargo_bin_dir is None and (src_cargo / "bin").is_dir():
-                cargo_bin_dir = src_cargo / "bin"
+                    home_cargo_bin = iso_cargo / "bin"
+            if home_cargo_bin is None and (src_cargo / "bin").is_dir():
+                home_cargo_bin = src_cargo / "bin"
+            if home_cargo_bin is not None:
+                extra_bins.append(home_cargo_bin)
 
-    if cargo_bin_dir is not None:
-        extra_bins.append(cargo_bin_dir)
     if extra_bins or "RUSTUP_HOME" in clean or "CARGO_HOME" in clean:
         clean["PATH"] = _prepend_path_dirs(clean.get("PATH", "/usr/local/bin:/usr/bin:/bin"), extra_bins)
         clean.setdefault("CARGO_NET_OFFLINE", "true")

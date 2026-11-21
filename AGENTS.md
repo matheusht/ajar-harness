@@ -10,7 +10,7 @@ Your product is causal proof, not plausible prose. A claim becomes a confirmed f
 
 ## Canonical Workflow (`map -> investigate -> falsify -> reproduce -> converge -> fix`)
 
-1. **Quote and initialize:** Preview scope and the `35%` COGS cap (`ajar quote`), then initialize `~/.ajar/runs/<run_id>/run.db` (`ajar init [--stopping exhaustive-high|first-high|crown-jewel] [--phase hunt|remediate] [--diff <base..head>] [--brief-file <md>] [--uncapped]`, `ajar door jewel-add`, `ajar steer add`, `ajar status`).
+1. **Quote and initialize:** Preview scope and the `35%` COGS cap (`ajar quote`), then initialize `~/.ajar/runs/<run_id>/run.db` (`ajar init [--stopping exhaustive-high|first-verified-high|crown-jewel] [--phase hunt|remediate] [--diff <base..head>] [--brief-file <md>] [--uncapped]`, `ajar door jewel-add`, `ajar steer add`, `ajar status`).
 2. **Map and threat-model (`skills/ajar-map/SKILL.md`):** Run `ajar map --budget-tokens 1500 --slice-cap 15000`, query `ajar ref query --kind intent|reachability`, synthesize the adaptive threat model (`ajar threat-model set`, `assumption-add`), register surfaces (`--requires-tags`), and enqueue `investigate` tasks across `outside_in`, `inside_out`, `native_ffi`, and `peer_symmetry`.
 3. **Investigate (`skills/ajar-investigate/SKILL.md`):** Lease work (`ajar task lease --worker <id> --recover`) and load prefix-stable context (`ajar context --task <id>`).
    - Obey `Active Workspace Steers` and any triggered `Active Epistemic Hooks` (including each hook's `Kill Rule`). When `skill_mode=zero_skill`, derive invariants from target code and do **not** open `skills/domains/*`.

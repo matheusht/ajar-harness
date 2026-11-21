@@ -73,7 +73,7 @@ Push maximum depth on every promising lead. When a deep sink or partial chain hi
 1. Suspend the blocked sink or partial prefix/suffix with `ajar door park`. Ajar spawns `<= 2` bounded `bridge` hunter tasks while preserving parallel greenfield exploration, and automatically wakes the door (`status = 'ready'`, `salience >= 96`) via tags, code symbols/call edges, or FTS5 the moment any worker discovers a matching piece:
    ```bash
    ajar door park \
-     --direction <sink_to_source|source_to_sink|middle_bridge> \
+     --direction <sink_to_source|source_to_sink|bidirectional> \
      [--jewel <jewel_id>] \
      [--held-ids "<prim_or_fnd_id>"] \
      [--snapshot <snp_id>] \

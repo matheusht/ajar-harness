@@ -1352,8 +1352,12 @@ def cmd_claim(args: argparse.Namespace) -> int:
                 siblings = [
                     {"claim_id": r["claim_id"], "poc_cmd": args.sibling_poc_cmd or ""}
                     for r in conn.execute(
-                        "SELECT claim_id FROM claims WHERE status = 'survived_falsify' AND claim_id != ?",
-                        (args.claim_id,),
+                        """
+                        SELECT claim_id FROM claims
+                        WHERE status = 'survived_falsify' AND claim_id != ?
+                          AND (locus = ? OR mechanism_key = ?)
+                        """,
+                        (args.claim_id, str(clm["locus"]), str(clm["mechanism_key"])),
                     ).fetchall()
                 ] if args.sibling_poc_cmd else None
                 res = run_source_reproduction(
@@ -1415,7 +1419,23 @@ def cmd_claim(args: argparse.Namespace) -> int:
 
             if not res["passed"]:
                 err_cls = str(res.get("error_class") or "target_negative")
-                if err_cls == "target_negative":
+                if str(clm["status"]) == "reproduced":
+                    log_event(
+                        conn,
+                        args.worker,
+                        "claim_repro_rerun_failed_preserved",
+                        args.claim_id,
+                        {"error_class": err_cls, "reason": str(res.get("reason", ""))[:200]},
+                    )
+                    pivot = {
+                        "claim_id": args.claim_id,
+                        "status": "reproduced",
+                        "error_class": err_cls,
+                        "strike_recorded": False,
+                        "failed_repro_count": int(clm["failed_repro_count"] or 0),
+                        "pivoted_to_instrumentation": False,
+                    }
+                elif err_cls == "target_negative":
                     pivot = record_repro_failure(
                         conn,
                         claim=clm,
@@ -1841,6 +1861,7 @@ def cmd_patch(args: argparse.Namespace) -> int:
                 max_changed_lines=args.max_changed_lines,
                 timeout_sec=args.timeout,
                 suite_timeout_sec=int(getattr(args, "suite_timeout", 1800)),
+                build_cmd=str(getattr(args, "build_cmd", None) or ""),
                 worker_id=args.worker,
             )
             _emit(res, True)
@@ -2757,6 +2778,7 @@ def build_parser() -> argparse.ArgumentParser:
     ppt_v.add_argument("--max-changed-lines", type=int, default=120)
     ppt_v.add_argument("--timeout", type=int, default=90)
     ppt_v.add_argument("--suite-timeout", type=int, default=1800, help="Timeout in seconds for Arm 5 full project test suite (default: 1800).")
+    ppt_v.add_argument("--build-cmd", default="", help="Optional build command run before clean/patched/reverted verification steps.")
     ppt_v.add_argument("--worker", default="worker")
     ppt_v.add_argument("--run")
     ppt_l = ptc_sub.add_parser("list")
@@ -2846,9 +2868,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_rep.set_defaults(func=cmd_report)
 
     # mcp
+    def _cmd_mcp(a: argparse.Namespace) -> int:
+        serve_mcp_stdio(explicit_run_id=a.run)
+        return EXIT_OK
+
     p_mcp = sub.add_parser("mcp", help="Run STDIO JSON-RPC 2.0 MCP server for Host Mode agents.")
     p_mcp.add_argument("--run")
-    p_mcp.set_defaults(func=lambda a: (serve_mcp_stdio(explicit_run_id=a.run), EXIT_OK)[1])
+    p_mcp.set_defaults(func=_cmd_mcp)
 
     # hook
     p_hk = sub.add_parser("hook", help="Host Mode persistence hooks.")

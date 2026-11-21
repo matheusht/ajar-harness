@@ -842,12 +842,16 @@ def capture_slot_post_state_snapshot(
 
     raw_bytes = archive_path.read_bytes()
     sha256_hex = hashlib.sha256(raw_bytes).hexdigest()
+    try:
+        stored_archive_path = str(archive_path.relative_to(run_dir))
+    except ValueError:
+        stored_archive_path = str(archive_path)
     return {
         "ok": True,
         "snapshot_id": snap_id,
         "claim_id": claim_id,
         "rel_dir": raw_rel,
-        "archive_path": str(archive_path),
+        "archive_path": stored_archive_path,
         "sha256": sha256_hex,
         "size_bytes": len(raw_bytes),
         "manifest": {"entry_count": len(entries), "sample_entries": entries[:24], "skipped_external_symlinks": skipped_symlinks},
@@ -1372,7 +1376,9 @@ def run_source_reproduction(
         }
     finally:
         if not verified_success and captured_snapshot and captured_snapshot.get("archive_path"):
-            pathlib.Path(str(captured_snapshot["archive_path"])).unlink(missing_ok=True)
+            raw_snap = pathlib.Path(str(captured_snapshot["archive_path"]))
+            snap_file = raw_snap if raw_snap.is_absolute() else (run_dir / raw_snap)
+            snap_file.unlink(missing_ok=True)
         if (slot_dir / ".git").exists():
             subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
             _clean_slot_preserving_objects(slot_dir, check=False)

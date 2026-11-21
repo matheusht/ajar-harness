@@ -102,7 +102,6 @@ def run_host_continuation_loop(
     """Outer continuation loop for `codex`, `omp`, or custom CLI host sessions."""
     rounds_run = 0
     stalled_rounds = 0
-    last_event_id = 0
 
     default_templates: dict[str, str] = {
         "codex": "codex exec {prompt}",
@@ -146,11 +145,10 @@ def run_host_continuation_loop(
         conn2 = open_run_db(run_id, ajar_home=ajar_home)
         try:
             after_event_id = int(conn2.execute("SELECT COALESCE(MAX(event_id), 0) AS m FROM events").fetchone()["m"])
-            if after_event_id <= cur_event_id and after_event_id <= last_event_id:
+            if after_event_id <= cur_event_id:
                 stalled_rounds += 1
             else:
                 stalled_rounds = 0
-            last_event_id = after_event_id
             if stalled_rounds >= MAX_CONSECUTIVE_STALLS:
                 return {
                     "completed": False,

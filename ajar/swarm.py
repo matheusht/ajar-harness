@@ -684,7 +684,7 @@ def complete_swarm_dispatch(
 def resolve_shared_mirror_root(
     explicit_root: str | pathlib.Path | None = None,
     *,
-    ajar_home: pathlib.Path | None = None,
+    ajar_home: pathlib.Path | str | None = None,
 ) -> pathlib.Path | None:
     """Resolve persistent shared ledger root (`/shared/user/.gemini/ajar/runs`) when enabled."""
     if explicit_root is not None:
@@ -740,7 +740,7 @@ def _copy2_overwriting_readonly(src: str | os.PathLike[str], dst: str | os.PathL
         except OSError:
             pass
         dst_p.unlink(missing_ok=True)
-    return shutil.copy2(src, dst)
+    return shutil.copy2(os.fspath(src), os.fspath(dst))
 
 
 def _copytree_readonly_safe(src: pathlib.Path, dst: pathlib.Path) -> None:
@@ -787,10 +787,10 @@ def _sync_bare_repo_portable(src_repo_git: pathlib.Path, dst_repo_git: pathlib.P
 def sync_run_to_shared_mirror(
     run_id: str,
     *,
-    ajar_home: pathlib.Path | None = None,
+    ajar_home: pathlib.Path | str | None = None,
     shared_root: str | pathlib.Path | None = None,
 ) -> dict[str, Any] | None:
-    """Mirror compact run ledger (`run.db`, `brief.md`, `repro/repo.git`, `repro/helpers`, `artifacts`) to shared storage."""
+    """Mirror compact run ledger (`run.db`, `brief.md`, `repro/repo.git`, `repro/helpers`, `repro/snapshots`, `artifacts`) to shared storage."""
     mirror_root = resolve_shared_mirror_root(shared_root, ajar_home=ajar_home)
     if mirror_root is None:
         return None
@@ -812,6 +812,10 @@ def sync_run_to_shared_mirror(
     if (rdir / "repro" / "helpers").is_dir():
         (dst_dir / "repro").mkdir(parents=True, exist_ok=True)
         _copytree_readonly_safe(rdir / "repro" / "helpers", dst_dir / "repro" / "helpers")
+
+    if (rdir / "repro" / "snapshots").is_dir():
+        (dst_dir / "repro").mkdir(parents=True, exist_ok=True)
+        _copytree_readonly_safe(rdir / "repro" / "snapshots", dst_dir / "repro" / "snapshots")
 
     if (rdir / "repro" / "repo.git" / "HEAD").is_file():
         (dst_dir / "repro").mkdir(parents=True, exist_ok=True)
@@ -841,6 +845,9 @@ def _hydrate_run_from_shared_mirror(
     if (src_dir / "repro" / "helpers").is_dir():
         (local_rdir / "repro").mkdir(parents=True, exist_ok=True)
         _copytree_readonly_safe(src_dir / "repro" / "helpers", local_rdir / "repro" / "helpers")
+    if (src_dir / "repro" / "snapshots").is_dir():
+        (local_rdir / "repro").mkdir(parents=True, exist_ok=True)
+        _copytree_readonly_safe(src_dir / "repro" / "snapshots", local_rdir / "repro" / "snapshots")
     if (src_dir / "repro" / "repo.git" / "HEAD").is_file():
         (local_rdir / "repro").mkdir(parents=True, exist_ok=True)
         _copytree_readonly_safe(src_dir / "repro" / "repo.git", local_rdir / "repro" / "repo.git")

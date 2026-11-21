@@ -142,10 +142,70 @@ def _extract_string_fragments(expr: ast.AST) -> str:
     return ""
 
 
-def _count_raw_sql_writes(path: pathlib.Path) -> list[tuple[int, str]]:
-    if not path.is_file():
-        return []
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+_HARDCODED_PATH_PREFILTER = re.compile(
+    "|".join(f"(?:{pat.pattern})" for _, pat in HARDCODED_PATH_PATTERNS)
+)
+
+
+class _ParsedPy:
+    """Lazily parses `.py` source so substring-filtered files never pay `ast.parse` cost."""
+
+    def __init__(self, rel: str, src: str) -> None:
+        self.rel = rel
+        self.src = src
+        self._tree: ast.AST | None = None
+
+    @property
+    def tree(self) -> ast.AST:
+        if self._tree is None:
+            self._tree = ast.parse(self.src, filename=self.rel)
+        return self._tree
+
+
+class _RepoAstCache:
+    """Single-pass source + lazy AST cache for `run_all_checks`."""
+
+    def __init__(self, root: pathlib.Path) -> None:
+        self.root = root
+        self._by_path: dict[pathlib.Path, _ParsedPy] = {}
+        self._dir_files: dict[str, list[_ParsedPy]] = {}
+
+    def get(self, path: pathlib.Path) -> _ParsedPy | None:
+        if path in self._by_path:
+            return self._by_path[path]
+        if not path.is_file():
+            return None
+        rel = path.relative_to(self.root).as_posix()
+        src = path.read_text(encoding="utf-8")
+        parsed = _ParsedPy(rel=rel, src=src)
+        self._by_path[path] = parsed
+        return parsed
+
+    def py_files_under(self, subdir: str) -> list[_ParsedPy]:
+        if subdir in self._dir_files:
+            return self._dir_files[subdir]
+        base = self.root / subdir
+        if not base.is_dir():
+            self._dir_files[subdir] = []
+            return []
+        items: list[_ParsedPy] = []
+        for py_path in sorted(base.rglob("*.py")):
+            parsed = self.get(py_path)
+            if parsed is not None:
+                items.append(parsed)
+        self._dir_files[subdir] = items
+        return items
+
+
+def _count_raw_sql_writes(
+    path: pathlib.Path,
+    *,
+    tree: ast.AST | None = None,
+) -> list[tuple[int, str]]:
+    if tree is None:
+        if not path.is_file():
+            return []
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     hits: list[tuple[int, str]] = []
     for node in ast.walk(tree):
         if (
@@ -161,10 +221,17 @@ def _count_raw_sql_writes(path: pathlib.Path) -> list[tuple[int, str]]:
     return hits
 
 
-def check_no_raw_sql_in_mcp(root: pathlib.Path) -> list[LintViolation]:
+def check_no_raw_sql_in_mcp(
+    root: pathlib.Path,
+    *,
+    _cache: _RepoAstCache | None = None,
+) -> list[LintViolation]:
     mcp_path = root / "ajar" / "mcp.py"
+    parsed = _cache.get(mcp_path) if _cache is not None else None
+    if _cache is not None and parsed is None:
+        return []
     violations: list[LintViolation] = []
-    for lineno, snippet in _count_raw_sql_writes(mcp_path):
+    for lineno, snippet in _count_raw_sql_writes(mcp_path, tree=parsed.tree if parsed else None):
         violations.append(
             LintViolation(
                 rule="NO_RAW_SQL_IN_MCP",
@@ -181,9 +248,13 @@ def check_cli_raw_sql_ratchet(
     root: pathlib.Path,
     *,
     max_writes: int = MAX_CLI_RAW_SQL_WRITES,
+    _cache: _RepoAstCache | None = None,
 ) -> list[LintViolation]:
     cli_path = root / "ajar" / "cli.py"
-    hits = _count_raw_sql_writes(cli_path)
+    parsed = _cache.get(cli_path) if _cache is not None else None
+    if _cache is not None and parsed is None:
+        return []
+    hits = _count_raw_sql_writes(cli_path, tree=parsed.tree if parsed else None)
     if len(hits) <= max_writes:
         return []
     first_line = hits[0][0] if hits else 1
@@ -202,15 +273,19 @@ def _module_is_under(mod: str, prefix: str) -> bool:
     return mod == prefix or mod.startswith(prefix + ".")
 
 
-def check_layer_dag_boundaries(root: pathlib.Path) -> list[LintViolation]:
+def check_layer_dag_boundaries(
+    root: pathlib.Path,
+    *,
+    _cache: _RepoAstCache | None = None,
+) -> list[LintViolation]:
     ajar_dir = root / "ajar"
     if not ajar_dir.is_dir():
         return []
+    cache = _cache if _cache is not None else _RepoAstCache(root)
     violations: list[LintViolation] = []
-    for py_path in sorted(ajar_dir.rglob("*.py")):
-        rel = py_path.relative_to(root).as_posix()
-        tree = ast.parse(py_path.read_text(encoding="utf-8"), filename=rel)
-        imports = _iter_imported_modules(tree, rel)
+    for parsed in cache.py_files_under("ajar"):
+        rel = parsed.rel
+        imports = _iter_imported_modules(parsed.tree, rel)
         seen_line_rule: set[tuple[int, str]] = set()
 
         def _record(
@@ -281,7 +356,11 @@ def check_layer_dag_boundaries(root: pathlib.Path) -> list[LintViolation]:
     return violations
 
 
-def check_no_hardcoded_devbox_paths(root: pathlib.Path) -> list[LintViolation]:
+def check_no_hardcoded_devbox_paths(
+    root: pathlib.Path,
+    *,
+    _cache: _RepoAstCache | None = None,
+) -> list[LintViolation]:
     violations: list[LintViolation] = []
     scan_roots = ("ajar", "tests", "skills", "docs")
     scan_exts = {".py", ".md", ".sh", ".yml", ".yaml", ".json", ".toml"}
@@ -292,8 +371,11 @@ def check_no_hardcoded_devbox_paths(root: pathlib.Path) -> list[LintViolation]:
         for fpath in sorted(base.rglob("*")):
             if not fpath.is_file() or fpath.suffix.lower() not in scan_exts:
                 continue
-            rel = fpath.relative_to(root).as_posix()
-            text = fpath.read_text(encoding="utf-8", errors="ignore")
+            cached = _cache.get(fpath) if (_cache is not None and fpath.suffix.lower() == ".py") else None
+            text = cached.src if cached is not None else fpath.read_text(encoding="utf-8", errors="ignore")
+            if _HARDCODED_PATH_PREFILTER.search(text) is None:
+                continue
+            rel = cached.rel if cached is not None else fpath.relative_to(root).as_posix()
             for idx, line in enumerate(text.splitlines(), start=1):
                 if "arch-lint: ignore-fixture" in line:
                     continue
@@ -323,16 +405,22 @@ def _protected_env_key(node: ast.AST) -> str | None:
     return None
 
 
-def check_no_ambient_env_mutation_in_tests(root: pathlib.Path) -> list[LintViolation]:
+def check_no_ambient_env_mutation_in_tests(
+    root: pathlib.Path,
+    *,
+    _cache: _RepoAstCache | None = None,
+) -> list[LintViolation]:
     tests_dir = root / "tests"
     if not tests_dir.is_dir():
         return []
+    cache = _cache if _cache is not None else _RepoAstCache(root)
     violations: list[LintViolation] = []
-    for py_path in sorted(tests_dir.rglob("*.py")):
-        rel = py_path.relative_to(root).as_posix()
-        src = py_path.read_text(encoding="utf-8")
-        lines = src.splitlines()
-        tree = ast.parse(src, filename=rel)
+    for parsed in cache.py_files_under("tests"):
+        rel = parsed.rel
+        if "environ" not in parsed.src and "putenv" not in parsed.src and "unsetenv" not in parsed.src:
+            continue
+        lines = parsed.src.splitlines()
+        tree = parsed.tree
 
         def _ignored(lineno: int, *, _lines: list[str] = lines) -> bool:
             return 0 < lineno <= len(_lines) and "arch-lint: ignore-fixture" in _lines[lineno - 1]
@@ -392,14 +480,21 @@ def check_no_ambient_env_mutation_in_tests(root: pathlib.Path) -> list[LintViola
     return violations
 
 
-def check_no_unfiltered_tar_extract(root: pathlib.Path) -> list[LintViolation]:
+def check_no_unfiltered_tar_extract(
+    root: pathlib.Path,
+    *,
+    _cache: _RepoAstCache | None = None,
+) -> list[LintViolation]:
     ajar_dir = root / "ajar"
     if not ajar_dir.is_dir():
         return []
+    cache = _cache if _cache is not None else _RepoAstCache(root)
     violations: list[LintViolation] = []
-    for py_path in sorted(ajar_dir.rglob("*.py")):
-        rel = py_path.relative_to(root).as_posix()
-        tree = ast.parse(py_path.read_text(encoding="utf-8"), filename=rel)
+    for parsed in cache.py_files_under("ajar"):
+        if "tarfile" not in parsed.src:
+            continue
+        rel = parsed.rel
+        tree = parsed.tree
         imported = {mod for _, mod in _iter_imported_modules(tree, rel)}
         if not any(_module_is_under(mod, "tarfile") for mod in imported):
             continue
@@ -438,13 +533,14 @@ def check_no_unfiltered_tar_extract(root: pathlib.Path) -> list[LintViolation]:
 
 
 def run_all_checks(root: pathlib.Path) -> list[LintViolation]:
+    cache = _RepoAstCache(root)
     violations: list[LintViolation] = []
-    violations.extend(check_no_raw_sql_in_mcp(root))
-    violations.extend(check_cli_raw_sql_ratchet(root))
-    violations.extend(check_layer_dag_boundaries(root))
-    violations.extend(check_no_hardcoded_devbox_paths(root))
-    violations.extend(check_no_ambient_env_mutation_in_tests(root))
-    violations.extend(check_no_unfiltered_tar_extract(root))
+    violations.extend(check_no_raw_sql_in_mcp(root, _cache=cache))
+    violations.extend(check_cli_raw_sql_ratchet(root, _cache=cache))
+    violations.extend(check_layer_dag_boundaries(root, _cache=cache))
+    violations.extend(check_no_hardcoded_devbox_paths(root, _cache=cache))
+    violations.extend(check_no_ambient_env_mutation_in_tests(root, _cache=cache))
+    violations.extend(check_no_unfiltered_tar_extract(root, _cache=cache))
     return violations
 
 

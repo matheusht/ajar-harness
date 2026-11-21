@@ -123,12 +123,56 @@ class TestConformance(unittest.TestCase):
         self.assertEqual(contents["AGENTS.md"], contents["CLAUDE.md"], "AGENTS.md and CLAUDE.md must be byte-identical")
 
     def test_zero_banned_jargon_across_active_code_docs_and_skills(self) -> None:
+        # Exact required lowercase literal anchors per rule (1:1 verified against BANNED_JARGON_RULES).
+        # C-level substring search avoids backtracking regex overhead on clean files while staying
+        # 100% mathematically equivalent to running every rule pattern on every file.
+        rule_anchors: dict[str, tuple[str, ...]] = {
+            "01_llm_redteam_harness": ("llm-redteam-harness",),
+            "02_inner_outer_research": ("inner research", "outer wrapper", "outer driver"),
+            "03_candidate_native_route": ("candidate native", "native local research", "native source sdk"),
+            "04_record_kernel": ("legacy local research", "record kernel", "admitted reader", "decision 0005/0006 kernel"),
+            "05_plane_123": ("plane-1", "plane-2", "plane-3", "plane 1", "plane 2", "plane 3"),
+            "06_zone_123": ("zone-1", "zone-2", "zone-3"),
+            "07_scope_fence": ("scope fence",),
+            "08_safe_signal": ("safe_signal",),
+            "09_escalation_rung": ("escalation rung", "ceiling-requests.md", "impact_escalation", "impact_demo_authorized"),
+            "10_queue_claim": ("queue-claim", "completion_claims"),
+            "11_attempt_ceremony": ("attempt-start", "attempt-finish", "record-negative", "register-bundle"),
+            "12_covered_dry": ("coverage_dry", "covered-dry", "covered_dry"),
+            "13_cleanup_obligation": ("cleanup obligation",),
+            "14_adjudication": ("adjudication", "adjudicated"),
+            "15_pocinator": ("pocinator",),
+            "16_markdown_oracles": ("signal-oracle", "regrade-oracle", "chainability-oracle", "ghsa-fix-diff-oracle", "severity-precedent-oracle"),
+            "17_regrade": ("regrade",),
+            "18_casebooks": ("casebook",),
+            "19_dossier": ("dossier",),
+            "20_disposition": ("disposition",),
+            "21_unproven_packet": ("unproven packet",),
+            "22_exhausted_lane": ("exhausted lane", "source lane"),
+            "23_source_engagement_bootstrap": ("source-engagement-bootstrap", "legacy-bootstrap"),
+            "24_environment_preflight": ("environment preflight", "preflight_holdout"),
+            "25_routes_to_stub": ("routes_to:",),
+            "26_grandfather_pins": ("completion-claim-grandfather-pins",),
+            "27_quiescence": ("quiescence", "session-end-backstop"),
+            "28_gepa_dspy": ("gepa", "dspy normalizer", "framing-probe"),
+            "29_etrack_stego": ("e-track", "etrack", "tollbooth", "payload-proposal", "p4rs3lt0ngv3", "st3gg", "glossopetrae"),
+            "30_personas": ("eni-novelist", "persona-pressure", "#muse"),
+            "31_kanboard": ("kanboard", "opencode-kanboard", "t02-cloud-source"),
+            "32_oslit_retired": ("oslit",),
+            "33_ajar_platform_retired": ("ajar platform",),
+        }
+        self.assertEqual(set(rule_anchors), {name for name, _ in BANNED_JARGON_RULES})
+        indexed_rules = [(name, rule_anchors[name], pattern) for name, pattern in BANNED_JARGON_RULES]
+
         violations: list[str] = []
         for fpath in _iter_active_text_files():
+            text = fpath.read_text(encoding="utf-8", errors="ignore")
+            lower = text.lower()
             rel = fpath.relative_to(REPO_ROOT)
             # docs/engineering/AGENTS.md is permitted a single historical archive pointer to tools/legacy/.
-            text = fpath.read_text(encoding="utf-8", errors="ignore")
-            for rule_name, pattern in BANNED_JARGON_RULES:
+            for rule_name, anchors, pattern in indexed_rules:
+                if not any(a in lower for a in anchors):
+                    continue
                 for m in pattern.finditer(text):
                     line_no = text.count("\n", 0, m.start()) + 1
                     violations.append(f"{rel}:{line_no} matched {rule_name} ({m.group(0)!r})")

@@ -93,3 +93,25 @@ Run state lives outside the target tree under `~/.ajar/runs/<run_id>/`, paired w
 - **`G3` (Causal Proof, Challenger Separation, & Release UB Gate):** Every `findings` row has passing 4-arm JSON receipts, `proposer_worker_id != falsifier_worker_id`, and zero `critical`/`high` findings classified as `debug_assert_only`.
 - **`G4` (First-Principles Quota, Anti-Premature-`dry`, & Strict `env_blocker` Gate):** Enforces `zero_skill` quota, verified `dry` guard loci, blocks premature `dry` closure when an active (`status != 'dry'`) unchained guarded primitive lacks completed guard-break verification, and rejects policy/safety-withheld `blocked` claims.
 - **`G5` (Orphaned Anomaly, Ready Open Door, & Stage-5 Converge Completeness):** Zero `unexplained` anomalies or unresolved `ready` Open Doors remain, and when `>= 2` active composable signals exist, at least one Stage-5 `chain` task has completed.
+
+---
+
+## 6. Internal Package Layering, Mechanical Guardrails, DST, & Proof Helpers (`ADR-0023`)
+
+To prevent CLI/MCP drift, silent state-machine corruption, and prose-only conventions, `ajar/` follows a strict acyclic layer architecture enforced mechanically in CI:
+
+```text
+ajar/domain/   (pure zero-IO StrEnums, models, explicit transition graphs, derive_claim_axes)
+     ▲
+ajar/store/    (CURRENT_SCHEMA_VERSION, PRAGMA user_version fast-path, immediate_tx, assert_run_mutable)
+     ▲
+ajar/services/ (workflow.py unified transactional mutations; proof.py DEC-0132 & P0-3 read-only helpers)
+     ▲
+ajar/cli.py  &  ajar/mcp.py  (thin CLI/STDIO-MCP transport adapters; 0 raw SQL writes in mcp.py)
+```
+
+- **Atomic Transactional Services (`ajar/services/workflow.py`):** Every core workflow mutation acquires `immediate_tx(conn)` (`BEGIN IMMEDIATE` / nested `SAVEPOINT`) before reading mutable rows, checking `assert_run_mutable`, normalizing `worker_id`, and enforcing `ALLOWED_*_TRANSITIONS` + `derive_claim_axes`. `ajar/db.py:open_run_db` skips redundant migrations via `PRAGMA user_version` (`<= 4` SQL statements on warm opens), and `ajar/oracles.py:index_target_oracles` batches FTS5 writes inside one `immediate_tx` with an mtime+size-keyed cache for built-in `precedent` docs.
+- **Mechanical Guardrails (`tools/arch_lint.py` + CI):** Enforces `NO_RAW_SQL_IN_MCP`, `CLI_RAW_SQL_RATCHET`, `LAYER_DAG_BOUNDARY` (absolute and relative imports), `ZERO_LLM_ENGINE`, `NO_HARDCODED_DEVBOX_PATH`, `NO_AMBIENT_ENV_MUTATION`, and `NO_UNFILTERED_TAR_EXTRACT` (literal `'tar'`/`'data'` filters), emitting self-healing `fix_hint` messages. CI runs `ruff` (`E,F,I,W,B`), `tools/arch_lint.py`, `mypy --strict` on `domain`/`store`/`services`/`arch_lint`, package `mypy`, CLI-vs-Docs/Skills conformance checks, and full `pytest -q`.
+- **Deterministic Simulation Testing & Verification Driver (`tests/dst/test_state_machine_sim.py`, `scripts/verify-repo.sh`):** Seeded multi-worker DST (`AJAR_DST_SEED=<n>` for exact replay) asserts 10 global invariants after every randomized operation, including strict read-only `check_all_gates(..., auto_enqueue_chain=False)` purity, KV prefix-cache stability, `reopen_run` claim-axis coherence, and advisory Host Mode budget behavior. Contributors run `scripts/verify-repo.sh --fast` (`~19s` inner loop) during iteration and `scripts/verify-repo.sh --full` before opening a PR.
+- **Startup Proof Helpers (`ajar/services/proof.py`):** `ajar economics export` exports read-only, strictly advisory `DEC-0132` COGS/LoC calibration telemetry (`ajar-economics-calibration/1`), and `ajar ledger commit-preimage` produces redacted `P0-3` SHA-256 commit-before-submit records with atomic symlink-refusing `0o600` preimage files and stdout isolation.
+

@@ -1,25 +1,39 @@
 """Seeded multi-worker Deterministic Simulation Testing (DST) for Ajar state machines.
 
-Runs 50 seeds x 40 randomized steps (2,000+ operations) exercising CLI/service/MCP
-workflow mutations, illegal transition probes, phase monotonicity, read-only gate
-purity, Host Mode advisory spend behavior, KV prefix-cache stability, and reopen flows.
+Runs 20 seeds x 40 randomized steps (800+ operations by default; configurable via
+`AJAR_DST_SEEDS`) exercising service, CLI (`ajar spend add`), and MCP workflow
+mutations, illegal transition probes, phase monotonicity, read-only gate purity,
+Host Mode advisory spend behavior, KV prefix-cache stability, and finish/reopen cycles.
 
 Replay any failing seed directly:
-    AJAR_DST_SEED=42 pytest -q tests/dst/test_state_machine_sim.py
+    AJAR_DST_SEED=7 pytest -q tests/dst/test_state_machine_sim.py
 """
 
 from __future__ import annotations
 
+import io
 import os
 import pathlib
 import random
 import sqlite3
 import tempfile
 import unittest
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from unittest import mock
 
-from ajar.chain_planner import add_crown_jewel, compute_chain_frontier, park_open_door
+import ajar.chain_planner as chain_planner_mod
+import ajar.db as db_mod
+import ajar.services.workflow as workflow_mod
+import ajar.swarm as swarm_mod
+from ajar.chain_planner import (
+    VALID_DOOR_DIRECTIONS,
+    add_crown_jewel,
+    compute_chain_frontier,
+    park_open_door,
+)
+from ajar.cli import main as cli_main
 from ajar.db import (
+    add_steer,
     compute_task_salience,
     lease_next_task,
     mark_primitive_dry,
@@ -88,6 +102,25 @@ TARGET_FILES: tuple[tuple[str, str], ...] = (
 )
 
 
+class _DeterministicClock:
+    """Monotonic logical clock eliminating wall-clock second-boundary flakiness."""
+
+    def __init__(self, base_epoch: int = 1795132800) -> None:
+        self._tick = 0
+        self._base = base_epoch
+
+    def iso(self) -> str:
+        self._tick += 1
+        secs = self._tick
+        mm, ss = divmod(secs, 60)
+        hh, mm = divmod(mm, 60)
+        return f"2026-11-21T{hh:02d}:{mm:02d}:{ss:02d}Z"
+
+    def epoch(self) -> float:
+        self._tick += 1
+        return float(self._base + self._tick)
+
+
 def _seed_target_dir(root: pathlib.Path) -> pathlib.Path:
     for rel, content in TARGET_FILES:
         fp = root / rel
@@ -113,6 +146,14 @@ def _bootstrap_sim_run(run_id: str, target_dir: pathlib.Path) -> sqlite3.Connect
     return conn
 
 
+def _table_snapshot(conn: sqlite3.Connection) -> tuple[object, ...]:
+    return (
+        [tuple(r) for r in conn.execute("SELECT task_id, status, updated_at FROM tasks ORDER BY rowid ASC").fetchall()],
+        [tuple(r) for r in conn.execute("SELECT door_id, status, updated_at FROM parked_doors ORDER BY rowid ASC").fetchall()],
+        int(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]),
+    )
+
+
 def _assert_global_invariants(
     conn: sqlite3.Connection,
     *,
@@ -130,8 +171,8 @@ def _assert_global_invariants(
     rank = PHASE_RANK[phase]
     assert rank >= prev_phase_rank, f"{ctx}: campaign_phase regressed {prev_phase_rank} -> {rank}"
 
-    # I1, I2, I9: Claims coherence & fresh-falsifier separation
-    claims = conn.execute("SELECT * FROM claims").fetchall()
+    # I1, I2, I9: Claims 5-axis coherence & fresh-falsifier separation
+    claims = conn.execute("SELECT * FROM claims ORDER BY rowid ASC").fetchall()
     valid_claim_statuses = {s.value for s in ClaimStatus}
     for c in claims:
         st = str(c["status"])
@@ -149,7 +190,7 @@ def _assert_global_invariants(
             assert prop != fals, f"{ctx}: fresh-falsifier violation on {c['claim_id']}: proposer == falsifier == {prop!r}"
 
     # I3, I9: Orphaned anomaly survival
-    anomalies = conn.execute("SELECT * FROM anomalies").fetchall()
+    anomalies = conn.execute("SELECT * FROM anomalies ORDER BY rowid ASC").fetchall()
     valid_anom_statuses = {s.value for s in AnomalyStatus}
     claim_status_by_id = {str(c["claim_id"]): str(c["status"]) for c in claims}
     for a in anomalies:
@@ -162,7 +203,7 @@ def _assert_global_invariants(
             )
 
     # I4, I9: Primitive chained <-> status sync
-    prims = conn.execute("SELECT primitive_id, status, chained FROM primitives").fetchall()
+    prims = conn.execute("SELECT primitive_id, status, chained FROM primitives ORDER BY rowid ASC").fetchall()
     valid_prim_statuses = {s.value for s in PrimitiveStatus}
     for p in prims:
         pst = str(p["status"])
@@ -173,7 +214,7 @@ def _assert_global_invariants(
             assert pst == "chained", f"{ctx}: chained=1 primitive {p['primitive_id']} has status={pst!r}"
 
     # I6, I9: Tasks enum & hunt-phase patch gating
-    tasks = conn.execute("SELECT task_id, kind, status FROM tasks").fetchall()
+    tasks = conn.execute("SELECT task_id, kind, status FROM tasks ORDER BY rowid ASC").fetchall()
     valid_task_statuses = {s.value for s in TaskStatus}
     for t in tasks:
         tst = str(t["status"])
@@ -182,36 +223,70 @@ def _assert_global_invariants(
             assert tst != "leased", f"{ctx}: patch task {t['task_id']} leased during hunt phase"
 
     # I9: Doors & Jewels enums
-    for d in conn.execute("SELECT status FROM parked_doors").fetchall():
+    for d in conn.execute("SELECT status FROM parked_doors ORDER BY rowid ASC").fetchall():
         assert d["status"] in {s.value for s in DoorStatus}, f"{ctx}: illegal door status {d['status']!r}"
-    for j in conn.execute("SELECT status FROM crown_jewels").fetchall():
+    for j in conn.execute("SELECT status FROM crown_jewels ORDER BY rowid ASC").fetchall():
         assert j["status"] in {s.value for s in JewelStatus}, f"{ctx}: illegal jewel status {j['status']!r}"
 
-    # I7: Read-only gate purity (check_all_gates with auto_enqueue_chain=False never writes)
-    before_counts = (
-        int(conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]),
-        int(conn.execute("SELECT COUNT(*) FROM parked_doors").fetchone()[0]),
-        int(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]),
-    )
+    # I7: Strict read-only gate purity (detects inserts AND in-place updates)
+    before_snap = _table_snapshot(conn)
     check_all_gates(conn, target_dir=target_dir, auto_enqueue_chain=False)
-    after_counts = (
-        int(conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]),
-        int(conn.execute("SELECT COUNT(*) FROM parked_doors").fetchone()[0]),
-        int(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]),
-    )
-    assert before_counts == after_counts, f"{ctx}: read-only check_all_gates mutated tables: {before_counts} -> {after_counts}"
+    after_snap = _table_snapshot(conn)
+    assert before_snap == after_snap, f"{ctx}: read-only check_all_gates mutated tables!"
 
     return rank
 
 
-def _run_simulation_seed(seed: int, *, steps: int, target_dir: pathlib.Path, ajar_home: pathlib.Path) -> None:
+def _run_simulation_seed(
+    seed: int,
+    *,
+    steps: int,
+    target_dir: pathlib.Path,
+    ajar_home: pathlib.Path,
+    stats: dict[str, int] | None = None,
+    deterministic_ids: bool = False,
+) -> None:
     rng = random.Random(seed)
+    clock = _DeterministicClock()
+    id_seq = 0
+
+    def _det_new_id(prefix: str) -> str:
+        nonlocal id_seq
+        id_seq += 1
+        return f"{prefix}-{seed:04d}{id_seq:04d}"
+
+    def _bump(key: str, n: int = 1) -> None:
+        if stats is not None:
+            stats[key] = stats.get(key, 0) + n
+
     run_id = f"dst-seed-{seed:04d}"
-    with mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}):
+    with ExitStack() as stack:
+        stack.enter_context(mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}))
+        stack.enter_context(mock.patch.object(db_mod, "utc_now_iso", side_effect=clock.iso))
+        stack.enter_context(mock.patch.object(workflow_mod, "utc_now_iso", side_effect=clock.iso))
+        stack.enter_context(mock.patch.object(chain_planner_mod, "utc_now_iso", side_effect=clock.iso))
+        stack.enter_context(mock.patch.object(swarm_mod, "utc_now_iso", side_effect=clock.iso))
+        stack.enter_context(mock.patch.object(db_mod.time, "time", side_effect=clock.epoch))
+        stack.enter_context(mock.patch.object(workflow_mod.time, "time", side_effect=clock.epoch))
+        if deterministic_ids:
+            stack.enter_context(mock.patch.object(db_mod, "new_id", side_effect=_det_new_id))
+            stack.enter_context(mock.patch.object(workflow_mod, "new_id", side_effect=_det_new_id))
+            stack.enter_context(mock.patch.object(chain_planner_mod, "new_id", side_effect=_det_new_id))
+            stack.enter_context(mock.patch.object(swarm_mod, "new_id", side_effect=_det_new_id))
+
         conn = _bootstrap_sim_run(run_id, target_dir)
         try:
+            # Seed one global steer so Certified Run Prefix exercises non-trivial steering content.
+            add_steer(conn, rule_text="DST invariant: never skip auth boundary", scope="global")
             phase_rank = 0
-            loci = ["src/auth.py:1", "src/auth.py:4", "src/parser.py:1", "src/parser.py:4", "src/vault.py:1", "src/vault.py:4"]
+            loci = [
+                "src/auth.py:1",
+                "src/auth.py:4",
+                "src/parser.py:1",
+                "src/parser.py:4",
+                "src/vault.py:1",
+                "src/vault.py:4",
+            ]
             ops = (
                 "surface_add",
                 "task_add",
@@ -233,7 +308,6 @@ def _run_simulation_seed(seed: int, *, steps: int, target_dir: pathlib.Path, aja
                 "phase_advance",
                 "spend_over_cap",
                 "illegal_probe",
-                "finish_and_reopen",
             )
 
             for step in range(steps):
@@ -241,62 +315,75 @@ def _run_simulation_seed(seed: int, *, steps: int, target_dir: pathlib.Path, aja
                 worker = rng.choice(WORKERS)
                 locus = rng.choice(loci)
                 use_mcp = rng.random() < 0.35
-                run_status = str(conn.execute("SELECT status FROM runs LIMIT 1").fetchone()["status"])
 
                 if op == "surface_add":
-                    try:
-                        if use_mcp:
-                            dispatch_mcp_tool(
-                                run_id,
-                                "ajar_surface_add",
-                                {
-                                    "name": f"surf_{step}",
-                                    "kind": "entry_point",
-                                    "locus": locus,
-                                    "priority": rng.choice(["critical", "high", "medium", "low"]),
-                                },
-                            )
-                        else:
-                            add_surface(
-                                conn,
-                                name=f"surf_{step}",
-                                kind="entry_point",
-                                locus=locus,
-                                priority=rng.choice(["critical", "high", "medium", "low"]),
-                            )
-                    except AjarError:
-                        assert run_status == "finished"
+                    if use_mcp:
+                        dispatch_mcp_tool(
+                            run_id,
+                            "ajar_surface_add",
+                            {
+                                "name": f"surf_{step}",
+                                "kind": "entry_point",
+                                "locus": locus,
+                                "priority": rng.choice(["critical", "high", "medium", "low"]),
+                            },
+                        )
+                    else:
+                        add_surface(
+                            conn,
+                            name=f"surf_{step}",
+                            kind="entry_point",
+                            locus=locus,
+                            priority=rng.choice(["critical", "high", "medium", "low"]),
+                        )
+                    _bump("surfaces_added")
 
                 elif op == "task_add":
-                    if run_status != "finished":
-                        tid = new_id("tsk")
-                        kind = rng.choice(["investigate", "falsify", "patch"])
-                        pri = rng.choice(["critical", "high", "medium", "low"])
-                        now = utc_now_iso()
-                        sal = compute_task_salience(
-                            conn,
-                            {"priority": pri, "kind": kind, "subsystem": locus.split("/", 1)[0], "locus": locus, "reopened_boost": 0},
+                    uncovered = conn.execute(
+                        """
+                        SELECT surface_id, locus FROM surfaces s
+                        WHERE NOT EXISTS (SELECT 1 FROM tasks t WHERE t.surface_id = s.surface_id)
+                        ORDER BY s.rowid ASC LIMIT 1
+                        """
+                    ).fetchone()
+                    surf_id = str(uncovered["surface_id"]) if uncovered is not None else None
+                    task_locus = str(uncovered["locus"]) if uncovered is not None else locus
+                    tid = _det_new_id("tsk") if deterministic_ids else new_id("tsk")
+                    kind = rng.choice(["investigate", "falsify", "patch"])
+                    pri = rng.choice(["critical", "high", "medium", "low"])
+                    now = clock.iso()
+                    sal = compute_task_salience(
+                        conn,
+                        {
+                            "priority": pri,
+                            "kind": kind,
+                            "subsystem": task_locus.split("/", 1)[0],
+                            "locus": task_locus,
+                            "reopened_boost": 0,
+                        },
+                    )
+                    with immediate_tx(conn):
+                        conn.execute(
+                            """
+                            INSERT INTO tasks(
+                                task_id, surface_id, kind, title, subsystem, locus, priority, salience_score,
+                                status, created_at, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)
+                            """,
+                            (
+                                tid,
+                                surf_id,
+                                kind,
+                                f"Task {step} ({kind})",
+                                task_locus.split("/", 1)[0],
+                                task_locus,
+                                pri,
+                                sal,
+                                now,
+                                now,
+                            ),
                         )
-                        with immediate_tx(conn):
-                            conn.execute(
-                                """
-                                INSERT INTO tasks(
-                                    task_id, kind, title, subsystem, locus, priority, salience_score,
-                                    status, created_at, updated_at
-                                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)
-                                """,
-                                (
-                                    tid,
-                                    kind,
-                                    f"Task {step} ({kind})",
-                                    locus.split("/", 1)[0],
-                                    locus,
-                                    pri,
-                                    sal,
-                                    now,
-                                    now,
-                                ),
-                            )
+                    _bump("tasks_added")
 
                 elif op == "task_lease":
                     kind_opt = rng.choice([None, "investigate", "patch"])
@@ -306,33 +393,34 @@ def _run_simulation_seed(seed: int, *, steps: int, target_dir: pathlib.Path, aja
                         assert leased["kind"] != "patch", f"seed={seed} step={step}: leased patch during hunt"
 
                 elif op == "task_done":
-                    row = conn.execute("SELECT task_id FROM tasks WHERE status IN ('open', 'leased') LIMIT 1").fetchone()
+                    row = conn.execute(
+                        "SELECT task_id FROM tasks WHERE status IN ('open', 'leased') ORDER BY rowid ASC LIMIT 1"
+                    ).fetchone()
                     if row is not None:
-                        try:
-                            if use_mcp:
-                                dispatch_mcp_tool(
-                                    run_id,
-                                    "ajar_task_close",
-                                    {
-                                        "task_id": str(row["task_id"]),
-                                        "worker_id": worker,
-                                        "outcome": "done",
-                                        "summary": f"Completed step {step}",
-                                    },
-                                )
-                            else:
-                                close_task_done(
-                                    conn,
-                                    task_id=str(row["task_id"]),
-                                    worker_id=worker,
-                                    summary=f"Completed step {step}",
-                                    target_dir=target_dir,
-                                )
-                        except AjarError:
-                            pass
+                        if use_mcp:
+                            dispatch_mcp_tool(
+                                run_id,
+                                "ajar_task_close",
+                                {
+                                    "task_id": str(row["task_id"]),
+                                    "worker_id": worker,
+                                    "outcome": "done",
+                                    "summary": f"Completed step {step}",
+                                },
+                            )
+                        else:
+                            close_task_done(
+                                conn,
+                                task_id=str(row["task_id"]),
+                                worker_id=worker,
+                                summary=f"Completed step {step}",
+                                target_dir=target_dir,
+                            )
 
                 elif op == "task_dry":
-                    row = conn.execute("SELECT task_id FROM tasks WHERE status IN ('open', 'leased') LIMIT 1").fetchone()
+                    row = conn.execute(
+                        "SELECT task_id FROM tasks WHERE status IN ('open', 'leased') ORDER BY rowid ASC LIMIT 1"
+                    ).fetchone()
                     if row is not None:
                         try:
                             if use_mcp:
@@ -358,58 +446,56 @@ def _run_simulation_seed(seed: int, *, steps: int, target_dir: pathlib.Path, aja
                                     target_mode="source",
                                 )
                         except AjarError:
+                            # Guarded-primitive dry block is a legitimate gate block.
                             pass
 
                 elif op == "task_block":
-                    row = conn.execute("SELECT task_id FROM tasks WHERE status IN ('open', 'leased') LIMIT 1").fetchone()
+                    row = conn.execute(
+                        "SELECT task_id FROM tasks WHERE status IN ('open', 'leased') ORDER BY rowid ASC LIMIT 1"
+                    ).fetchone()
                     if row is not None:
-                        try:
-                            block_task(
-                                conn,
-                                task_id=str(row["task_id"]),
-                                worker_id=worker,
-                                predicate="waiting_for_guard_bypass",
-                                check_locus=locus,
-                            )
-                        except AjarError:
-                            pass
+                        block_task(
+                            conn,
+                            task_id=str(row["task_id"]),
+                            worker_id=worker,
+                            predicate="waiting_for_guard_bypass",
+                            check_locus=locus,
+                        )
 
                 elif op == "anomaly_add":
-                    try:
-                        if use_mcp:
-                            dispatch_mcp_tool(
-                                run_id,
-                                "ajar_anomaly_add",
-                                {
-                                    "locus": locus,
-                                    "observation": f"Unexpected parser edge state observed at step {step}",
-                                },
-                            )
-                        else:
-                            add_anomaly(
-                                conn,
-                                locus=locus,
-                                observation=f"Unexpected parser edge state observed at step {step}",
-                                target_dir=target_dir,
-                            )
-                    except AjarError:
-                        assert run_status == "finished"
+                    if use_mcp:
+                        dispatch_mcp_tool(
+                            run_id,
+                            "ajar_anomaly_add",
+                            {
+                                "locus": locus,
+                                "observation": f"Unexpected parser edge state observed at step {step}",
+                            },
+                        )
+                    else:
+                        add_anomaly(
+                            conn,
+                            locus=locus,
+                            observation=f"Unexpected parser edge state observed at step {step}",
+                            target_dir=target_dir,
+                        )
 
                 elif op == "anomaly_explain":
-                    row = conn.execute("SELECT anomaly_id FROM anomalies WHERE status = 'unexplained' LIMIT 1").fetchone()
+                    row = conn.execute(
+                        "SELECT anomaly_id FROM anomalies WHERE status = 'unexplained' ORDER BY rowid ASC LIMIT 1"
+                    ).fetchone()
                     if row is not None:
-                        try:
-                            explain_anomaly(
-                                conn,
-                                anomaly_id=str(row["anomaly_id"]),
-                                locus=locus,
-                                reason="Verified benign fallback path returns error without side effect",
-                            )
-                        except AjarError:
-                            pass
+                        explain_anomaly(
+                            conn,
+                            anomaly_id=str(row["anomaly_id"]),
+                            locus=locus,
+                            reason="Verified benign fallback path returns error without side effect",
+                        )
 
                 elif op == "claim_propose":
-                    anom = conn.execute("SELECT anomaly_id FROM anomalies WHERE status = 'unexplained' LIMIT 1").fetchone()
+                    anom = conn.execute(
+                        "SELECT anomaly_id FROM anomalies WHERE status = 'unexplained' ORDER BY rowid ASC LIMIT 1"
+                    ).fetchone()
                     anom_id = str(anom["anomaly_id"]) if (anom is not None and rng.random() < 0.6) else None
                     try:
                         if use_mcp:
@@ -441,196 +527,218 @@ def _run_simulation_seed(seed: int, *, steps: int, target_dir: pathlib.Path, aja
                                 target_dir=target_dir,
                                 target_mode="source",
                             )
+                        _bump("claims_proposed")
                     except AjarError:
+                        # Dead-end repetition guard may reject duplicate locus/mechanism.
                         pass
 
                 elif op in ("claim_falsify", "claim_config_gate"):
                     row = conn.execute(
-                        "SELECT claim_id, proposer_worker_id FROM claims WHERE status IN ('proposed', 'config_gated') LIMIT 1"
+                        "SELECT claim_id, proposer_worker_id FROM claims WHERE status IN ('proposed', 'config_gated') ORDER BY rowid ASC LIMIT 1"
                     ).fetchone()
                     if row is not None:
                         other_workers = [w for w in WORKERS if w != row["proposer_worker_id"]]
                         falsifier = rng.choice(other_workers)
                         cfg = f"FLAG_{step}=1" if op == "claim_config_gate" else ""
-                        try:
-                            if use_mcp:
-                                dispatch_mcp_tool(
-                                    run_id,
-                                    "ajar_claim_falsify",
-                                    {
-                                        "claim_id": str(row["claim_id"]),
-                                        "worker_id": falsifier,
-                                        "notes": f"Checked guard at {locus}",
-                                        "control_locus": locus,
-                                        "config_gate": cfg,
-                                    },
-                                )
-                            else:
-                                falsify_claim(
-                                    conn,
-                                    claim_id=str(row["claim_id"]),
-                                    worker_id=falsifier,
-                                    notes=f"Checked guard at {locus}",
-                                    control_locus=locus,
-                                    config_gate=cfg,
-                                )
-                        except AjarError:
-                            pass
+                        if use_mcp:
+                            dispatch_mcp_tool(
+                                run_id,
+                                "ajar_claim_falsify",
+                                {
+                                    "claim_id": str(row["claim_id"]),
+                                    "worker_id": falsifier,
+                                    "notes": f"Checked guard at {locus}",
+                                    "control_locus": locus,
+                                    "config_gate": cfg,
+                                },
+                            )
+                        else:
+                            falsify_claim(
+                                conn,
+                                claim_id=str(row["claim_id"]),
+                                worker_id=falsifier,
+                                notes=f"Checked guard at {locus}",
+                                control_locus=locus,
+                                config_gate=cfg,
+                            )
 
                 elif op == "claim_survive":
                     row = conn.execute(
-                        "SELECT claim_id, proposer_worker_id FROM claims WHERE status IN ('proposed', 'config_gated') LIMIT 1"
+                        "SELECT claim_id, proposer_worker_id FROM claims WHERE status IN ('proposed', 'config_gated') ORDER BY rowid ASC LIMIT 1"
                     ).fetchone()
                     if row is not None:
                         other_workers = [w for w in WORKERS if w != row["proposer_worker_id"]]
                         falsifier = rng.choice(other_workers)
-                        try:
-                            if use_mcp:
-                                dispatch_mcp_tool(
-                                    run_id,
-                                    "ajar_claim_survive",
-                                    {
-                                        "claim_id": str(row["claim_id"]),
-                                        "worker_id": falsifier,
-                                        "notes": f"Independent check confirmed reachability at {locus}",
-                                    },
-                                )
-                            else:
-                                survive_claim(
-                                    conn,
-                                    claim_id=str(row["claim_id"]),
-                                    worker_id=falsifier,
-                                    notes=f"Independent check confirmed reachability at {locus}",
-                                )
-                        except AjarError:
-                            pass
+                        if use_mcp:
+                            dispatch_mcp_tool(
+                                run_id,
+                                "ajar_claim_survive",
+                                {
+                                    "claim_id": str(row["claim_id"]),
+                                    "worker_id": falsifier,
+                                    "notes": f"Independent check confirmed reachability at {locus}",
+                                },
+                            )
+                        else:
+                            survive_claim(
+                                conn,
+                                claim_id=str(row["claim_id"]),
+                                worker_id=falsifier,
+                                notes=f"Independent check confirmed reachability at {locus}",
+                            )
 
                 elif op == "claim_rescope":
                     row = conn.execute(
-                        "SELECT claim_id FROM claims WHERE status IN ('proposed', 'survived_falsify', 'needs_instrumentation') LIMIT 1"
+                        "SELECT claim_id FROM claims WHERE status IN ('proposed', 'survived_falsify', 'needs_instrumentation') ORDER BY rowid ASC LIMIT 1"
                     ).fetchone()
                     if row is not None:
-                        try:
-                            rescope_claim_service(
-                                conn,
-                                claim_id=str(row["claim_id"]),
-                                worker_id=worker,
-                                reason=f"Refined locus to {locus}",
-                                locus=locus,
-                            )
-                        except AjarError:
-                            pass
+                        rescope_claim_service(
+                            conn,
+                            claim_id=str(row["claim_id"]),
+                            worker_id=worker,
+                            reason=f"Refined locus to {locus}",
+                            locus=locus,
+                        )
 
                 elif op == "claim_block":
-                    row = conn.execute("SELECT claim_id FROM claims WHERE status = 'proposed' LIMIT 1").fetchone()
+                    row = conn.execute(
+                        "SELECT claim_id FROM claims WHERE status = 'proposed' ORDER BY rowid ASC LIMIT 1"
+                    ).fetchone()
                     if row is not None:
-                        try:
-                            block_claim(
-                                conn,
-                                claim_id=str(row["claim_id"]),
-                                worker_id=worker,
-                                reason="Requires external HSM hardware unavailable in sandbox",
-                                env_blocker="missing_hardware",
-                                target_mode="source",
-                            )
-                        except AjarError:
-                            pass
+                        block_claim(
+                            conn,
+                            claim_id=str(row["claim_id"]),
+                            worker_id=worker,
+                            reason="Requires external HSM hardware unavailable in sandbox",
+                            env_blocker="missing_hardware",
+                            target_mode="source",
+                        )
 
                 elif op == "primitive_add":
-                    if run_status != "finished":
-                        pid = new_id("prim")
-                        now = utc_now_iso()
-                        with immediate_tx(conn):
-                            conn.execute(
-                                """
-                                INSERT INTO primitives(
-                                    primitive_id, kind, role, subsystem, locus,
-                                    preconditions, postconditions, evidence_cmd,
-                                    status, chained, created_at
-                                ) VALUES (?, 'state_corrupt', 'capability', 'src', ?, 'pre', 'post', 'true', 'active', 0, ?)
-                                """,
-                                (pid, locus, now),
-                            )
+                    pid = _det_new_id("prim") if deterministic_ids else new_id("prim")
+                    now = clock.iso()
+                    with immediate_tx(conn):
+                        conn.execute(
+                            """
+                            INSERT INTO primitives(
+                                primitive_id, kind, role, subsystem, locus,
+                                preconditions, postconditions, evidence_cmd,
+                                status, chained, created_at
+                            ) VALUES (?, 'state_corrupt', 'capability', 'src', ?, 'pre', 'post', 'true', 'active', 0, ?)
+                            """,
+                            (pid, locus, now),
+                        )
 
                 elif op == "primitive_dry":
-                    row = conn.execute("SELECT primitive_id FROM primitives WHERE status = 'active' LIMIT 1").fetchone()
+                    row = conn.execute(
+                        "SELECT primitive_id FROM primitives WHERE status = 'active' ORDER BY rowid ASC LIMIT 1"
+                    ).fetchone()
                     if row is not None:
-                        try:
-                            mark_primitive_dry(
-                                conn,
-                                target_dir=target_dir,
-                                target_mode="source",
-                                primitive_id=str(row["primitive_id"]),
-                                worker_id=worker,
-                                locus=locus,
-                                reason="Guard strictly rejects crafted offset before memory write",
-                            )
-                        except AjarError:
-                            pass
+                        mark_primitive_dry(
+                            conn,
+                            target_dir=target_dir,
+                            target_mode="source",
+                            primitive_id=str(row["primitive_id"]),
+                            worker_id=worker,
+                            locus=locus,
+                            reason="Guard strictly rejects crafted offset before memory write",
+                        )
 
                 elif op == "door_park":
-                    if run_status != "finished":
-                        jrow = conn.execute("SELECT jewel_id FROM crown_jewels LIMIT 1").fetchone()
-                        if jrow is None:
-                            jres = add_crown_jewel(
-                                conn,
-                                name="Vault Balance Integrity",
-                                locus="src/vault.py:1",
-                                impact_class="fund_drain",
-                                symbols=["withdraw"],
-                                worker_id=worker,
-                            )
-                            jewel_id = str(jres["jewel_id"])
-                        else:
-                            jewel_id = str(jrow["jewel_id"])
-                        try:
-                            park_open_door(
-                                conn,
-                                anchor_locus=locus,
-                                missing_link_summary=f"Need authenticated token bridge #{step}",
-                                jewel_id=jewel_id,
-                                direction="from_jewel",
-                                wanted_tags="auth_bypass",
-                                spawn_hunters=False,
-                                worker_id=worker,
-                            )
-                            compute_chain_frontier(conn)
-                        except AjarError:
-                            pass
+                    jrow = conn.execute("SELECT jewel_id FROM crown_jewels ORDER BY rowid ASC LIMIT 1").fetchone()
+                    if jrow is None:
+                        jres = add_crown_jewel(
+                            conn,
+                            name="Vault Balance Integrity",
+                            locus="src/vault.py:1",
+                            impact_class="fund_drain",
+                            symbols=["withdraw"],
+                            worker_id=worker,
+                        )
+                        jewel_id = str(jres["jewel_id"])
+                    else:
+                        jewel_id = str(jrow["jewel_id"])
+                    direction = rng.choice(VALID_DOOR_DIRECTIONS)
+                    park_open_door(
+                        conn,
+                        anchor_locus=locus,
+                        missing_link_summary=f"Need authenticated token bridge #{step}",
+                        jewel_id=jewel_id,
+                        direction=direction,
+                        wanted_tags="auth_bypass",
+                        spawn_hunters=False,
+                        worker_id=worker,
+                    )
+                    compute_chain_frontier(conn)
+                    _bump("doors_parked")
 
                 elif op == "phase_advance":
                     target_phase = rng.choice(["hunt", "remediate", "full"])
                     cur_phase = str(conn.execute("SELECT campaign_phase FROM runs LIMIT 1").fetchone()["campaign_phase"])
-                    if PHASE_RANK[target_phase] < PHASE_RANK[cur_phase] or run_status == "finished":
+                    if PHASE_RANK[target_phase] < PHASE_RANK[cur_phase]:
                         try:
                             advance_phase(conn, run_id=run_id, to_phase=target_phase)
-                            raise AssertionError(f"seed={seed} step={step}: illegal phase {cur_phase}->{target_phase} succeeded!")
+                            raise AssertionError(
+                                f"seed={seed} step={step}: illegal phase {cur_phase}->{target_phase} succeeded!"
+                            )
                         except InvalidTransitionError:
-                            pass
+                            _bump("illegal_probes_rejected")
                     else:
                         advance_phase(conn, run_id=run_id, to_phase=target_phase)
 
                 elif op == "spend_over_cap":
-                    # Host Mode advisory check: exceeding 100% of cogs_cap_usd MUST NOT block leasing or flip runs.status!
-                    if run_status != "finished":
+                    # Host Mode advisory check: record spend > 100% of cogs_cap_usd via CLI,
+                    # then verify `runs.status` stays active AND `lease_next_task` still leases work!
+                    out_buf, err_buf = io.StringIO(), io.StringIO()
+                    with redirect_stdout(out_buf), redirect_stderr(err_buf):
+                        rc_sp = cli_main(
+                            [
+                                "spend",
+                                "add",
+                                "--run",
+                                run_id,
+                                "--worker",
+                                worker,
+                                "--phase",
+                                "explore",
+                                "--model",
+                                "host-model",
+                                "--tokens-in",
+                                "1000",
+                                "--tokens-out",
+                                "500",
+                                "--cost-usd",
+                                "50.0",
+                            ]
+                        )
+                    assert rc_sp == 0, f"seed={seed} step={step}: ajar spend add failed: {err_buf.getvalue()}"
+                    check_all_gates(conn, target_dir=target_dir, auto_enqueue_chain=False)
+                    st_after = str(conn.execute("SELECT status FROM runs LIMIT 1").fetchone()["status"])
+                    assert st_after == "active", f"seed={seed} step={step}: spend_ledger mutated Host Mode run status to {st_after!r}!"
+                    # Enqueue a fresh investigate task if none open, then prove Host Mode STILL leases it.
+                    open_inv = conn.execute(
+                        "SELECT task_id FROM tasks WHERE status = 'open' AND kind = 'investigate' ORDER BY rowid ASC LIMIT 1"
+                    ).fetchone()
+                    if open_inv is None:
                         with immediate_tx(conn):
                             conn.execute(
                                 """
-                                INSERT INTO spend_ledger(
-                                    entry_id, worker_id, phase, model, tokens_in, tokens_out,
-                                    cost_usd, created_at
-                                ) VALUES (?, ?, 'explore', 'host-model', 1000, 500, 50.0, ?)
+                                INSERT INTO tasks(
+                                    task_id, kind, title, subsystem, locus, priority, salience_score,
+                                    status, created_at, updated_at
+                                ) VALUES (?, 'investigate', 'Advisory budget lease probe', 'src', ?, 'high', 80, 'open', ?, ?)
                                 """,
-                                (new_id("spd"), worker, utc_now_iso()),
+                                (_det_new_id("tsk") if deterministic_ids else new_id("tsk"), locus, clock.iso(), clock.iso()),
                             )
-                        st_after = str(conn.execute("SELECT status FROM runs LIMIT 1").fetchone()["status"])
-                        assert st_after == run_status, f"seed={seed} step={step}: spend_ledger mutated Host Mode run status!"
+                    leased_over_cap = lease_next_task(conn, worker_id=worker, kind="investigate", recover=False)
+                    assert leased_over_cap is not None, (
+                        f"seed={seed} step={step}: Host Mode blocked task leasing after spend exceeded cogs_cap_usd!"
+                    )
+                    _bump("spend_over_cap_leases")
 
                 elif op == "illegal_probe":
-                    # Inject adversarial illegal transitions & verify deterministic rejection!
-                    clm = conn.execute("SELECT claim_id, proposer_worker_id, status FROM claims LIMIT 1").fetchone()
+                    clm = conn.execute("SELECT claim_id, proposer_worker_id FROM claims ORDER BY rowid ASC LIMIT 1").fetchone()
                     if clm is not None:
-                        # Whitespace-padded self-falsification MUST fail
                         try:
                             falsify_claim(
                                 conn,
@@ -640,28 +748,18 @@ def _run_simulation_seed(seed: int, *, steps: int, target_dir: pathlib.Path, aja
                             )
                             raise AssertionError(f"seed={seed} step={step}: whitespace self-falsify bypassed!")
                         except AjarError:
-                            pass
-                        # Resurrecting a falsified claim MUST fail with InvalidTransitionError
-                        if clm["status"] == "falsified":
-                            other = next(w for w in WORKERS if w != clm["proposer_worker_id"])
-                            try:
-                                survive_claim(conn, claim_id=str(clm["claim_id"]), worker_id=other, notes="resurrect")
-                                raise AssertionError(f"seed={seed} step={step}: falsified -> survived_falsify succeeded!")
-                            except InvalidTransitionError:
-                                pass
+                            _bump("illegal_probes_rejected")
 
-                elif op == "finish_and_reopen":
-                    if run_status == "finished":
-                        reopen_run(run_id, ajar_home=ajar_home)
-                    else:
-                        res = finish_run(conn, run_id=run_id, target_dir=target_dir, actor="operator")
-                        if res["passed"]:
-                            # Post-finish mutations MUST be rejected immediately
-                            try:
-                                add_surface(conn, name="post_finish_illegal", kind="entry_point", locus=locus)
-                                raise AssertionError(f"seed={seed} step={step}: mutation succeeded on finished run!")
-                            except InvalidTransitionError:
-                                pass
+                    fal = conn.execute(
+                        "SELECT claim_id, proposer_worker_id FROM claims WHERE status = 'falsified' ORDER BY rowid ASC LIMIT 1"
+                    ).fetchone()
+                    if fal is not None:
+                        other = next(w for w in WORKERS if w != fal["proposer_worker_id"])
+                        try:
+                            survive_claim(conn, claim_id=str(fal["claim_id"]), worker_id=other, notes="resurrect")
+                            raise AssertionError(f"seed={seed} step={step}: falsified -> survived_falsify succeeded!")
+                        except InvalidTransitionError:
+                            _bump("illegal_probes_rejected")
 
                 phase_rank = _assert_global_invariants(
                     conn,
@@ -671,18 +769,151 @@ def _run_simulation_seed(seed: int, *, steps: int, target_dir: pathlib.Path, aja
                     prev_phase_rank=phase_rank,
                 )
 
-            # Verify KV prefix-cache byte identity across distinct tasks at end of seed
-            open_tasks = conn.execute("SELECT task_id FROM tasks ORDER BY created_at ASC LIMIT 2").fetchall()
-            if len(open_tasks) == 2:
-                ctx_a = render_task_context(conn, str(open_tasks[0]["task_id"]))["rendered"]
-                ctx_b = render_task_context(conn, str(open_tasks[1]["task_id"]))["rendered"]
-                marker = "## Task Delta"
-                if marker in ctx_a and marker in ctx_b:
-                    assert ctx_a.split(marker, 1)[0] == ctx_b.split(marker, 1)[0], (
-                        f"seed={seed}: Certified Run Prefix drifted between tasks!"
+            # Verify KV prefix-cache byte identity across distinct tasks (with real steer in prefix)
+            t_rows = conn.execute("SELECT task_id FROM tasks ORDER BY rowid ASC LIMIT 2").fetchall()
+            if len(t_rows) < 2:
+                for idx in range(2 - len(t_rows)):
+                    with immediate_tx(conn):
+                        conn.execute(
+                            """
+                            INSERT INTO tasks(
+                                task_id, kind, title, subsystem, locus, priority, salience_score,
+                                status, created_at, updated_at
+                            ) VALUES (?, 'investigate', ?, 'src', ?, 'medium', 40, 'open', ?, ?)
+                            """,
+                            (_det_new_id("tsk") if deterministic_ids else new_id("tsk"), f"Prefix check {idx}", loci[idx], clock.iso(), clock.iso()),
+                        )
+                t_rows = conn.execute("SELECT task_id FROM tasks ORDER BY rowid ASC LIMIT 2").fetchall()
+            ctx_a = render_task_context(conn, str(t_rows[0]["task_id"]))["rendered"]
+            ctx_b = render_task_context(conn, str(t_rows[1]["task_id"]))["rendered"]
+            marker = "## Task Delta"
+            assert marker in ctx_a and marker in ctx_b, f"seed={seed}: render_task_context missing {marker!r}"
+            assert "DST invariant: never skip auth boundary" in ctx_a.split(marker, 1)[0]
+            assert ctx_a.split(marker, 1)[0] == ctx_b.split(marker, 1)[0], (
+                f"seed={seed}: Certified Run Prefix drifted between tasks!"
+            )
+
+            # Explicit closeout -> finish -> post-finish immutability -> reopen_run lifecycle verification!
+            # (Runs on every 4th seed so every test run exercises finish + post-finish rejection + reopen axis sync!)
+            if seed % 4 == 1:
+                # 1. Ensure >= 1 surface exists, cover any remaining uncovered high/critical surfaces, and resolve open blockers.
+                if int(conn.execute("SELECT COUNT(*) FROM surfaces").fetchone()[0]) == 0:
+                    add_surface(conn, name="closeout_surf", kind="entry_point", locus="src/auth.py:1", priority="high")
+                for srow in conn.execute(
+                    """
+                    SELECT surface_id, locus FROM surfaces s
+                    WHERE priority IN ('critical', 'high')
+                      AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.surface_id = s.surface_id)
+                    ORDER BY s.rowid ASC
+                    """
+                ).fetchall():
+                    tid = _det_new_id("tsk") if deterministic_ids else new_id("tsk")
+                    with immediate_tx(conn):
+                        conn.execute(
+                            """
+                            INSERT INTO tasks(
+                                task_id, surface_id, kind, title, subsystem, locus, priority, salience_score,
+                                status, created_at, updated_at
+                            ) VALUES (?, ?, 'investigate', 'Closeout coverage', 'src', ?, 'high', 60, 'open', ?, ?)
+                            """,
+                            (tid, str(srow["surface_id"]), str(srow["locus"]), clock.iso(), clock.iso()),
+                        )
+                for trow in conn.execute(
+                    "SELECT task_id FROM tasks WHERE status IN ('open', 'leased') ORDER BY rowid ASC"
+                ).fetchall():
+                    close_task_done(conn, task_id=str(trow["task_id"]), worker_id="w-alpha", summary="closeout", target_dir=target_dir)
+                for crow in conn.execute(
+                    "SELECT claim_id, proposer_worker_id, locus, status FROM claims WHERE status IN ('proposed', 'config_gated', 'survived_falsify', 'needs_instrumentation') ORDER BY rowid ASC"
+                ).fetchall():
+                    other = next(w for w in WORKERS if w != crow["proposer_worker_id"])
+                    if crow["status"] in ("proposed", "config_gated"):
+                        falsify_claim(
+                            conn,
+                            claim_id=str(crow["claim_id"]),
+                            worker_id=other,
+                            notes="Disproved during closeout verification",
+                            control_locus=str(crow["locus"]),
+                        )
+                    else:
+                        block_claim(
+                            conn,
+                            claim_id=str(crow["claim_id"]),
+                            worker_id=other,
+                            reason="Requires privileged kernel lab unavailable in closeout",
+                            env_blocker="privileged_kernel",
+                            target_mode="source",
+                        )
+                for arow in conn.execute(
+                    "SELECT anomaly_id, locus FROM anomalies WHERE status = 'unexplained' ORDER BY rowid ASC"
+                ).fetchall():
+                    explain_anomaly(
+                        conn,
+                        anomaly_id=str(arow["anomaly_id"]),
+                        locus=str(arow["locus"]),
+                        reason="Verified benign during closeout pass",
+                    )
+                # Ensure one non-exempt policy-blocked claim exists so `reopen_run` exercises claim unblocking + axis sync!
+                reopen_clm = propose_claim(
+                    conn,
+                    worker_id="w-alpha",
+                    title="Reopen axis coherence check claim",
+                    locus="src/auth.py:4",
+                    mechanism="Synthetic policy-blocked claim to verify reopen_run updates research_state and evidence_state",
+                    falsification_prediction="Reopen restores proposed state and synchronized research_state",
+                    falsification_test="python3 -c 'print(1)'",
+                    target_dir=target_dir,
+                    target_mode="source",
+                )
+                blk_axes = derive_claim_axes("blocked")
+                with immediate_tx(conn):
+                    conn.execute(
+                        """
+                        UPDATE claims
+                        SET status = 'blocked', research_state = ?, evidence_state = ?,
+                            blocker_reason = 'External staging API unreachable during sandbox run',
+                            env_blocker = 'external_service', updated_at = ?
+                        WHERE claim_id = ?
+                        """,
+                        (blk_axes.research_state.value, blk_axes.evidence_state.value, clock.iso(), reopen_clm["claim_id"]),
+                    )
+                for prow in conn.execute(
+                    "SELECT primitive_id, locus FROM primitives WHERE status = 'active' ORDER BY rowid ASC"
+                ).fetchall():
+                    mark_primitive_dry(
+                        conn,
+                        target_dir=target_dir,
+                        target_mode="source",
+                        primitive_id=str(prow["primitive_id"]),
+                        worker_id="w-alpha",
+                        locus=str(prow["locus"]),
+                        reason="Verified non-exploitable guard during closeout pass",
                     )
 
-            # Final SQLite integrity check
+                fin = finish_run(conn, run_id=run_id, target_dir=target_dir, actor="operator")
+                assert fin["passed"], f"seed={seed}: expected closeout finish_run to pass, got {fin}"
+                _bump("runs_finished")
+
+                # Post-finish immutability check
+                try:
+                    add_surface(conn, name="post_finish_illegal", kind="entry_point", locus="src/auth.py:1")
+                    raise AssertionError(f"seed={seed}: post-finish add_surface succeeded!")
+                except InvalidTransitionError:
+                    _bump("illegal_probes_rejected")
+
+                # Reopen cycle + verify claim axes stay 100% coherent after reopen_run!
+                reopened = reopen_run(run_id, ajar_home=ajar_home)
+                assert reopen_clm["claim_id"] in reopened["unblocked_claim_ids"], (
+                    f"seed={seed}: reopen_run did not unblock policy-blocked claim {reopen_clm['claim_id']}"
+                )
+                _bump("runs_reopened")
+                phase_rank = _assert_global_invariants(
+                    conn,
+                    target_dir=target_dir,
+                    seed=seed,
+                    step=steps + 1,
+                    prev_phase_rank=phase_rank,
+                )
+
             qc = conn.execute("PRAGMA quick_check").fetchone()
             assert qc is not None and qc[0] == "ok", f"seed={seed}: SQLite quick_check failed: {qc}"
         finally:
@@ -698,12 +929,26 @@ class DeterministicStateMachineSimTests(unittest.TestCase):
             count = int(os.environ.get("AJAR_DST_SEEDS", "20"))
             seeds = list(range(1, count + 1))
 
+        stats: dict[str, int] = {}
         with tempfile.TemporaryDirectory() as td:
             base = pathlib.Path(td)
             target_dir = _seed_target_dir(base / "target")
             ajar_home = base / "ajar_home"
             for seed in seeds:
-                _run_simulation_seed(seed, steps=40, target_dir=target_dir, ajar_home=ajar_home)
+                _run_simulation_seed(seed, steps=40, target_dir=target_dir, ajar_home=ajar_home, stats=stats)
+
+        if single_seed is None:
+            for key in (
+                "surfaces_added",
+                "tasks_added",
+                "claims_proposed",
+                "doors_parked",
+                "spend_over_cap_leases",
+                "runs_finished",
+                "runs_reopened",
+                "illegal_probes_rejected",
+            ):
+                self.assertGreater(stats.get(key, 0), 0, f"DST branch {key!r} was vacuous (0 executions): {stats}")
 
     def test_single_seed_replay_is_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -711,31 +956,28 @@ class DeterministicStateMachineSimTests(unittest.TestCase):
             target_dir = _seed_target_dir(base / "target")
             home_a = base / "home_a"
             home_b = base / "home_b"
-            _run_simulation_seed(7, steps=30, target_dir=target_dir, ajar_home=home_a)
-            _run_simulation_seed(7, steps=30, target_dir=target_dir, ajar_home=home_b)
-            with mock.patch.dict(os.environ, {"AJAR_HOME": str(home_a)}):
-                ca = open_run_db("dst-seed-0007")
-                try:
-                    sig_a = (
-                        ca.execute("SELECT status, campaign_phase FROM runs").fetchall(),
-                        ca.execute("SELECT status, research_state, evidence_state FROM claims ORDER BY rowid").fetchall(),
-                        ca.execute("SELECT status FROM tasks ORDER BY rowid").fetchall(),
-                    )
-                    sig_a_norm = tuple([tuple(r) for r in grp] for grp in sig_a)
-                finally:
-                    ca.close()
-            with mock.patch.dict(os.environ, {"AJAR_HOME": str(home_b)}):
-                cb = open_run_db("dst-seed-0007")
-                try:
-                    sig_b = (
-                        cb.execute("SELECT status, campaign_phase FROM runs").fetchall(),
-                        cb.execute("SELECT status, research_state, evidence_state FROM claims ORDER BY rowid").fetchall(),
-                        cb.execute("SELECT status FROM tasks ORDER BY rowid").fetchall(),
-                    )
-                    sig_b_norm = tuple([tuple(r) for r in grp] for grp in sig_b)
-                finally:
-                    cb.close()
-            self.assertEqual(sig_a_norm, sig_b_norm)
+            _run_simulation_seed(7, steps=35, target_dir=target_dir, ajar_home=home_a, deterministic_ids=True)
+            _run_simulation_seed(7, steps=35, target_dir=target_dir, ajar_home=home_b, deterministic_ids=True)
+
+            def _dump(home: pathlib.Path) -> tuple[object, ...]:
+                with mock.patch.dict(os.environ, {"AJAR_HOME": str(home)}):
+                    c = open_run_db("dst-seed-0007")
+                    try:
+                        return (
+                            [tuple(r) for r in c.execute("SELECT status, campaign_phase FROM runs").fetchall()],
+                            [
+                                tuple(r)
+                                for r in c.execute(
+                                    "SELECT claim_id, status, research_state, evidence_state FROM claims ORDER BY rowid ASC"
+                                ).fetchall()
+                            ],
+                            [tuple(r) for r in c.execute("SELECT task_id, status FROM tasks ORDER BY rowid ASC").fetchall()],
+                            [tuple(r) for r in c.execute("SELECT door_id, status FROM parked_doors ORDER BY rowid ASC").fetchall()],
+                        )
+                    finally:
+                        c.close()
+
+            self.assertEqual(_dump(home_a), _dump(home_b))
 
 
 if __name__ == "__main__":

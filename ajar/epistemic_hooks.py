@@ -22,6 +22,7 @@ from typing import Any, Sequence
 
 from ajar.domain.enums import HookCode
 from ajar.redact import scrub_text
+from ajar.store import immediate_tx
 
 HOOK_CODES: tuple[str, ...] = tuple(h.value for h in HookCode)
 
@@ -552,142 +553,143 @@ def on_primitive_added(
 
     fired: list[dict[str, Any]] = []
     now_iso = utc_now_iso()
-    if provides_tags:
-        evaluate_adaptive_threat_assumptions(
-            conn,
-            evidence_ref=primitive_id,
-            provided_tags=provides_tags,
-        )
-
-    # H1: Guarded inner primitive -> register guard-symmetry hook and optional inside-out guard task.
-    gloc = guarded_by_locus.strip()
-    if gloc:
-        spawned_tid: str | None = None
-        if spawn_guard_task:
-            existing_guard_task = conn.execute(
-                """
-                SELECT task_id FROM tasks
-                WHERE locus = ? AND kind IN ('investigate', 'chain')
-                  AND status IN ('open', 'leased', 'done', 'dry')
-                LIMIT 1
-                """,
-                (gloc,),
-            ).fetchone()
-            if existing_guard_task is None:
-                gsub = infer_subsystem(gloc)
-                draft = {"priority": "high", "subsystem": gsub, "locus": gloc, "reopened_boost": 8}
-                sal = max(82, compute_task_salience(conn, draft))
-                spawned_tid = new_id("task")
-                conn.execute(
-                    """
-                    INSERT INTO tasks(
-                        task_id, kind, direction, title, subsystem, locus,
-                        priority, status, salience_score, summary, created_at, updated_at
-                    ) VALUES (?, 'investigate', 'inside_out', ?, ?, ?, 'high', 'open', ?, ?, ?, ?)
-                    """,
-                    (
-                        spawn_guard_task and spawned_tid or "",
-                        f"Audit upstream guard {gloc} blocking {primitive_id} ({kind})",
-                        gsub,
-                        gloc,
-                        sal,
-                        f"Auto-enqueued by H1_GUARD_SYMMETRY for {primitive_id} @ {locus}.",
-                        now_iso,
-                        now_iso,
-                    ),
-                )
-        gsub = infer_subsystem(gloc)
-        h1 = register_epistemic_hook(
-            conn,
-            hook_code="H1_GUARD_SYMMETRY",
-            trigger_cmd="primitive.add",
-            source_entity_id=primitive_id,
-            dedup_material=f"{gloc}:{locus}",
-            subsystem=gsub,
-            target_locus=gloc,
-            spawned_task_id=spawned_tid,
-            directive_text=(
-                f"Audit guard {gloc} in isolation: check shared bit-width, mask/modulus, "
-                f"normalization, or fail-open branch with {primitive_id}@{locus}."
-            ),
-            kill_rule=(
-                f"STOP and mark dry if {gloc} enforces widening/checked bounds on immutable "
-                "server state with zero shared truncation."
-            ),
-        )
-        fired.append(h1)
-
-    # H4: Typed state bridge across subsystems (`provides_tags <-> requires_tags`).
-    if provides_tags or requires_tags:
-        bridges = detect_capability_bridges(conn, limit=8)
-        for br in bridges:
-            if br["bridge_type"] != "complete_bridge" or not br["providers"]:
-                continue
-            prov0 = br["providers"][0]
-            if prov0["primitive_id"] != primitive_id and br["sink_id"] != primitive_id:
-                continue
-            tags_s = ",".join(br["matched_tags"][:3])
-            existing_chain = conn.execute(
-                """
-                SELECT task_id FROM tasks
-                WHERE kind = 'chain' AND status IN ('open', 'leased')
-                  AND summary LIKE ?
-                LIMIT 1
-                """,
-                (f"%{br['sink_id']}%",),
-            ).fetchone()
-            chain_tid: str | None = None
-            if existing_chain is None:
-                chain_tid = new_id("task")
-                conn.execute(
-                    """
-                    INSERT INTO tasks(
-                        task_id, kind, direction, title, subsystem, locus,
-                        priority, status, salience_score, summary, created_at, updated_at
-                    ) VALUES (?, 'chain', 'outside_in', ?, ?, ?, 'high', 'open', 86, ?, ?, ?)
-                    """,
-                    (
-                        chain_tid,
-                        f"Bridge {prov0['primitive_id']} -> {br['sink_id']} via [{tags_s}]",
-                        br["sink_subsystem"],
-                        br["sink_locus"],
-                        f"Cross-subsystem bridge: {prov0['primitive_id']}@{prov0['locus']} provides [{tags_s}] required by {br['sink_id']}@{br['sink_locus']}.",
-                        now_iso,
-                        now_iso,
-                    ),
-                )
-            h4 = register_epistemic_hook(
+    with immediate_tx(conn):
+        if provides_tags:
+            evaluate_adaptive_threat_assumptions(
                 conn,
-                hook_code="H4_TYPED_STATE_BRIDGE",
+                evidence_ref=primitive_id,
+                provided_tags=provides_tags,
+            )
+
+        # H1: Guarded inner primitive -> register guard-symmetry hook and optional inside-out guard task.
+        gloc = guarded_by_locus.strip()
+        if gloc:
+            spawned_tid: str | None = None
+            if spawn_guard_task:
+                existing_guard_task = conn.execute(
+                    """
+                    SELECT task_id FROM tasks
+                    WHERE locus = ? AND kind IN ('investigate', 'chain')
+                      AND status IN ('open', 'leased', 'done', 'dry')
+                    LIMIT 1
+                    """,
+                    (gloc,),
+                ).fetchone()
+                if existing_guard_task is None:
+                    gsub = infer_subsystem(gloc)
+                    draft = {"priority": "high", "subsystem": gsub, "locus": gloc, "reopened_boost": 8}
+                    sal = max(82, compute_task_salience(conn, draft))
+                    spawned_tid = new_id("task")
+                    conn.execute(
+                        """
+                        INSERT INTO tasks(
+                            task_id, kind, direction, title, subsystem, locus,
+                            priority, status, salience_score, summary, created_at, updated_at
+                        ) VALUES (?, 'investigate', 'inside_out', ?, ?, ?, 'high', 'open', ?, ?, ?, ?)
+                        """,
+                        (
+                            spawn_guard_task and spawned_tid or "",
+                            f"Audit upstream guard {gloc} blocking {primitive_id} ({kind})",
+                            gsub,
+                            gloc,
+                            sal,
+                            f"Auto-enqueued by H1_GUARD_SYMMETRY for {primitive_id} @ {locus}.",
+                            now_iso,
+                            now_iso,
+                        ),
+                    )
+            gsub = infer_subsystem(gloc)
+            h1 = register_epistemic_hook(
+                conn,
+                hook_code="H1_GUARD_SYMMETRY",
                 trigger_cmd="primitive.add",
                 source_entity_id=primitive_id,
-                dedup_material=f"{prov0['primitive_id']}->{br['sink_id']}:{tags_s}",
-                subsystem=br["sink_subsystem"],
-                target_locus=br["sink_locus"],
-                spawned_task_id=chain_tid,
+                dedup_material=f"{gloc}:{locus}",
+                subsystem=gsub,
+                target_locus=gloc,
+                spawned_task_id=spawned_tid,
                 directive_text=(
-                    f"Bridge {prov0['primitive_id']}@{prov0['locus']} provides [{tags_s}] "
-                    f"required by {br['sink_id']}@{br['sink_locus']}; prove end-to-end via ajar chain propose."
+                    f"Audit guard {gloc} in isolation: check shared bit-width, mask/modulus, "
+                    f"normalization, or fail-open branch with {primitive_id}@{locus}."
                 ),
                 kill_rule=(
-                    f"STOP and mark dry if {br['sink_locus']} re-verifies principal and digest "
-                    f"inline from authoritative state independent of [{tags_s}]."
+                    f"STOP and mark dry if {gloc} enforces widening/checked bounds on immutable "
+                    "server state with zero shared truncation."
                 ),
             )
-            fired.append(h4)
+            fired.append(h1)
 
-    wake_matching_doors_for_artifact(
-        conn,
-        artifact_id=primitive_id,
-        artifact_kind=role or "capability",
-        locus=locus,
-        subsystem=subsystem,
-        text_blob=f"{kind} {postconditions} {trusted_invariant}",
-        provides_tags=provides_tags,
-        symbols=symbols,
-        snapshot_id=snapshot_id,
-        trigger_cmd="primitive.add",
-    )
+        # H4: Typed state bridge across subsystems (`provides_tags <-> requires_tags`).
+        if provides_tags or requires_tags:
+            bridges = detect_capability_bridges(conn, limit=8)
+            for br in bridges:
+                if br["bridge_type"] != "complete_bridge" or not br["providers"]:
+                    continue
+                prov0 = br["providers"][0]
+                if prov0["primitive_id"] != primitive_id and br["sink_id"] != primitive_id:
+                    continue
+                tags_s = ",".join(br["matched_tags"][:3])
+                existing_chain = conn.execute(
+                    """
+                    SELECT task_id FROM tasks
+                    WHERE kind = 'chain' AND status IN ('open', 'leased')
+                      AND summary LIKE ?
+                    LIMIT 1
+                    """,
+                    (f"%{br['sink_id']}%",),
+                ).fetchone()
+                chain_tid: str | None = None
+                if existing_chain is None:
+                    chain_tid = new_id("task")
+                    conn.execute(
+                        """
+                        INSERT INTO tasks(
+                            task_id, kind, direction, title, subsystem, locus,
+                            priority, status, salience_score, summary, created_at, updated_at
+                        ) VALUES (?, 'chain', 'outside_in', ?, ?, ?, 'high', 'open', 86, ?, ?, ?)
+                        """,
+                        (
+                            chain_tid,
+                            f"Bridge {prov0['primitive_id']} -> {br['sink_id']} via [{tags_s}]",
+                            br["sink_subsystem"],
+                            br["sink_locus"],
+                            f"Cross-subsystem bridge: {prov0['primitive_id']}@{prov0['locus']} provides [{tags_s}] required by {br['sink_id']}@{br['sink_locus']}.",
+                            now_iso,
+                            now_iso,
+                        ),
+                    )
+                h4 = register_epistemic_hook(
+                    conn,
+                    hook_code="H4_TYPED_STATE_BRIDGE",
+                    trigger_cmd="primitive.add",
+                    source_entity_id=primitive_id,
+                    dedup_material=f"{prov0['primitive_id']}->{br['sink_id']}:{tags_s}",
+                    subsystem=br["sink_subsystem"],
+                    target_locus=br["sink_locus"],
+                    spawned_task_id=chain_tid,
+                    directive_text=(
+                        f"Bridge {prov0['primitive_id']}@{prov0['locus']} provides [{tags_s}] "
+                        f"required by {br['sink_id']}@{br['sink_locus']}; prove end-to-end via ajar chain propose."
+                    ),
+                    kill_rule=(
+                        f"STOP and mark dry if {br['sink_locus']} re-verifies principal and digest "
+                        f"inline from authoritative state independent of [{tags_s}]."
+                    ),
+                )
+                fired.append(h4)
+
+        wake_matching_doors_for_artifact(
+            conn,
+            artifact_id=primitive_id,
+            artifact_kind=role or "capability",
+            locus=locus,
+            subsystem=subsystem,
+            text_blob=f"{kind} {postconditions} {trusted_invariant}",
+            provides_tags=provides_tags,
+            symbols=symbols,
+            snapshot_id=snapshot_id,
+            trigger_cmd="primitive.add",
+        )
     return fired
 
 

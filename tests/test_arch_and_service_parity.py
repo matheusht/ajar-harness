@@ -165,6 +165,31 @@ class ArchLintSelfTests(unittest.TestCase):
             self.assertEqual(len(v_tar), 3)
             self.assertTrue(all(v.rule == "NO_UNFILTERED_TAR_EXTRACT" and v.path == "ajar/bad_tar.py" for v in v_tar))
 
+            # 7. NO_COMMIT_NOOP
+            (root / "ajar" / "bad_tx.py").write_text(
+                "def bad_commit(conn):\n"
+                "    conn.execute('UPDATE runs SET status = \"active\"')\n"
+                "    conn.execute('DELETE FROM tasks WHERE 1=0')\n"
+                "    conn.commit()\n"
+                "\n"
+                "def good_tx(conn):\n"
+                "    with immediate_tx(conn):\n"
+                "        conn.execute('UPDATE runs SET status = \"active\"')\n"
+                "        conn.execute('DELETE FROM tasks WHERE 1=0')\n",
+                encoding="utf-8",
+            )
+            v_commit = self.lint.check_no_commit_noop(root)
+            self.assertEqual([v.rule for v in v_commit], ["NO_COMMIT_NOOP"])
+            self.assertTrue(v_commit[0].fix_hint)
+
+            # 8. MULTI_WRITE_REQUIRES_IMMEDIATE_TX
+            v_multi = self.lint.check_multi_write_requires_immediate_tx(root)
+            bad_tx_multi = [v for v in v_multi if v.path == "ajar/bad_tx.py"]
+            self.assertEqual(len(bad_tx_multi), 1)
+            self.assertEqual(bad_tx_multi[0].rule, "MULTI_WRITE_REQUIRES_IMMEDIATE_TX")
+            self.assertIn("bad_commit", bad_tx_multi[0].message)
+            self.assertTrue(bad_tx_multi[0].fix_hint)
+
 
 class CliMcpDifferentialParityTests(unittest.TestCase):
     def test_cli_and_mcp_produce_identical_workflow_state_and_errors(self) -> None:
@@ -675,6 +700,122 @@ class CliMcpDifferentialParityTests(unittest.TestCase):
                 )
                 self.assertNotEqual(rc_c, 0)
                 self.assertIn("Invalid primitive.status transition", str(out_c))
+
+    def test_repro_outcome_persists_build_cmd_and_sealed_run_rejects_cli_writes(self) -> None:
+        from ajar.services import (
+            add_primitive,
+            add_surface_driver,
+            add_task,
+            propose_claim,
+            record_human_touch,
+            record_reproduction_outcome,
+            record_spend_entry,
+            survive_claim,
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            target = _make_git_target(root)
+            ajar_home = root / "ajar_home"
+            rid = "run-build-cmd-001"
+            with mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}):
+                rc, _ = _run_cli(
+                    [
+                        "init",
+                        str(target),
+                        "--run-id",
+                        rid,
+                        "--goal",
+                        "Verify findings.build_cmd and sealed-run write guards",
+                        "--in-place",
+                        "--allow-historical-target",
+                    ]
+                )
+                self.assertEqual(rc, 0)
+                conn = open_run_db(rid, ajar_home=ajar_home)
+                try:
+                    c1 = propose_claim(
+                        conn,
+                        worker_id="w1",
+                        title="Auth token bypass",
+                        locus="auth.py:1",
+                        mechanism="Weak token equality accepts forged input",
+                        falsification_prediction="Forge fails if strict HMAC check runs",
+                        falsification_test="pytest -k test_auth",
+                        severity="high",
+                        target_dir=target,
+                        target_mode="source",
+                    )
+                    c2 = propose_claim(
+                        conn,
+                        worker_id="w1",
+                        title="Sibling auth bypass",
+                        locus="auth.py:2",
+                        mechanism="Same weak token check from second entrypoint",
+                        falsification_prediction="Forge fails if strict HMAC check runs",
+                        falsification_test="pytest -k test_auth_2",
+                        severity="high",
+                        target_dir=target,
+                        target_mode="source",
+                    )
+                    survive_claim(conn, claim_id=str(c1["claim_id"]), worker_id="w2", notes="verified")
+                    survive_claim(conn, claim_id=str(c2["claim_id"]), worker_id="w2", notes="verified")
+
+                    out = record_reproduction_outcome(
+                        conn,
+                        claim_id=str(c1["claim_id"]),
+                        worker_id="w2",
+                        poc_cmd="python3 -c 'raise SystemExit(1)'",
+                        control_cmd="python3 -c 'raise SystemExit(0)'",
+                        build_cmd="make -j4 auth_bin",
+                        micropatch_path="fix.diff",
+                        repro_result={
+                            "passed": True,
+                            "micropatch_diff": "--- a/auth.py\n+++ b/auth.py\n@@ -1 +1 @@\n-bad\n+good\n",
+                            "arm1_clean_poc": {"exit_code": 1, "arm_passed": True, "stdout": "", "stderr": ""},
+                            "arm2_clean_control": {"exit_code": 0, "arm_passed": True, "stdout": "", "stderr": ""},
+                            "arm3_patch_poc": {"exit_code": 0, "arm_passed": True, "stdout": "", "stderr": ""},
+                            "arm4_patch_control": {"exit_code": 0, "arm_passed": True, "stdout": "", "stderr": ""},
+                            "cross_killed_claim_ids": [str(c2["claim_id"])],
+                        },
+                    )
+                    frow = conn.execute(
+                        "SELECT build_cmd FROM findings WHERE finding_id = ?",
+                        (str(out["finding_id"]),),
+                    ).fetchone()
+                    self.assertIsNotNone(frow)
+                    self.assertEqual(str(frow["build_cmd"]), "make -j4 auth_bin")
+
+                    dup_row = conn.execute(
+                        "SELECT status, research_state, evidence_state, duplicate_of_claim_id FROM claims WHERE claim_id = ?",
+                        (str(c2["claim_id"]),),
+                    ).fetchone()
+                    self.assertEqual(str(dup_row["status"]), "duplicate_root_cause")
+                    self.assertEqual(str(dup_row["research_state"]), "rejected_during_research")
+                    self.assertEqual(str(dup_row["evidence_state"]), "unverified")
+                    self.assertEqual(str(dup_row["duplicate_of_claim_id"]), str(c1["claim_id"]))
+
+                    # Seal run and prove all newly unified CLI write services reject mutations.
+                    conn.execute("UPDATE runs SET status = 'finished' WHERE run_id = ?", (rid,))
+                    with self.assertRaises(InvalidTransitionError):
+                        add_surface_driver(conn, surface_id="surf-1", setup_cmd="true", invoke_template="true")
+                    with self.assertRaises(InvalidTransitionError):
+                        add_task(conn, kind="investigate", title="Post-finish task", locus="auth.py:1")
+                    with self.assertRaises(InvalidTransitionError):
+                        add_primitive(
+                            conn,
+                            locus="auth.py:1",
+                            kind="auth_bypass",
+                            preconditions="p",
+                            postconditions="q",
+                            evidence_cmd="true",
+                        )
+                    with self.assertRaises(InvalidTransitionError):
+                        record_human_touch(conn, kind="scope_authority", actor="op", notes="sealed")
+                    with self.assertRaises(InvalidTransitionError):
+                        record_spend_entry(conn, worker_id="w1", phase="hunt", cost_usd=1.0)
+                finally:
+                    conn.close()
 
 
 if __name__ == "__main__":

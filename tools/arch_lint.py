@@ -24,9 +24,8 @@ SQL_WRITE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Ratchet ceiling for remaining inline SQL mutations in `ajar/cli.py`.
-# Lower this whenever another CLI command moves into `ajar/services/`.
-MAX_CLI_RAW_SQL_WRITES = 14
+# Ratchet ceiling for inline SQL mutations in `ajar/cli.py` / `ajar/cli/*.py` (locked at 0).
+MAX_CLI_RAW_SQL_WRITES = 0
 
 FORBIDDEN_LLM_SDKS: frozenset[str] = frozenset(
     {
@@ -250,21 +249,33 @@ def check_cli_raw_sql_ratchet(
     max_writes: int = MAX_CLI_RAW_SQL_WRITES,
     _cache: _RepoAstCache | None = None,
 ) -> list[LintViolation]:
-    cli_path = root / "ajar" / "cli.py"
-    parsed = _cache.get(cli_path) if _cache is not None else None
-    if _cache is not None and parsed is None:
+    targets: list[pathlib.Path] = []
+    cli_file = root / "ajar" / "cli.py"
+    if cli_file.is_file():
+        targets.append(cli_file)
+    cli_pkg = root / "ajar" / "cli"
+    if cli_pkg.is_dir():
+        targets.extend(sorted(cli_pkg.rglob("*.py")))
+    if not targets:
         return []
-    hits = _count_raw_sql_writes(cli_path, tree=parsed.tree if parsed else None)
-    if len(hits) <= max_writes:
+
+    all_hits: list[tuple[str, int, str]] = []
+    for tpath in targets:
+        parsed = _cache.get(tpath) if _cache is not None else None
+        rel = parsed.rel if parsed is not None else tpath.relative_to(root).as_posix()
+        for lineno, snippet in _count_raw_sql_writes(tpath, tree=parsed.tree if parsed else None):
+            all_hits.append((rel, lineno, snippet))
+
+    if len(all_hits) <= max_writes:
         return []
-    first_line = hits[0][0] if hits else 1
+    first_rel, first_line, _ = all_hits[0]
     return [
         LintViolation(
             rule="CLI_RAW_SQL_RATCHET",
-            path="ajar/cli.py",
+            path=first_rel,
             line=first_line,
-            message=f"`ajar/cli.py` has {len(hits)} raw SQL writes, exceeding the ratchet ceiling of {max_writes}.",
-            fix_hint="Do not add inline INSERT/UPDATE/DELETE statements to `ajar/cli.py`; delegate via `ajar/services/`.",
+            message=f"CLI layer has {len(all_hits)} raw SQL write(s), exceeding the ratchet ceiling of {max_writes}.",
+            fix_hint="Do not add inline INSERT/UPDATE/DELETE statements to `ajar/cli`; delegate via `ajar/services/`.",
         )
     ]
 
@@ -532,6 +543,102 @@ def check_no_unfiltered_tar_extract(
     return violations
 
 
+_MIGRATION_FUNC_RE = re.compile(r"^_ensure_v\d+_schema$")
+
+
+def check_no_commit_noop(
+    root: pathlib.Path,
+    *,
+    _cache: _RepoAstCache | None = None,
+) -> list[LintViolation]:
+    """Reject `.commit()` calls inside `ajar/` (connections use autocommit + `immediate_tx`)."""
+    ajar_dir = root / "ajar"
+    if not ajar_dir.is_dir():
+        return []
+    cache = _cache if _cache is not None else _RepoAstCache(root)
+    violations: list[LintViolation] = []
+    for parsed in cache.py_files_under("ajar"):
+        if ".commit(" not in parsed.src:
+            continue
+        for node in ast.walk(parsed.tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "commit"
+            ):
+                violations.append(
+                    LintViolation(
+                        rule="NO_COMMIT_NOOP",
+                        path=parsed.rel,
+                        line=node.lineno,
+                        message=f"`.commit()` call in `{parsed.rel}:{node.lineno}` is a no-op under `isolation_level=None`.",
+                        fix_hint="Wrap multi-statement SQLite mutations in `with immediate_tx(conn):` from `ajar.store` and remove `.commit()`.",
+                    )
+                )
+    return violations
+
+
+def _function_sql_writes_and_tx(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[list[int], bool]:
+    writes: list[int] = []
+    has_tx = False
+
+    def _visit(node: ast.AST) -> None:
+        nonlocal has_tx
+        if node is not fn and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            return
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr in ("execute", "executemany", "executescript") and node.args:
+                sql_text = _extract_string_fragments(node.args[0])
+                if sql_text and SQL_WRITE_RE.search(sql_text):
+                    writes.append(node.lineno)
+        elif isinstance(node, ast.With):
+            for item in node.items:
+                if isinstance(item.context_expr, ast.Call):
+                    f = item.context_expr.func
+                    name = f.id if isinstance(f, ast.Name) else (f.attr if isinstance(f, ast.Attribute) else "")
+                    if name == "immediate_tx":
+                        has_tx = True
+        for child in ast.iter_child_nodes(node):
+            _visit(child)
+
+    _visit(fn)
+    return (writes, has_tx)
+
+
+def check_multi_write_requires_immediate_tx(
+    root: pathlib.Path,
+    *,
+    _cache: _RepoAstCache | None = None,
+) -> list[LintViolation]:
+    """Require `with immediate_tx(conn):` on any function in `ajar/` issuing >= 2 SQL writes."""
+    ajar_dir = root / "ajar"
+    if not ajar_dir.is_dir():
+        return []
+    cache = _cache if _cache is not None else _RepoAstCache(root)
+    violations: list[LintViolation] = []
+    for parsed in cache.py_files_under("ajar"):
+        if "execute" not in parsed.src:
+            continue
+        for node in ast.walk(parsed.tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if _MIGRATION_FUNC_RE.match(node.name):
+                    continue
+                writes, has_tx = _function_sql_writes_and_tx(node)
+                if len(writes) >= 2 and not has_tx:
+                    violations.append(
+                        LintViolation(
+                            rule="MULTI_WRITE_REQUIRES_IMMEDIATE_TX",
+                            path=parsed.rel,
+                            line=node.lineno,
+                            message=(
+                                f"`{node.name}` executes {len(writes)} SQL write statements without `immediate_tx(conn)`."
+                            ),
+                            fix_hint="Wrap the multi-statement write block in `with immediate_tx(conn):` (never across subprocess calls).",
+                        )
+                    )
+    return violations
+
+
 def run_all_checks(root: pathlib.Path) -> list[LintViolation]:
     cache = _RepoAstCache(root)
     violations: list[LintViolation] = []
@@ -541,6 +648,8 @@ def run_all_checks(root: pathlib.Path) -> list[LintViolation]:
     violations.extend(check_no_hardcoded_devbox_paths(root, _cache=cache))
     violations.extend(check_no_ambient_env_mutation_in_tests(root, _cache=cache))
     violations.extend(check_no_unfiltered_tar_extract(root, _cache=cache))
+    violations.extend(check_no_commit_noop(root, _cache=cache))
+    violations.extend(check_multi_write_requires_immediate_tx(root, _cache=cache))
     return violations
 
 

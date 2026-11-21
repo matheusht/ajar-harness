@@ -15,6 +15,8 @@ import re
 import sqlite3
 from typing import Any, Sequence
 
+from ajar.store import immediate_tx
+
 SKIP_DIRS: frozenset[str] = frozenset(
     {
         ".git",
@@ -535,9 +537,8 @@ def build_repomap(
 
     file_ranks = _personalized_pagerank(nodes, out_edges, personalization)
 
-    conn.execute("DELETE FROM repomap_symbols")
-    conn.execute("DELETE FROM repomap_edges")
     all_symbols: list[dict[str, Any]] = []
+    symbol_params: list[tuple[str, str, str, str, int, float, str]] = []
     for rel, syms in symbols_by_file.items():
         f_rank = round(float(file_ranks.get(rel, 0.0)), 6)
         for s in syms:
@@ -546,19 +547,25 @@ def build_repomap(
             sym_id = f"{rel}:{s['line_no']}:{s['name']}"
             row = {**s, "symbol_id": sym_id, "pagerank": s_rank}
             all_symbols.append(row)
-            conn.execute(
+            symbol_params.append((sym_id, rel, s["name"], s["kind"], s["line_no"], s_rank, s["signature"]))
+
+    with immediate_tx(conn):
+        conn.execute("DELETE FROM repomap_symbols")
+        conn.execute("DELETE FROM repomap_edges")
+        if symbol_params:
+            conn.executemany(
                 """
                 INSERT OR REPLACE INTO repomap_symbols(
                     symbol_id, rel_path, name, kind, line_no, pagerank, signature
                 ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (sym_id, rel, s["name"], s["kind"], s["line_no"], s_rank, s["signature"]),
+                symbol_params,
             )
-    for src_f, dst_f, sym, w in edge_rows[:5000]:
-        conn.execute(
-            "INSERT INTO repomap_edges(src_file, dst_file, symbol, weight) VALUES (?, ?, ?, ?)",
-            (src_f, dst_f, sym, w),
-        )
+        if edge_rows:
+            conn.executemany(
+                "INSERT INTO repomap_edges(src_file, dst_file, symbol, weight) VALUES (?, ?, ?, ?)",
+                edge_rows[:5000],
+            )
 
     ranked_files = sorted(nodes, key=lambda u: (-file_ranks.get(u, 0.0), u))
     call_slices = _partition_call_slices(

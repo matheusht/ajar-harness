@@ -38,6 +38,7 @@ from ajar.gates import (
 )
 from ajar.redact import scrub_text
 from ajar.report import build_report_data, render_markdown_report
+from ajar.store import immediate_tx
 from ajar.workspace import init_run_workspace
 
 REASON_TASK_KINDS: frozenset[str] = frozenset({"map", "falsify", "chain", "bridge", "patch", "escalate"})
@@ -90,61 +91,62 @@ def _enqueue_verification_drain_tasks(conn: Any) -> int:
     created = 0
     now_iso = utc_now_iso()
 
-    for c in conn.execute("SELECT * FROM claims WHERE status = 'proposed'").fetchall():
-        existing = conn.execute(
-            "SELECT 1 FROM tasks WHERE kind = 'falsify' AND status IN ('open', 'leased') AND summary LIKE ?",
-            (f"%{c['claim_id']}%",),
-        ).fetchone()
-        if not existing:
-            tid = new_id("task")
-            conn.execute(
-                """
-                INSERT INTO tasks(
-                    task_id, surface_id, kind, title, subsystem, locus, priority,
-                    status, salience_score, summary, created_at, updated_at
-                ) VALUES (?, ?, 'falsify', ?, ?, ?, ?, 'open', 92, ?, ?, ?)
-                """,
-                (
-                    tid,
-                    c["surface_id"],
-                    f"Falsify claim {c['claim_id']}: {c['title'][:80]}",
-                    c["subsystem"],
-                    c["locus"],
-                    c["severity"],
-                    f"Verify or disprove {c['claim_id']} using falsification_test.",
-                    now_iso,
-                    now_iso,
-                ),
-            )
-            created += 1
+    with immediate_tx(conn):
+        for c in conn.execute("SELECT * FROM claims WHERE status = 'proposed'").fetchall():
+            existing = conn.execute(
+                "SELECT 1 FROM tasks WHERE kind = 'falsify' AND status IN ('open', 'leased') AND summary LIKE ?",
+                (f"%{c['claim_id']}%",),
+            ).fetchone()
+            if not existing:
+                tid = new_id("task")
+                conn.execute(
+                    """
+                    INSERT INTO tasks(
+                        task_id, surface_id, kind, title, subsystem, locus, priority,
+                        status, salience_score, summary, created_at, updated_at
+                    ) VALUES (?, ?, 'falsify', ?, ?, ?, ?, 'open', 92, ?, ?, ?)
+                    """,
+                    (
+                        tid,
+                        c["surface_id"],
+                        f"Falsify claim {c['claim_id']}: {c['title'][:80]}",
+                        c["subsystem"],
+                        c["locus"],
+                        c["severity"],
+                        f"Verify or disprove {c['claim_id']} using falsification_test.",
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+                created += 1
 
-    for c in conn.execute("SELECT * FROM claims WHERE status = 'survived_falsify'").fetchall():
-        existing = conn.execute(
-            "SELECT 1 FROM tasks WHERE kind = 'reproduce' AND status IN ('open', 'leased') AND summary LIKE ?",
-            (f"%{c['claim_id']}%",),
-        ).fetchone()
-        if not existing:
-            tid = new_id("task")
-            conn.execute(
-                """
-                INSERT INTO tasks(
-                    task_id, surface_id, kind, title, subsystem, locus, priority,
-                    status, salience_score, summary, created_at, updated_at
-                ) VALUES (?, ?, 'reproduce', ?, ?, ?, ?, 'open', 95, ?, ?, ?)
-                """,
-                (
-                    tid,
-                    c["surface_id"],
-                    f"Reproduce claim {c['claim_id']} with 4-arm proof",
-                    c["subsystem"],
-                    c["locus"],
-                    c["severity"],
-                    f"Execute 4-arm counterfactual reproduction for {c['claim_id']}.",
-                    now_iso,
-                    now_iso,
-                ),
-            )
-            created += 1
+        for c in conn.execute("SELECT * FROM claims WHERE status = 'survived_falsify'").fetchall():
+            existing = conn.execute(
+                "SELECT 1 FROM tasks WHERE kind = 'reproduce' AND status IN ('open', 'leased') AND summary LIKE ?",
+                (f"%{c['claim_id']}%",),
+            ).fetchone()
+            if not existing:
+                tid = new_id("task")
+                conn.execute(
+                    """
+                    INSERT INTO tasks(
+                        task_id, surface_id, kind, title, subsystem, locus, priority,
+                        status, salience_score, summary, created_at, updated_at
+                    ) VALUES (?, ?, 'reproduce', ?, ?, ?, ?, 'open', 95, ?, ?, ?)
+                    """,
+                    (
+                        tid,
+                        c["surface_id"],
+                        f"Reproduce claim {c['claim_id']} with 4-arm proof",
+                        c["subsystem"],
+                        c["locus"],
+                        c["severity"],
+                        f"Execute 4-arm counterfactual reproduction for {c['claim_id']}.",
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+                created += 1
     return created
 
 
@@ -340,10 +342,11 @@ def run_autonomous_schedule(
 
             if cap > 0.0 and spent >= cap:
                 stop_reason = "budget_cap_reached"
-                conn.execute(
-                    "UPDATE runs SET status = 'blocked', stop_reason = ?, finished_at = ?",
-                    (stop_reason, utc_now_iso()),
-                )
+                with immediate_tx(conn):
+                    conn.execute(
+                        "UPDATE runs SET status = 'blocked', stop_reason = ?, finished_at = ?",
+                        (stop_reason, utc_now_iso()),
+                    )
                 break
 
             tripped = evaluate_dry_surface_breaker(conn)
@@ -353,26 +356,28 @@ def run_autonomous_schedule(
             # 80/20 Explore-vs-Verify Reserve Cutoff (active only when a finite budget cap exists):
             if cap > 0.0 and spent >= 0.80 * cap and run_row["status"] == "active":
                 verify_cutoff_triggered = True
-                conn.execute("UPDATE runs SET status = 'verify_only'")
-                drained = _enqueue_verification_drain_tasks(conn)
-                log_event(
-                    conn,
-                    "scheduler",
-                    "verify_only_cutoff",
-                    rid,
-                    {"spent_usd": spent, "budget_usd": cap, "enqueued_verification_tasks": drained},
-                )
+                with immediate_tx(conn):
+                    conn.execute("UPDATE runs SET status = 'verify_only'")
+                    drained = _enqueue_verification_drain_tasks(conn)
+                    log_event(
+                        conn,
+                        "scheduler",
+                        "verify_only_cutoff",
+                        rid,
+                        {"spent_usd": spent, "budget_usd": cap, "enqueued_verification_tasks": drained},
+                    )
             else:
                 _enqueue_verification_drain_tasks(conn)
 
             gates = check_all_gates(conn, target_dir=tpath, auto_enqueue_chain=True)
             if gates["passed"]:
                 stop_reason = "all_gates_passed"
-                conn.execute(
-                    "UPDATE runs SET status = 'finished', stop_reason = ?, finished_at = ?",
-                    (stop_reason, utc_now_iso()),
-                )
-                log_event(conn, "scheduler", "run_finished", rid, {})
+                with immediate_tx(conn):
+                    conn.execute(
+                        "UPDATE runs SET status = 'finished', stop_reason = ?, finished_at = ?",
+                        (stop_reason, utc_now_iso()),
+                    )
+                    log_event(conn, "scheduler", "run_finished", rid, {})
                 break
 
             # Pick worker ID: use dedicated `falsifier-0` when open `falsify` tasks exist.
@@ -393,19 +398,20 @@ def run_autonomous_schedule(
             if leased is None:
                 # Re-check gates when queue is empty.
                 gates_after = check_all_gates(conn, target_dir=tpath, auto_enqueue_chain=True)
-                if gates_after["passed"]:
-                    stop_reason = "all_gates_passed"
-                    conn.execute(
-                        "UPDATE runs SET status = 'finished', stop_reason = ?, finished_at = ?",
-                        (stop_reason, utc_now_iso()),
-                    )
-                else:
-                    stop_reason = (
-                        "verify_queue_drained"
-                        if run_row["status"] == "verify_only"
-                        else "no_leasable_tasks_gates_unmet"
-                    )
-                    conn.execute("UPDATE runs SET stop_reason = ?", (stop_reason,))
+                with immediate_tx(conn):
+                    if gates_after["passed"]:
+                        stop_reason = "all_gates_passed"
+                        conn.execute(
+                            "UPDATE runs SET status = 'finished', stop_reason = ?, finished_at = ?",
+                            (stop_reason, utc_now_iso()),
+                        )
+                    else:
+                        stop_reason = (
+                            "verify_queue_drained"
+                            if run_row["status"] == "verify_only"
+                            else "no_leasable_tasks_gates_unmet"
+                        )
+                        conn.execute("UPDATE runs SET stop_reason = ?", (stop_reason,))
                 break
 
             ctx = render_task_context(conn, str(leased["task_id"]))

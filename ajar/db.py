@@ -313,6 +313,7 @@ CREATE TABLE IF NOT EXISTS findings (
     root_cause TEXT NOT NULL,
     poc_cmd TEXT NOT NULL,
     control_cmd TEXT NOT NULL,
+    build_cmd TEXT NOT NULL DEFAULT '',
     micropatch_path TEXT NOT NULL DEFAULT '',
     micropatch_diff TEXT NOT NULL DEFAULT '',
     arm1_clean_poc_json TEXT NOT NULL,
@@ -1200,6 +1201,7 @@ def _ensure_v33_schema(conn: sqlite3.Connection) -> None:
     if "findings" in tables:
         fcols = {r[1] for r in conn.execute("PRAGMA table_info(findings)").fetchall()}
         for cname, cdef in (
+            ("build_cmd", "TEXT NOT NULL DEFAULT ''"),
             ("provides_tags_json", "TEXT NOT NULL DEFAULT '[]'"),
             ("snapshot_id", "TEXT NOT NULL DEFAULT ''"),
             ("realism_tier", "TEXT NOT NULL DEFAULT 'stepping_stone'"),
@@ -1509,8 +1511,7 @@ def lease_next_task(
     """Atomically lease the highest-salience open task with portfolio balance and Zero-Skill quota."""
     now = time.time()
     now_iso = utc_now_iso()
-    conn.execute("BEGIN IMMEDIATE")
-    try:
+    with immediate_tx(conn):
         conn.execute(
             """
             UPDATE tasks
@@ -1534,7 +1535,6 @@ def lease_next_task(
                     "UPDATE tasks SET lease_expires_at = ?, updated_at = ? WHERE task_id = ?",
                     (now + ttl_sec, now_iso, existing["task_id"]),
                 )
-                conn.commit()
                 out = dict(existing)
                 out["suppress_domain_skills"] = out["skill_mode"] == "zero_skill"
                 return out
@@ -1548,7 +1548,6 @@ def lease_next_task(
         row: sqlite3.Row | None = None
         if kind:
             if (verify_only and kind in ("map", "investigate", "bridge")) or (in_hunt_phase and kind == "patch"):
-                conn.commit()
                 return None
             row = conn.execute(
                 """
@@ -1637,7 +1636,6 @@ def lease_next_task(
                 ).fetchone()
 
         if row is None:
-            conn.commit()
             return None
 
         skill_mode = "domain"
@@ -1681,14 +1679,9 @@ def lease_next_task(
             {"kind": row["kind"], "skill_mode": skill_mode, "salience_score": row["salience_score"]},
         )
         updated = conn.execute("SELECT * FROM tasks WHERE task_id = ?", (row["task_id"],)).fetchone()
-        conn.commit()
         out = dict(updated)
         out["suppress_domain_skills"] = skill_mode == "zero_skill"
         return out
-    except Exception:
-        if conn.in_transaction:
-            conn.rollback()
-        raise
 
 
 def maybe_auto_pulse(conn: sqlite3.Connection, target_dir: pathlib.Path | None = None) -> dict[str, Any] | None:
@@ -1739,37 +1732,38 @@ def set_certified_binding(
     sha, s_line, e_line = file_locus_sha256(target_dir, locus)
     now_iso = utc_now_iso()
     clean_val = scrub_text(value)
-    existing = conn.execute("SELECT binding_id FROM certified_bindings WHERE name = ?", (name,)).fetchone()
-    binding_id = existing["binding_id"] if existing else new_id("bind")
-    conn.execute(
-        """
-        INSERT INTO certified_bindings(
-            binding_id, task_id, name, value, locus, file_sha256, line_start, line_end, valid, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-        ON CONFLICT(name) DO UPDATE SET
-            task_id = excluded.task_id,
-            value = excluded.value,
-            locus = excluded.locus,
-            file_sha256 = excluded.file_sha256,
-            line_start = excluded.line_start,
-            line_end = excluded.line_end,
-            valid = 1,
-            updated_at = excluded.updated_at
-        """,
-        (binding_id, task_id, name, clean_val, locus, sha, s_line, e_line, now_iso, now_iso),
-    )
-    # Recording new target binding also satisfies pending instrumentation on matching locus!
-    conn.execute(
-        """
-        UPDATE claims
-        SET instrumented_since_fail = 1,
-            status = CASE WHEN status = 'needs_instrumentation' THEN 'survived_falsify' ELSE status END,
-            updated_at = ?
-        WHERE locus = ? AND status IN ('needs_instrumentation', 'survived_falsify')
-        """,
-        (now_iso, locus),
-    )
-    log_event(conn, actor, "binding_certified", binding_id, {"name": name, "locus": locus})
+    with immediate_tx(conn):
+        existing = conn.execute("SELECT binding_id FROM certified_bindings WHERE name = ?", (name,)).fetchone()
+        binding_id = existing["binding_id"] if existing else new_id("bind")
+        conn.execute(
+            """
+            INSERT INTO certified_bindings(
+                binding_id, task_id, name, value, locus, file_sha256, line_start, line_end, valid, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            ON CONFLICT(name) DO UPDATE SET
+                task_id = excluded.task_id,
+                value = excluded.value,
+                locus = excluded.locus,
+                file_sha256 = excluded.file_sha256,
+                line_start = excluded.line_start,
+                line_end = excluded.line_end,
+                valid = 1,
+                updated_at = excluded.updated_at
+            """,
+            (binding_id, task_id, name, clean_val, locus, sha, s_line, e_line, now_iso, now_iso),
+        )
+        # Recording new target binding also satisfies pending instrumentation on matching locus!
+        conn.execute(
+            """
+            UPDATE claims
+            SET instrumented_since_fail = 1,
+                status = CASE WHEN status = 'needs_instrumentation' THEN 'survived_falsify' ELSE status END,
+                updated_at = ?
+            WHERE locus = ? AND status IN ('needs_instrumentation', 'survived_falsify')
+            """,
+            (now_iso, locus),
+        )
+        log_event(conn, actor, "binding_certified", binding_id, {"name": name, "locus": locus})
     return {
         "binding_id": binding_id,
         "name": name,
@@ -1803,27 +1797,28 @@ def add_steer(
     now_iso = utc_now_iso()
     clean_filter = scrub_text(target_filter.strip())
     clean_author = scrub_text(author.strip() or "operator")
-    conn.execute(
-        """
-        INSERT INTO steers(steer_id, scope, target_filter, rule_text, author, touch_kind, active, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, 1, ?)
-        """,
-        (sid, scope, clean_filter, clean_rule, clean_author, touch_kind, now_iso),
-    )
     touch_id = None
-    if record_human_touch and clean_author != "system":
-        touch_id = new_id("tch")
+    with immediate_tx(conn):
         conn.execute(
-            "INSERT INTO human_touches(touch_id, kind, actor, notes, created_at) VALUES (?, ?, ?, ?, ?)",
-            (touch_id, touch_kind, clean_author, f"steer {sid} [{scope}:{clean_filter or '*'}]: {clean_rule[:160]}", now_iso),
+            """
+            INSERT INTO steers(steer_id, scope, target_filter, rule_text, author, touch_kind, active, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+            """,
+            (sid, scope, clean_filter, clean_rule, clean_author, touch_kind, now_iso),
         )
-    log_event(
-        conn,
-        clean_author,
-        "steer_added",
-        sid,
-        {"scope": scope, "target_filter": clean_filter, "touch_kind": touch_kind, "touch_id": touch_id},
-    )
+        if record_human_touch and clean_author != "system":
+            touch_id = new_id("tch")
+            conn.execute(
+                "INSERT INTO human_touches(touch_id, kind, actor, notes, created_at) VALUES (?, ?, ?, ?, ?)",
+                (touch_id, touch_kind, clean_author, f"steer {sid} [{scope}:{clean_filter or '*'}]: {clean_rule[:160]}", now_iso),
+            )
+        log_event(
+            conn,
+            clean_author,
+            "steer_added",
+            sid,
+            {"scope": scope, "target_filter": clean_filter, "touch_kind": touch_kind, "touch_id": touch_id},
+        )
     return {
         "steer_id": sid,
         "scope": scope,
@@ -2266,51 +2261,51 @@ def calibrate_finding(
     worker_id: str = "operator",
 ) -> dict[str, Any]:
     """Calibrate severity/title on a confirmed finding without ad-hoc SQL edits."""
-    frow = conn.execute("SELECT * FROM findings WHERE finding_id = ?", (finding_id,)).fetchone()
-    if frow is None:
-        raise AjarError(f"Unknown finding_id: {finding_id}", EXIT_USER_ERROR)
     clean_reason = scrub_text((reason or "").strip())
     if len(clean_reason) < 8:
         raise AjarError("Finding calibration --reason must be at least 8 characters.", EXIT_USER_ERROR)
-
-    new_sev = (severity or str(frow["severity"])).strip().lower()
-    if new_sev not in ("critical", "high", "medium", "low"):
-        raise AjarError(f"Unsupported severity: {new_sev!r}", EXIT_USER_ERROR)
-    new_title = scrub_text(title.strip()) if title and title.strip() else str(frow["title"])
-    cur_tier = str(frow["realism_tier"] if "realism_tier" in frow.keys() else "stepping_stone")
-    new_tier = "stepping_stone" if new_sev in ("medium", "low") else cur_tier
     now_iso = utc_now_iso()
+    with immediate_tx(conn):
+        frow = conn.execute("SELECT * FROM findings WHERE finding_id = ?", (finding_id,)).fetchone()
+        if frow is None:
+            raise AjarError(f"Unknown finding_id: {finding_id}", EXIT_USER_ERROR)
+        new_sev = (severity or str(frow["severity"])).strip().lower()
+        if new_sev not in ("critical", "high", "medium", "low"):
+            raise AjarError(f"Unsupported severity: {new_sev!r}", EXIT_USER_ERROR)
+        new_title = scrub_text(title.strip()) if title and title.strip() else str(frow["title"])
+        cur_tier = str(frow["realism_tier"] if "realism_tier" in frow.keys() else "stepping_stone")
+        new_tier = "stepping_stone" if new_sev in ("medium", "low") else cur_tier
 
-    conn.execute(
-        """
-        UPDATE findings
-        SET severity = ?, title = ?, realism_tier = ?, calibration_notes = ?
-        WHERE finding_id = ?
-        """,
-        (new_sev, new_title, new_tier, clean_reason, finding_id),
-    )
-    conn.execute(
-        "UPDATE claims SET severity = ?, title = ?, updated_at = ? WHERE claim_id = ?",
-        (new_sev, new_title, now_iso, str(frow["claim_id"])),
-    )
-    if worker_id == "operator":
         conn.execute(
-            "INSERT INTO human_touches(touch_id, kind, actor, notes, created_at) VALUES (?, 'scope_authority', 'operator', ?, ?)",
-            (new_id("tch"), f"calibrate {finding_id} -> {new_sev}: {clean_reason[:140]}", now_iso),
+            """
+            UPDATE findings
+            SET severity = ?, title = ?, realism_tier = ?, calibration_notes = ?
+            WHERE finding_id = ?
+            """,
+            (new_sev, new_title, new_tier, clean_reason, finding_id),
         )
-    log_event(
-        conn,
-        worker_id,
-        "finding_calibrated",
-        finding_id,
-        {
-            "old_severity": frow["severity"],
-            "new_severity": new_sev,
-            "new_title": new_title,
-            "realism_tier": new_tier,
-            "reason": clean_reason[:200],
-        },
-    )
+        conn.execute(
+            "UPDATE claims SET severity = ?, title = ?, updated_at = ? WHERE claim_id = ?",
+            (new_sev, new_title, now_iso, str(frow["claim_id"])),
+        )
+        if worker_id == "operator":
+            conn.execute(
+                "INSERT INTO human_touches(touch_id, kind, actor, notes, created_at) VALUES (?, 'scope_authority', 'operator', ?, ?)",
+                (new_id("tch"), f"calibrate {finding_id} -> {new_sev}: {clean_reason[:140]}", now_iso),
+            )
+        log_event(
+            conn,
+            worker_id,
+            "finding_calibrated",
+            finding_id,
+            {
+                "old_severity": frow["severity"],
+                "new_severity": new_sev,
+                "new_title": new_title,
+                "realism_tier": new_tier,
+                "reason": clean_reason[:200],
+            },
+        )
     return {
         "finding_id": finding_id,
         "claim_id": str(frow["claim_id"]),
@@ -2385,88 +2380,89 @@ def run_pulse(conn: sqlite3.Connection, *, target_dir: pathlib.Path | None = Non
     now = time.time()
     now_iso = utc_now_iso()
 
-    cur_exp = conn.execute(
-        """
-        UPDATE tasks
-        SET status = 'open',
-            worker_id = NULL,
-            lease_expires_at = NULL,
-            attempt_count = attempt_count + 1,
-            updated_at = ?
-        WHERE status = 'leased' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
-        """,
-        (now_iso, now),
-    )
-    expired_leases = int(cur_exp.rowcount or 0)
-    expired_hooks = expire_stale_hooks(conn)
-    exhausted_doors = reconcile_door_bridge_tasks(conn)
+    with immediate_tx(conn):
+        cur_exp = conn.execute(
+            """
+            UPDATE tasks
+            SET status = 'open',
+                worker_id = NULL,
+                lease_expires_at = NULL,
+                attempt_count = attempt_count + 1,
+                updated_at = ?
+            WHERE status = 'leased' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
+            """,
+            (now_iso, now),
+        )
+        expired_leases = int(cur_exp.rowcount or 0)
+        expired_hooks = expire_stale_hooks(conn)
+        exhausted_doors = reconcile_door_bridge_tasks(conn)
 
-    invalidated_bindings = 0
-    if target_dir is not None and target_dir.is_dir():
-        for b in conn.execute("SELECT binding_id, locus, file_sha256 FROM certified_bindings WHERE valid = 1").fetchall():
-            if b["file_sha256"]:
-                cur_sha, _, _ = file_locus_sha256(target_dir, b["locus"])
-                if cur_sha and cur_sha != b["file_sha256"]:
-                    conn.execute(
-                        "UPDATE certified_bindings SET valid = 0, updated_at = ? WHERE binding_id = ?",
-                        (now_iso, b["binding_id"]),
-                    )
-                    invalidated_bindings += 1
+        invalidated_bindings = 0
+        if target_dir is not None and target_dir.is_dir():
+            for b in conn.execute("SELECT binding_id, locus, file_sha256 FROM certified_bindings WHERE valid = 1").fetchall():
+                if b["file_sha256"]:
+                    cur_sha, _, _ = file_locus_sha256(target_dir, b["locus"])
+                    if cur_sha and cur_sha != b["file_sha256"]:
+                        conn.execute(
+                            "UPDATE certified_bindings SET valid = 0, updated_at = ? WHERE binding_id = ?",
+                            (now_iso, b["binding_id"]),
+                        )
+                        invalidated_bindings += 1
 
-    # Check `conditional_blocked` tasks against newly discovered capability tags, primitives, anomalies, and findings.
-    reopened_tasks: list[str] = []
-    blocked_rows = conn.execute("SELECT * FROM tasks WHERE status = 'conditional_blocked'").fetchall()
-    if blocked_rows:
-        signal_blobs: list[str] = []
-        provided_tag_set: set[str] = set()
-        for p in conn.execute(
-            "SELECT locus, kind, postconditions, guarded_by_locus, provides_tags_json FROM primitives WHERE status != 'dry'"
-        ).fetchall():
-            ptags = parse_tag_list(p["provides_tags_json"])
-            provided_tag_set.update(ptags)
-            signal_blobs.append(
-                f"{p['locus']} {p['kind']} {p['postconditions']} {p['guarded_by_locus']} {' '.join(ptags)}".lower()
-            )
-        for a in conn.execute("SELECT locus, observation FROM anomalies WHERE status = 'unexplained'").fetchall():
-            signal_blobs.append(f"{a['locus']} {a['observation']}".lower())
-        for f in conn.execute("SELECT locus, title, root_cause FROM findings").fetchall():
-            signal_blobs.append(f"{f['locus']} {f['title']} {f['root_cause']}".lower())
-        combined_signals = "\n".join(signal_blobs)
-
-        for brow in blocked_rows:
-            check_loc = (brow["blocker_check_locus"] or "").strip().lower()
-            pred = (brow["blocker_predicate"] or "").strip().lower()
-            matched = False
-            pred_tags = [t for t in parse_tag_list(pred) if ":" in t]
-            if pred_tags and any(pt in provided_tag_set for pt in pred_tags):
-                matched = True
-            elif check_loc and check_loc in combined_signals:
-                matched = True
-            elif pred:
-                pred_tokens = [t for t in re.findall(r"[a-z0-9_]{4,}", pred) if t not in {"need", "when", "until", "with", "from"}]
-                if pred_tokens and all(tok in combined_signals for tok in pred_tokens[:2]):
-                    matched = True
-            if matched:
-                conn.execute(
-                    """
-                    UPDATE tasks
-                    SET status = 'open', reopened_boost = reopened_boost + 12, updated_at = ?
-                    WHERE task_id = ?
-                    """,
-                    (now_iso, brow["task_id"]),
+        # Check `conditional_blocked` tasks against newly discovered capability tags, primitives, anomalies, and findings.
+        reopened_tasks: list[str] = []
+        blocked_rows = conn.execute("SELECT * FROM tasks WHERE status = 'conditional_blocked'").fetchall()
+        if blocked_rows:
+            signal_blobs: list[str] = []
+            provided_tag_set: set[str] = set()
+            for p in conn.execute(
+                "SELECT locus, kind, postconditions, guarded_by_locus, provides_tags_json FROM primitives WHERE status != 'dry'"
+            ).fetchall():
+                ptags = parse_tag_list(p["provides_tags_json"])
+                provided_tag_set.update(ptags)
+                signal_blobs.append(
+                    f"{p['locus']} {p['kind']} {p['postconditions']} {p['guarded_by_locus']} {' '.join(ptags)}".lower()
                 )
-                reopened_tasks.append(brow["task_id"])
+            for a in conn.execute("SELECT locus, observation FROM anomalies WHERE status = 'unexplained'").fetchall():
+                signal_blobs.append(f"{a['locus']} {a['observation']}".lower())
+            for f in conn.execute("SELECT locus, title, root_cause FROM findings").fetchall():
+                signal_blobs.append(f"{f['locus']} {f['title']} {f['root_cause']}".lower())
+            combined_signals = "\n".join(signal_blobs)
 
-    rescored = recompute_all_open_salience(conn)
-    result = {
-        "expired_leases": expired_leases,
-        "expired_hooks": expired_hooks,
-        "exhausted_doors": exhausted_doors,
-        "invalidated_bindings": invalidated_bindings,
-        "reopened_tasks": reopened_tasks,
-        "rescored_open_tasks": rescored,
-    }
-    log_event(conn, "system", "pulse", "", result)
+            for brow in blocked_rows:
+                check_loc = (brow["blocker_check_locus"] or "").strip().lower()
+                pred = (brow["blocker_predicate"] or "").strip().lower()
+                matched = False
+                pred_tags = [t for t in parse_tag_list(pred) if ":" in t]
+                if pred_tags and any(pt in provided_tag_set for pt in pred_tags):
+                    matched = True
+                elif check_loc and check_loc in combined_signals:
+                    matched = True
+                elif pred:
+                    pred_tokens = [t for t in re.findall(r"[a-z0-9_]{4,}", pred) if t not in {"need", "when", "until", "with", "from"}]
+                    if pred_tokens and all(tok in combined_signals for tok in pred_tokens[:2]):
+                        matched = True
+                if matched:
+                    conn.execute(
+                        """
+                        UPDATE tasks
+                        SET status = 'open', reopened_boost = reopened_boost + 12, updated_at = ?
+                        WHERE task_id = ?
+                        """,
+                        (now_iso, brow["task_id"]),
+                    )
+                    reopened_tasks.append(brow["task_id"])
+
+        rescored = recompute_all_open_salience(conn)
+        result = {
+            "expired_leases": expired_leases,
+            "expired_hooks": expired_hooks,
+            "exhausted_doors": exhausted_doors,
+            "invalidated_bindings": invalidated_bindings,
+            "reopened_tasks": reopened_tasks,
+            "rescored_open_tasks": rescored,
+        }
+        log_event(conn, "system", "pulse", "", result)
     return result
 
 
@@ -2488,53 +2484,54 @@ def record_repro_failure(
     new_status = "needs_instrumentation" if pivoted else "survived_falsify"
     instrument_task_id = None
 
-    conn.execute(
-        """
-        UPDATE claims
-        SET failed_repro_count = ?,
-            last_observation_hash = ?,
-            instrumented_since_fail = CASE WHEN ? THEN 0 ELSE instrumented_since_fail END,
-            status = ?,
-            updated_at = ?
-        WHERE claim_id = ?
-        """,
-        (prev_fails, observation_hash, 1 if pivoted else 0, new_status, now_iso, claim_id),
-    )
-
-    if pivoted:
-        instrument_task_id = new_id("task")
-        sub = str(claim["subsystem"] or infer_subsystem(str(claim["locus"])))
+    with immediate_tx(conn):
         conn.execute(
             """
-            INSERT INTO tasks(
-                task_id, parent_claim_id, surface_id, kind, title, subsystem, locus, priority,
-                status, salience_score, summary, created_at, updated_at
-            ) VALUES (?, ?, ?, 'instrument', ?, ?, ?, 'critical', 'open', 85, ?, ?, ?)
+            UPDATE claims
+            SET failed_repro_count = ?,
+                last_observation_hash = ?,
+                instrumented_since_fail = CASE WHEN ? THEN 0 ELSE instrumented_since_fail END,
+                status = ?,
+                updated_at = ?
+            WHERE claim_id = ?
             """,
-            (
-                instrument_task_id,
-                claim_id,
-                claim["surface_id"],
-                f"Instrument target state for stalled reproduction of {claim_id}",
-                sub,
-                claim["locus"],
-                scrub_text(f"2 failed PoC attempts ({reason[:120]}). Capture target trace/binding before retrying."),
-                now_iso,
-                now_iso,
-            ),
+            (prev_fails, observation_hash, 1 if pivoted else 0, new_status, now_iso, claim_id),
         )
-    log_event(
-        conn,
-        worker_id,
-        "claim_repro_failed",
-        claim_id,
-        {
-            "failed_repro_count": prev_fails,
-            "pivoted_to_instrumentation": pivoted,
-            "instrument_task_id": instrument_task_id,
-            "reason": reason[:200],
-        },
-    )
+
+        if pivoted:
+            instrument_task_id = new_id("task")
+            sub = str(claim["subsystem"] or infer_subsystem(str(claim["locus"])))
+            conn.execute(
+                """
+                INSERT INTO tasks(
+                    task_id, parent_claim_id, surface_id, kind, title, subsystem, locus, priority,
+                    status, salience_score, summary, created_at, updated_at
+                ) VALUES (?, ?, ?, 'instrument', ?, ?, ?, 'critical', 'open', 85, ?, ?, ?)
+                """,
+                (
+                    instrument_task_id,
+                    claim_id,
+                    claim["surface_id"],
+                    f"Instrument target state for stalled reproduction of {claim_id}",
+                    sub,
+                    claim["locus"],
+                    scrub_text(f"2 failed PoC attempts ({reason[:120]}). Capture target trace/binding before retrying."),
+                    now_iso,
+                    now_iso,
+                ),
+            )
+        log_event(
+            conn,
+            worker_id,
+            "claim_repro_failed",
+            claim_id,
+            {
+                "failed_repro_count": prev_fails,
+                "pivoted_to_instrumentation": pivoted,
+                "instrument_task_id": instrument_task_id,
+                "reason": reason[:200],
+            },
+        )
     return {
         "claim_id": claim_id,
         "status": new_status,
@@ -2668,115 +2665,116 @@ def transition_threat_assumption(
     """
     if new_status not in ("verified_holds", "violated", "assumed"):
         raise AjarError(f"Invalid assumption status {new_status!r}", EXIT_USER_ERROR)
-    row = conn.execute("SELECT * FROM threat_assumptions WHERE assumption_id = ?", (assumption_id,)).fetchone()
-    if row is None:
-        raise AjarError(f"Unknown assumption_id: {assumption_id}", EXIT_USER_ERROR)
 
-    prev_status = str(row["status"])
     now_iso = utc_now_iso()
     clean_ev = scrub_text(evidence_ref.strip())
     clean_notes = scrub_text(notes.strip())
-    conn.execute(
-        """
-        UPDATE threat_assumptions
-        SET status = ?, evidence_ref = ?, notes = ?, updated_at = ?
-        WHERE assumption_id = ?
-        """,
-        (new_status, clean_ev, clean_notes, now_iso, assumption_id),
-    )
-
     unblocked_tasks = 0
     upgraded_surface = ""
     spawned_task_id = ""
     new_revision = 1
 
-    if new_status == "violated" and prev_status != "violated":
-        run = conn.execute("SELECT run_id FROM runs LIMIT 1").fetchone()
-        rid = str(run["run_id"]) if run else "run"
-        tm = conn.execute("SELECT revision FROM threat_models WHERE run_id = ?", (rid,)).fetchone()
-        if tm is not None:
-            new_revision = int(tm["revision"]) + 1
-            conn.execute("UPDATE threat_models SET revision = ?, updated_at = ? WHERE run_id = ?", (new_revision, now_iso, rid))
-        else:
-            new_revision = 2
-            conn.execute(
-                "INSERT INTO threat_models(run_id, summary, revision, updated_at) VALUES (?, ?, ?, ?)",
-                (rid, f"Auto-initialized on violation of {assumption_id}", new_revision, now_iso),
-            )
-
-        dep_sid = str(row["dependent_surface_id"] or "").strip()
-        esc_prio = str(row["escalate_priority"] or "critical")
-        prio_rank = {"low": 1, "medium": 2, "high": 3, "critical": 4}
-        if dep_sid:
-            srow = conn.execute("SELECT surface_id, priority, locus, subsystem, name FROM surfaces WHERE surface_id = ?", (dep_sid,)).fetchone()
-            if srow is not None:
-                if prio_rank.get(str(srow["priority"]), 1) < prio_rank.get(esc_prio, 4):
-                    conn.execute("UPDATE surfaces SET priority = ? WHERE surface_id = ?", (esc_prio, dep_sid))
-                    upgraded_surface = dep_sid
-
-        chk_loc = str(row["check_locus"] or "").strip()
-        cur = conn.execute(
+    with immediate_tx(conn):
+        row = conn.execute("SELECT * FROM threat_assumptions WHERE assumption_id = ?", (assumption_id,)).fetchone()
+        if row is None:
+            raise AjarError(f"Unknown assumption_id: {assumption_id}", EXIT_USER_ERROR)
+        prev_status = str(row["status"])
+        conn.execute(
             """
-            UPDATE tasks
-            SET status = 'open',
-                reopened_boost = reopened_boost + 30,
-                salience_score = MIN(100, salience_score + 30),
-                updated_at = ?
-            WHERE status = 'conditional_blocked'
-              AND (
-                  (? != '' AND blocker_check_locus = ?)
-                  OR (? != '' AND surface_id = ?)
-                  OR blocker_predicate LIKE ?
-              )
+            UPDATE threat_assumptions
+            SET status = ?, evidence_ref = ?, notes = ?, updated_at = ?
+            WHERE assumption_id = ?
             """,
-            (now_iso, chk_loc, chk_loc, dep_sid, dep_sid, f"%{assumption_id}%"),
+            (new_status, clean_ev, clean_notes, now_iso, assumption_id),
         )
-        unblocked_tasks = int(cur.rowcount or 0)
 
-        if dep_sid:
-            open_on_surf = conn.execute(
-                "SELECT task_id FROM tasks WHERE surface_id = ? AND status IN ('open', 'leased') LIMIT 1",
-                (dep_sid,),
-            ).fetchone()
-            if open_on_surf is None:
-                srow = conn.execute("SELECT locus, subsystem, name FROM surfaces WHERE surface_id = ?", (dep_sid,)).fetchone()
+        if new_status == "violated" and prev_status != "violated":
+            run = conn.execute("SELECT run_id FROM runs LIMIT 1").fetchone()
+            rid = str(run["run_id"]) if run else "run"
+            tm = conn.execute("SELECT revision FROM threat_models WHERE run_id = ?", (rid,)).fetchone()
+            if tm is not None:
+                new_revision = int(tm["revision"]) + 1
+                conn.execute("UPDATE threat_models SET revision = ?, updated_at = ? WHERE run_id = ?", (new_revision, now_iso, rid))
+            else:
+                new_revision = 2
+                conn.execute(
+                    "INSERT INTO threat_models(run_id, summary, revision, updated_at) VALUES (?, ?, ?, ?)",
+                    (rid, f"Auto-initialized on violation of {assumption_id}", new_revision, now_iso),
+                )
+
+            dep_sid = str(row["dependent_surface_id"] or "").strip()
+            esc_prio = str(row["escalate_priority"] or "critical")
+            prio_rank = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+            if dep_sid:
+                srow = conn.execute("SELECT surface_id, priority, locus, subsystem, name FROM surfaces WHERE surface_id = ?", (dep_sid,)).fetchone()
                 if srow is not None:
-                    spawned_task_id = new_id("task")
-                    conn.execute(
-                        """
-                        INSERT INTO tasks(
-                            task_id, surface_id, kind, direction, title, subsystem, locus,
-                            priority, status, salience_score, reopened_boost, summary, created_at, updated_at
-                        ) VALUES (?, ?, 'investigate', 'outside_in', ?, ?, ?, ?, 'open', 92, 30, ?, ?, ?)
-                        """,
-                        (
-                            spawned_task_id,
-                            dep_sid,
-                            f"Adaptive threat-model escalation on {srow['name']} ({assumption_id} violated)",
-                            str(srow["subsystem"] or row["subsystem"] or ""),
-                            str(srow["locus"] or ""),
-                            esc_prio,
-                            f"Trust assumption {assumption_id} ({str(row['assumption_text'])[:90]}) was violated by {clean_ev or 'new evidence'}.",
-                            now_iso,
-                            now_iso,
-                        ),
-                    )
+                    if prio_rank.get(str(srow["priority"]), 1) < prio_rank.get(esc_prio, 4):
+                        conn.execute("UPDATE surfaces SET priority = ? WHERE surface_id = ?", (esc_prio, dep_sid))
+                        upgraded_surface = dep_sid
 
-        log_event(
-            conn,
-            "engine",
-            "threat_assumption_violated",
-            assumption_id,
-            {
-                "evidence_ref": clean_ev,
-                "upgraded_surface": upgraded_surface,
-                "unblocked_tasks": unblocked_tasks,
-                "spawned_task_id": spawned_task_id,
-                "threat_model_revision": new_revision,
-            },
-        )
-    else:
-        log_event(conn, "worker", "threat_assumption_updated", assumption_id, {"status": new_status, "evidence_ref": clean_ev})
+            chk_loc = str(row["check_locus"] or "").strip()
+            cur = conn.execute(
+                """
+                UPDATE tasks
+                SET status = 'open',
+                    reopened_boost = reopened_boost + 30,
+                    salience_score = MIN(100, salience_score + 30),
+                    updated_at = ?
+                WHERE status = 'conditional_blocked'
+                  AND (
+                      (? != '' AND blocker_check_locus = ?)
+                      OR (? != '' AND surface_id = ?)
+                      OR blocker_predicate LIKE ?
+                  )
+                """,
+                (now_iso, chk_loc, chk_loc, dep_sid, dep_sid, f"%{assumption_id}%"),
+            )
+            unblocked_tasks = int(cur.rowcount or 0)
+
+            if dep_sid:
+                open_on_surf = conn.execute(
+                    "SELECT task_id FROM tasks WHERE surface_id = ? AND status IN ('open', 'leased') LIMIT 1",
+                    (dep_sid,),
+                ).fetchone()
+                if open_on_surf is None:
+                    srow = conn.execute("SELECT locus, subsystem, name FROM surfaces WHERE surface_id = ?", (dep_sid,)).fetchone()
+                    if srow is not None:
+                        spawned_task_id = new_id("task")
+                        conn.execute(
+                            """
+                            INSERT INTO tasks(
+                                task_id, surface_id, kind, direction, title, subsystem, locus,
+                                priority, status, salience_score, reopened_boost, summary, created_at, updated_at
+                            ) VALUES (?, ?, 'investigate', 'outside_in', ?, ?, ?, ?, 'open', 92, 30, ?, ?, ?)
+                            """,
+                            (
+                                spawned_task_id,
+                                dep_sid,
+                                f"Adaptive threat-model escalation on {srow['name']} ({assumption_id} violated)",
+                                str(srow["subsystem"] or row["subsystem"] or ""),
+                                str(srow["locus"] or ""),
+                                esc_prio,
+                                f"Trust assumption {assumption_id} ({str(row['assumption_text'])[:90]}) was violated by {clean_ev or 'new evidence'}.",
+                                now_iso,
+                                now_iso,
+                            ),
+                        )
+
+            log_event(
+                conn,
+                "engine",
+                "threat_assumption_violated",
+                assumption_id,
+                {
+                    "evidence_ref": clean_ev,
+                    "upgraded_surface": upgraded_surface,
+                    "unblocked_tasks": unblocked_tasks,
+                    "spawned_task_id": spawned_task_id,
+                    "threat_model_revision": new_revision,
+                },
+            )
+        else:
+            log_event(conn, "worker", "threat_assumption_updated", assumption_id, {"status": new_status, "evidence_ref": clean_ev})
 
     return {
         "assumption_id": assumption_id,

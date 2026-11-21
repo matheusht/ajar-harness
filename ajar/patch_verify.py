@@ -41,6 +41,7 @@ from ajar.repro_source import (
     resolve_local_build_cache_dir,
     run_source_reproduction,
 )
+from ajar.store import immediate_tx
 
 FAILURE_MARKER_RE = re.compile(
     r"^(?:FAIL(?:ED)?\b.*|ERROR\b.*|---\s*FAIL:\s*\S+.*|.*::\S+\s+FAILED\b.*|test\s+\S+\s+\.\.\.\s+FAILED.*)$",
@@ -643,46 +644,47 @@ def _persist_patch_verification(
 ) -> dict[str, Any]:
     vid = new_id("pvf")
     now_iso = utc_now_iso()
-    conn.execute(
-        """
-        INSERT INTO patch_verifications(
-            verification_id, finding_id, claim_id, patch_path, patch_diff,
-            suite_cmd, variant_cmds_json, caller_audit, sibling_audit,
-            arms_json, baseline_suite_json, arm7_caller_cmd, arm8_sibling_cmd,
-            arm9_revert_poc_json, passed, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            vid,
-            finding_id,
-            claim_id,
-            str(patch_path),
-            scrub_text(patch_diff[:8000]),
-            scrub_text(suite_cmd),
-            json.dumps([scrub_text(v) for v in variant_cmds]),
-            scrub_text(caller_audit.strip()),
-            scrub_text(sibling_audit.strip()),
-            json.dumps(arms, sort_keys=True),
-            json.dumps(baseline_suite, sort_keys=True),
-            scrub_text(caller_cmd.strip()),
-            scrub_text(sibling_cmd.strip()),
-            json.dumps(arms.get("arm9_revert_poc", {}), sort_keys=True),
-            1 if passed else 0,
-            now_iso,
-        ),
-    )
-    if passed:
+    with immediate_tx(conn):
         conn.execute(
-            "UPDATE claims SET remediation_state = 'verified_local', updated_at = ? WHERE claim_id = ?",
-            (now_iso, claim_id),
+            """
+            INSERT INTO patch_verifications(
+                verification_id, finding_id, claim_id, patch_path, patch_diff,
+                suite_cmd, variant_cmds_json, caller_audit, sibling_audit,
+                arms_json, baseline_suite_json, arm7_caller_cmd, arm8_sibling_cmd,
+                arm9_revert_poc_json, passed, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                vid,
+                finding_id,
+                claim_id,
+                str(patch_path),
+                scrub_text(patch_diff[:8000]),
+                scrub_text(suite_cmd),
+                json.dumps([scrub_text(v) for v in variant_cmds]),
+                scrub_text(caller_audit.strip()),
+                scrub_text(sibling_audit.strip()),
+                json.dumps(arms, sort_keys=True),
+                json.dumps(baseline_suite, sort_keys=True),
+                scrub_text(caller_cmd.strip()),
+                scrub_text(sibling_cmd.strip()),
+                json.dumps(arms.get("arm9_revert_poc", {}), sort_keys=True),
+                1 if passed else 0,
+                now_iso,
+            ),
         )
-    log_event(
-        conn,
-        worker_id,
-        "patch_verified" if passed else "patch_verify_failed",
-        vid,
-        {"finding_id": finding_id, "claim_id": claim_id, "passed": passed, "reason": reason[:200]},
-    )
+        if passed:
+            conn.execute(
+                "UPDATE claims SET remediation_state = 'verified_local', updated_at = ? WHERE claim_id = ?",
+                (now_iso, claim_id),
+            )
+        log_event(
+            conn,
+            worker_id,
+            "patch_verified" if passed else "patch_verify_failed",
+            vid,
+            {"finding_id": finding_id, "claim_id": claim_id, "passed": passed, "reason": reason[:200]},
+        )
     return {
         "verification_id": vid,
         "finding_id": finding_id,

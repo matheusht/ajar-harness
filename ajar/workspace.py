@@ -33,6 +33,7 @@ from ajar.oracles import index_target_oracles
 from ajar.redact import scrub_text
 from ajar.repomap import build_repomap, compute_cogs_cap_usd, count_in_scope_loc
 from ajar.repro_source import init_source_mirror
+from ajar.store import immediate_tx
 from ajar.target_check import inspect_local_target_freshness
 
 UNTRUSTED_TARGET_AGENT_CONFIGS: frozenset[str] = frozenset(
@@ -308,57 +309,58 @@ def init_run_workspace(
     diff_sync_summary: dict[str, Any] | None = None
     conn = open_run_db(rid, create=True, ajar_home=home)
     try:
-        conn.execute(
-            """
-            INSERT INTO runs(
-                run_id, target_path, workspace_path, target_mode, workspace_mode,
-                goal, stopping_criterion, campaign_phase, budget_usd, in_scope_loc, code_quote_usd,
-                cogs_cap_usd, pricing_mode, commitment_hash, status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
-            """,
-            (
-                rid,
-                target_path_str,
-                str(workspace_dir),
-                target_mode,
-                workspace_mode,
-                clean_goal,
-                stopping_criterion,
-                campaign_phase,
-                eff_cogs_cap,
-                int(loc_info["total_loc"]),
-                quote_usd,
-                eff_cogs_cap,
-                pricing_mode,
-                commit_hash,
-                created_at,
-            ),
-        )
         hosts = [h.strip().lower() for h in (allowed_hosts or []) if h.strip()]
-        conn.execute(
-            """
-            INSERT INTO scope_rules(
-                run_id, allowed_hosts_json, allow_live_requests, allow_live_mutations, signed_by, raw_scope_json
-            ) VALUES (?, ?, ?, ?, 'operator', ?)
-            """,
-            (
-                rid,
-                json.dumps(hosts),
-                1 if allow_live_requests else 0,
-                1 if allow_live_mutations else 0,
-                json.dumps(
-                    {
-                        "target": target_path_str,
-                        "target_mode": target_mode,
-                        "allowed_hosts": hosts,
-                        "allow_live_requests": bool(allow_live_requests),
-                        "allow_live_mutations": bool(allow_live_mutations),
-                        "diff_range": (diff_range or "").strip(),
-                    },
-                    sort_keys=True,
+        with immediate_tx(conn):
+            conn.execute(
+                """
+                INSERT INTO runs(
+                    run_id, target_path, workspace_path, target_mode, workspace_mode,
+                    goal, stopping_criterion, campaign_phase, budget_usd, in_scope_loc, code_quote_usd,
+                    cogs_cap_usd, pricing_mode, commitment_hash, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+                """,
+                (
+                    rid,
+                    target_path_str,
+                    str(workspace_dir),
+                    target_mode,
+                    workspace_mode,
+                    clean_goal,
+                    stopping_criterion,
+                    campaign_phase,
+                    eff_cogs_cap,
+                    int(loc_info["total_loc"]),
+                    quote_usd,
+                    eff_cogs_cap,
+                    pricing_mode,
+                    commit_hash,
+                    created_at,
                 ),
-            ),
-        )
+            )
+            conn.execute(
+                """
+                INSERT INTO scope_rules(
+                    run_id, allowed_hosts_json, allow_live_requests, allow_live_mutations, signed_by, raw_scope_json
+                ) VALUES (?, ?, ?, ?, 'operator', ?)
+                """,
+                (
+                    rid,
+                    json.dumps(hosts),
+                    1 if allow_live_requests else 0,
+                    1 if allow_live_mutations else 0,
+                    json.dumps(
+                        {
+                            "target": target_path_str,
+                            "target_mode": target_mode,
+                            "allowed_hosts": hosts,
+                            "allow_live_requests": bool(allow_live_requests),
+                            "allow_live_mutations": bool(allow_live_mutations),
+                            "diff_range": (diff_range or "").strip(),
+                        },
+                        sort_keys=True,
+                    ),
+                ),
+            )
 
         oracle_counts = {"intent": 0, "reachability": 0, "precedent": 0}
         map_summary = {"files_indexed": 0, "symbols_indexed": 0}

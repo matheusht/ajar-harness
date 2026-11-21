@@ -15,8 +15,10 @@ import time
 from typing import Any
 
 from ajar import EXIT_GATE_BLOCKED, EXIT_USER_ERROR
+from ajar.chain_planner import evaluate_precondition_realism
 from ajar.db import (
     check_dead_end_repetition,
+    compute_task_salience,
     infer_subsystem,
     log_event,
     maybe_auto_pulse,
@@ -31,6 +33,7 @@ from ajar.domain import (
     assert_valid_anomaly_transition,
     assert_valid_claim_transition,
     assert_valid_phase_transition,
+    assert_valid_primitive_transition,
     assert_valid_task_transition,
     derive_claim_axes,
 )
@@ -39,12 +42,19 @@ from ajar.epistemic_hooks import (
     on_anomaly_or_claim_recorded,
     on_claim_config_gated,
     on_claim_survived,
+    on_finding_confirmed,
+    on_primitive_added,
     parse_tag_list,
     register_epistemic_hook,
     scan_source_for_epistemic_signals,
 )
-from ajar.gates import check_guarded_primitive_dry_block, validate_dry_locus
+from ajar.gates import (
+    check_guarded_primitive_dry_block,
+    finding_attribution_for_claim,
+    validate_dry_locus,
+)
 from ajar.redact import scrub_text
+from ajar.repro_source import validate_micropatch_diff
 from ajar.store import assert_run_mutable, immediate_tx
 from ajar.swarm import validate_claim_block_request, validate_structural_claim_prose
 
@@ -712,3 +722,547 @@ def finish_run(
                 {"findings_count": gates.get("findings_count", 0)},
             )
     return gates
+
+
+def add_surface_driver(
+    conn: sqlite3.Connection,
+    *,
+    surface_id: str,
+    setup_cmd: str,
+    invoke_template: str,
+    teardown_cmd: str = "",
+    notes: str = "",
+    actor: str = "worker",
+) -> dict[str, Any]:
+    did = new_id("drv")
+    now_iso = utc_now_iso()
+    with immediate_tx(conn):
+        assert_run_mutable(conn, operation="driver_add")
+        conn.execute(
+            """
+            INSERT INTO surface_drivers(driver_id, surface_id, setup_cmd, invoke_template, teardown_cmd, notes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                did,
+                surface_id,
+                scrub_text(setup_cmd),
+                scrub_text(invoke_template),
+                scrub_text(teardown_cmd or ""),
+                scrub_text(notes or ""),
+                now_iso,
+            ),
+        )
+        log_event(conn, actor.strip() or "worker", "driver_added", did, {"surface_id": surface_id})
+    return {"driver_id": did, "surface_id": surface_id}
+
+
+def add_task(
+    conn: sqlite3.Connection,
+    *,
+    kind: str,
+    title: str,
+    locus: str = "",
+    subsystem: str | None = None,
+    priority: str = "medium",
+    direction: str = "outside_in",
+    parent_task_id: str | None = None,
+    surface_id: str | None = None,
+    actor: str = "worker",
+) -> dict[str, Any]:
+    tid = new_id("task")
+    now_iso = utc_now_iso()
+    sub = (subsystem or "").strip() or infer_subsystem(locus or "")
+    clean_dir = (direction or "outside_in").strip() or "outside_in"
+    draft = {
+        "priority": priority,
+        "subsystem": sub,
+        "locus": locus or "",
+        "reopened_boost": 0,
+    }
+    with immediate_tx(conn):
+        assert_run_mutable(conn, operation="task_add")
+        sal = compute_task_salience(conn, draft)
+        conn.execute(
+            """
+            INSERT INTO tasks(
+                task_id, parent_task_id, surface_id, kind, direction, title, subsystem, locus,
+                priority, status, salience_score, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
+            """,
+            (
+                tid,
+                parent_task_id,
+                surface_id,
+                kind,
+                clean_dir,
+                scrub_text(title),
+                sub,
+                locus or "",
+                priority,
+                sal,
+                now_iso,
+                now_iso,
+            ),
+        )
+        log_event(
+            conn,
+            actor.strip() or "worker",
+            "task_added",
+            tid,
+            {"kind": kind, "direction": clean_dir, "salience_score": sal},
+        )
+    return {
+        "task_id": tid,
+        "kind": kind,
+        "direction": clean_dir,
+        "subsystem": sub,
+        "salience_score": sal,
+    }
+
+
+def add_primitive(
+    conn: sqlite3.Connection,
+    *,
+    locus: str,
+    kind: str,
+    preconditions: str,
+    postconditions: str,
+    evidence_cmd: str,
+    evidence_output: str = "",
+    surface_id: str | None = None,
+    subsystem: str | None = None,
+    role: str = "capability",
+    trusted_invariant: str = "",
+    symbols: list[str] | None = None,
+    guarded_by_locus: str = "",
+    guard_assumption: str = "",
+    provides_tags: str | list[str] | None = None,
+    requires_tags: str | list[str] | None = None,
+    micropatch_path: str | None = None,
+    snapshot_id: str = "",
+    actor: str = "worker",
+) -> dict[str, Any]:
+    clean_role = (role or "capability").strip() or "capability"
+    if clean_role not in ("capability", "trust_gadget"):
+        raise AjarError(f"Unsupported --role {clean_role!r}; choose 'capability' or 'trust_gadget'.", EXIT_USER_ERROR)
+    clean_inv = scrub_text((trusted_invariant or "").strip())
+
+    mp_diff = ""
+    if micropatch_path and micropatch_path.strip():
+        mp_file = pathlib.Path(micropatch_path.strip()).expanduser()
+        if not mp_file.is_file():
+            raise AjarError(f"Primitive --micropatch file not found: {mp_file}", EXIT_USER_ERROR)
+        raw_mp = mp_file.read_text(encoding="utf-8", errors="replace")
+        ok_mp, mp_msg, _ = validate_micropatch_diff(raw_mp, max_changed_lines=24, claim_locus=locus)
+        if not ok_mp:
+            raise AjarError(f"Primitive --micropatch invalid: {mp_msg}", EXIT_GATE_BLOCKED)
+        mp_diff = scrub_text(raw_mp[:4000])
+
+    pid = new_id("prim")
+    sub = (subsystem or "").strip() or infer_subsystem(locus)
+    syms = [s.strip() for s in (symbols or []) if s.strip()]
+    guarded_by = (guarded_by_locus or "").strip()
+    guard_assump = scrub_text(guard_assumption or "")
+    prov_tags = parse_tag_list(provides_tags)
+    req_tags = parse_tag_list(requires_tags)
+    snap_id = (snapshot_id or "").strip()
+    now_iso = utc_now_iso()
+
+    with immediate_tx(conn):
+        assert_run_mutable(conn, operation="primitive_add")
+        conn.execute(
+            """
+            INSERT INTO primitives(
+                primitive_id, surface_id, subsystem, locus, kind, role, trusted_invariant,
+                symbols_json, preconditions, postconditions, guarded_by_locus, guard_assumption,
+                provides_tags_json, requires_tags_json, micropatch_diff, snapshot_id,
+                evidence_cmd, evidence_output, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+            """,
+            (
+                pid,
+                surface_id,
+                sub,
+                locus,
+                kind,
+                clean_role,
+                clean_inv,
+                json.dumps(syms),
+                scrub_text(preconditions),
+                scrub_text(postconditions),
+                guarded_by,
+                guard_assump,
+                json.dumps(prov_tags),
+                json.dumps(req_tags),
+                mp_diff,
+                snap_id,
+                scrub_text(evidence_cmd),
+                scrub_text(evidence_output or ""),
+                now_iso,
+            ),
+        )
+        hooks = on_primitive_added(
+            conn,
+            primitive_id=pid,
+            subsystem=sub,
+            locus=locus,
+            kind=kind,
+            guarded_by_locus=guarded_by,
+            provides_tags=prov_tags,
+            requires_tags=req_tags,
+            role=clean_role,
+            trusted_invariant=clean_inv,
+            symbols=syms,
+            snapshot_id=snap_id,
+            postconditions=postconditions,
+        )
+        woken_doors = [
+            str(r["door_id"])
+            for r in conn.execute(
+                "SELECT door_id FROM parked_doors WHERE status = 'ready' AND matched_by_json LIKE '%' || ? || '%'",
+                (pid,),
+            ).fetchall()
+        ]
+        log_event(
+            conn,
+            actor.strip() or "worker",
+            "primitive_added",
+            pid,
+            {
+                "locus": locus,
+                "kind": kind,
+                "role": clean_role,
+                "guarded_by_locus": guarded_by,
+                "provides_tags": prov_tags,
+                "requires_tags": req_tags,
+                "woken_doors": woken_doors,
+            },
+        )
+    return {
+        "primitive_id": pid,
+        "role": clean_role,
+        "subsystem": sub,
+        "guarded_by_locus": guarded_by,
+        "provides_tags": prov_tags,
+        "requires_tags": req_tags,
+        "symbols": syms,
+        "woken_doors": woken_doors,
+        "hooks_triggered": [h["hook_code"] for h in hooks],
+    }
+
+
+def record_reproduction_outcome(
+    conn: sqlite3.Connection,
+    *,
+    claim_id: str,
+    worker_id: str,
+    poc_cmd: str,
+    control_cmd: str,
+    repro_result: dict[str, Any],
+    build_cmd: str = "",
+    micropatch_path: str = "",
+    oracle_dict: dict[str, Any] | None = None,
+    provides_tags: list[str] | None = None,
+    declared_steps: int | None = None,
+) -> dict[str, Any]:
+    """Atomically promote a passed causal reproduction to `findings` with full axis coherence."""
+    clean_worker = worker_id.strip() or "worker"
+    prov_tags = list(provides_tags or [])
+    ub_div = str(repro_result.get("ub_divergence_class") or "")
+    snap_meta = repro_result.get("post_state_snapshot")
+    arm1_obj = repro_result.get("arm1_clean_poc") or {}
+    clean_build_cmd = scrub_text((build_cmd or "").strip())
+
+    with immediate_tx(conn):
+        assert_run_mutable(conn, operation="claim_reproduce")
+        clm = conn.execute("SELECT * FROM claims WHERE claim_id = ?", (claim_id,)).fetchone()
+        if clm is None:
+            raise AjarError(f"Unknown claim_id: {claim_id}", EXIT_USER_ERROR)
+        assert_valid_claim_transition(str(clm["status"]), "reproduced", claim_id=claim_id)
+
+        if ub_div == "debug_assert_only" and str(clm["severity"]) in ("critical", "high"):
+            raise AjarError(
+                f"Release-profile UB differential classified {claim_id} as debug_assert_only "
+                "(clean --release-cmd exited 0 without post-state violation); rescope severity to low/medium "
+                "via `ajar claim rescope` before confirming.",
+                EXIT_GATE_BLOCKED,
+            )
+
+        now_iso = utc_now_iso()
+        snap_id = ""
+        if isinstance(snap_meta, dict) and snap_meta.get("ok") and snap_meta.get("snapshot_id"):
+            snap_id = str(snap_meta["snapshot_id"])
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO repro_snapshots(
+                    snapshot_id, claim_id, rel_dir, archive_path, sha256,
+                    size_bytes, manifest_json, source_cmd, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    snap_id,
+                    claim_id,
+                    str(snap_meta["rel_dir"]),
+                    str(snap_meta["archive_path"]),
+                    str(snap_meta["sha256"]),
+                    int(snap_meta["size_bytes"]),
+                    json.dumps(snap_meta.get("manifest") or {}, sort_keys=True),
+                    str(snap_meta.get("source_cmd") or ""),
+                    str(snap_meta.get("created_at") or now_iso),
+                ),
+            )
+
+        realism = evaluate_precondition_realism(
+            conn,
+            poc_cmd=poc_cmd,
+            control_cmd=control_cmd,
+            stdout=str(arm1_obj.get("stdout", "")),
+            stderr=str(arm1_obj.get("stderr", "")),
+            severity=str(clm["severity"]),
+            config_gate=str(clm["config_gate"] if "config_gate" in clm.keys() else ""),
+            declared_steps=declared_steps,
+            target_locus=str(clm["locus"]),
+        )
+
+        existing_f = conn.execute("SELECT finding_id FROM findings WHERE claim_id = ?", (claim_id,)).fetchone()
+        fid = str(existing_f["finding_id"]) if existing_f else new_id("fnd")
+        attr = finding_attribution_for_claim(conn, clm)
+        axes = derive_claim_axes("reproduced")
+        conn.execute(
+            """
+            UPDATE claims
+            SET status = 'reproduced', research_state = ?, evidence_state = ?,
+                remediation_state = CASE WHEN ? != '' THEN 'micropatched' ELSE remediation_state END,
+                updated_at = ?
+            WHERE claim_id = ?
+            """,
+            (
+                axes.research_state.value,
+                axes.evidence_state.value,
+                str(repro_result.get("micropatch_diff") or ""),
+                now_iso,
+                claim_id,
+            ),
+        )
+        conn.execute(
+            """
+            UPDATE tasks
+            SET status = 'done', worker_id = ?, lease_expires_at = NULL, updated_at = ?
+            WHERE parent_claim_id = ? AND kind = 'reproduce' AND status IN ('open', 'leased')
+            """,
+            (clean_worker, now_iso, claim_id),
+        )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO findings(
+                finding_id, claim_id, title, severity, locus, root_cause, poc_cmd, control_cmd,
+                build_cmd, micropatch_path, micropatch_diff, arm1_clean_poc_json, arm2_clean_ctrl_json,
+                arm3_patch_poc_json, arm4_patch_ctrl_json, oracle_json,
+                arm5a_release_poc_json, arm5b_release_ctrl_json, ub_divergence_class,
+                provides_tags_json, snapshot_id, realism_tier, realism_json,
+                attribution, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                fid,
+                claim_id,
+                clm["title"],
+                clm["severity"],
+                clm["locus"],
+                clm["mechanism"],
+                scrub_text(poc_cmd),
+                scrub_text(control_cmd),
+                clean_build_cmd,
+                str(micropatch_path or ""),
+                str(repro_result.get("micropatch_diff") or ""),
+                json.dumps(repro_result["arm1_clean_poc"], sort_keys=True),
+                json.dumps(repro_result["arm2_clean_control"], sort_keys=True),
+                json.dumps(repro_result["arm3_patch_poc"], sort_keys=True),
+                json.dumps(repro_result["arm4_patch_control"], sort_keys=True),
+                json.dumps(oracle_dict or {}, sort_keys=True),
+                json.dumps(repro_result.get("arm5a_release_poc") or {}, sort_keys=True),
+                json.dumps(repro_result.get("arm5b_release_control") or {}, sort_keys=True),
+                ub_div,
+                json.dumps(prov_tags),
+                snap_id,
+                str(realism["realism_tier"]),
+                json.dumps(realism, sort_keys=True),
+                attr,
+                now_iso,
+            ),
+        )
+        if realism["realism_tier"] == "crown_jewel" and realism.get("jewel_id"):
+            conn.execute(
+                "UPDATE crown_jewels SET status = 'reached', reached_by_id = ?, updated_at = ? WHERE jewel_id = ?",
+                (fid, now_iso, str(realism["jewel_id"])),
+            )
+
+        dup_axes = derive_claim_axes("duplicate_root_cause")
+        for dup_id in repro_result.get("cross_killed_claim_ids") or []:
+            conn.execute(
+                """
+                UPDATE claims
+                SET status = 'duplicate_root_cause', duplicate_of_claim_id = ?,
+                    research_state = ?, evidence_state = ?, updated_at = ?
+                WHERE claim_id = ?
+                """,
+                (
+                    claim_id,
+                    dup_axes.research_state.value,
+                    dup_axes.evidence_state.value,
+                    now_iso,
+                    dup_id,
+                ),
+            )
+
+        esc = on_finding_confirmed(
+            conn,
+            finding_id=fid,
+            claim_row=clm,
+            provides_tags=prov_tags,
+            snapshot_id=snap_id,
+            realism_tier=str(realism["realism_tier"]),
+        )
+        log_event(
+            conn,
+            clean_worker,
+            "finding_reproduced",
+            fid,
+            {
+                "claim_id": claim_id,
+                "attribution": attr,
+                "realism_tier": realism["realism_tier"],
+                "snapshot_id": snap_id,
+                "ub_divergence_class": ub_div,
+            },
+        )
+
+    out_payload: dict[str, Any] = {
+        "finding_id": fid,
+        "attribution": attr,
+        "realism_tier": realism["realism_tier"],
+        "snapshot_id": snap_id,
+        "reproduction": repro_result,
+    }
+    if esc is not None:
+        out_payload["post_confirm_escalation"] = esc
+    return out_payload
+
+
+def preflight_chain_proposal(conn: sqlite3.Connection, steps: list[str]) -> None:
+    """Fail fast before running PoC subprocesses if run is sealed or any step primitive is terminal."""
+    assert_run_mutable(conn, operation="chain_propose")
+    for sid in steps:
+        prow = conn.execute("SELECT status FROM primitives WHERE primitive_id = ?", (sid,)).fetchone()
+        if prow is not None:
+            assert_valid_primitive_transition(str(prow["status"]), "chained", primitive_id=sid)
+
+
+def record_chain_proposal(
+    conn: sqlite3.Connection,
+    *,
+    title: str,
+    severity: str,
+    steps: list[str],
+    poc_cmd: str,
+    control_cmd: str,
+    verified: bool,
+    evidence: dict[str, Any],
+    actor: str = "worker",
+) -> dict[str, Any]:
+    cid = new_id("chn")
+    now_iso = utc_now_iso()
+    with immediate_tx(conn):
+        assert_run_mutable(conn, operation="chain_propose")
+        for sid in steps:
+            prow = conn.execute("SELECT status FROM primitives WHERE primitive_id = ?", (sid,)).fetchone()
+            if prow is not None:
+                assert_valid_primitive_transition(str(prow["status"]), "chained", primitive_id=sid)
+        conn.execute(
+            """
+            INSERT INTO chains(chain_id, title, severity, step_ids_json, e2e_poc_cmd, control_cmd, verified, evidence_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                cid,
+                scrub_text(title),
+                severity,
+                json.dumps(steps),
+                scrub_text(poc_cmd),
+                scrub_text(control_cmd),
+                1 if verified else 0,
+                json.dumps(evidence, sort_keys=True),
+                now_iso,
+            ),
+        )
+        if verified:
+            for sid in steps:
+                conn.execute(
+                    "UPDATE primitives SET chained = 1, status = 'chained' WHERE primitive_id = ?",
+                    (sid,),
+                )
+                conn.execute(
+                    "UPDATE anomalies SET status = 'consumed_by_chain', consumed_by_id = ?, updated_at = ? WHERE anomaly_id = ?",
+                    (cid, now_iso, sid),
+                )
+        log_event(conn, actor.strip() or "worker", "chain_proposed", cid, {"verified": verified, "steps": steps})
+    return {"chain_id": cid, "verified": verified, "evidence": evidence}
+
+
+def record_human_touch(
+    conn: sqlite3.Connection,
+    *,
+    kind: str,
+    actor: str,
+    notes: str,
+) -> dict[str, Any]:
+    tid = new_id("tch")
+    now_iso = utc_now_iso()
+    clean_actor = scrub_text(actor.strip() or "operator")
+    with immediate_tx(conn):
+        assert_run_mutable(conn, operation="touch_add")
+        conn.execute(
+            "INSERT INTO human_touches(touch_id, kind, actor, notes, created_at) VALUES (?, ?, ?, ?, ?)",
+            (tid, kind, clean_actor, scrub_text(notes), now_iso),
+        )
+        log_event(conn, clean_actor, "human_touch_recorded", tid, {"kind": kind})
+    return {"touch_id": tid, "kind": kind}
+
+
+def record_spend_entry(
+    conn: sqlite3.Connection,
+    *,
+    worker_id: str,
+    phase: str,
+    cost_usd: float,
+    surface_id: str = "",
+    model: str = "",
+    tokens_in: int = 0,
+    tokens_out: int = 0,
+    notes: str = "",
+) -> dict[str, Any]:
+    eid = new_id("spd")
+    surf = (surface_id or "").strip()
+    now_iso = utc_now_iso()
+    with immediate_tx(conn):
+        assert_run_mutable(conn, operation="spend_add")
+        conn.execute(
+            """
+            INSERT INTO spend_ledger(entry_id, worker_id, surface_id, phase, model, tokens_in, tokens_out, cost_usd, notes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                eid,
+                worker_id,
+                surf,
+                phase,
+                model or "",
+                int(tokens_in),
+                int(tokens_out),
+                float(cost_usd),
+                scrub_text(notes or ""),
+                now_iso,
+            ),
+        )
+    return {"entry_id": eid, "surface_id": surf, "cost_usd": float(cost_usd)}

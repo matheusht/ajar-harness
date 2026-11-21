@@ -16,6 +16,7 @@ from ajar import EXIT_OK, EXIT_STALLED_RELEASE, EXIT_USER_ERROR
 from ajar.db import log_event, open_run_db
 from ajar.gates import check_all_gates
 from ajar.redact import scrub_text
+from ajar.store import immediate_tx
 
 MAX_CONSECUTIVE_STALLS = 3
 
@@ -40,44 +41,45 @@ def evaluate_claude_stop_hook(
         return (EXIT_OK, {"decision": "approve", "reason": "All closeout gates G1-G5 passed."})
 
     # Measure database progress since previous stop check (`events` monotonic `event_id`).
-    max_ev = int(
-        conn.execute("SELECT COALESCE(MAX(event_id), 0) AS m FROM events WHERE action != 'stop_hook_check'").fetchone()["m"]
-    )
-    prev_ev = int(run["last_stop_event_id"] or 0)
-    stalls = int(run["consecutive_stall_checks"] or 0)
-
-    if max_ev <= prev_ev:
-        stalls += 1
-    else:
-        stalls = 0
-
-    conn.execute(
-        "UPDATE runs SET last_stop_event_id = ?, consecutive_stall_checks = ?",
-        (max_ev, stalls),
-    )
-    log_event(
-        conn,
-        "host_hook",
-        "stop_hook_check",
-        run["run_id"],
-        {"stalls": stalls, "blockers_count": len(gate_res["blockers"])},
-    )
-
-    if stalls >= MAX_CONSECUTIVE_STALLS:
-        reason = (
-            f"Released stalled host session after {stalls} consecutive stop checks with zero new run events."
+    with immediate_tx(conn):
+        max_ev = int(
+            conn.execute("SELECT COALESCE(MAX(event_id), 0) AS m FROM events WHERE action != 'stop_hook_check'").fetchone()["m"]
         )
-        conn.execute("UPDATE runs SET stop_reason = ? WHERE run_id = ?", (reason, run["run_id"]))
-        return (
-            EXIT_OK,
-            {
-                "decision": "approve",
-                "stalled_release": True,
-                "exit_hint": EXIT_STALLED_RELEASE,
-                "reason": reason,
-                "remaining_blockers": gate_res["blockers"][:6],
-            },
+        prev_ev = int(run["last_stop_event_id"] or 0)
+        stalls = int(run["consecutive_stall_checks"] or 0)
+
+        if max_ev <= prev_ev:
+            stalls += 1
+        else:
+            stalls = 0
+
+        conn.execute(
+            "UPDATE runs SET last_stop_event_id = ?, consecutive_stall_checks = ?",
+            (max_ev, stalls),
         )
+        log_event(
+            conn,
+            "host_hook",
+            "stop_hook_check",
+            run["run_id"],
+            {"stalls": stalls, "blockers_count": len(gate_res["blockers"])},
+        )
+
+        if stalls >= MAX_CONSECUTIVE_STALLS:
+            reason = (
+                f"Released stalled host session after {stalls} consecutive stop checks with zero new run events."
+            )
+            conn.execute("UPDATE runs SET stop_reason = ? WHERE run_id = ?", (reason, run["run_id"]))
+            return (
+                EXIT_OK,
+                {
+                    "decision": "approve",
+                    "stalled_release": True,
+                    "exit_hint": EXIT_STALLED_RELEASE,
+                    "reason": reason,
+                    "remaining_blockers": gate_res["blockers"][:6],
+                },
+            )
 
     summary = "; ".join(gate_res["blockers"][:5])
     return (

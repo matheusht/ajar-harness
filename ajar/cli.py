@@ -33,14 +33,11 @@ from ajar.db import (
     add_threat_assumption,
     calibrate_finding,
     checkpoint_task,
-    compute_task_salience,
-    infer_subsystem,
     lease_next_task,
     list_rows,
     list_steers,
     log_event,
     mark_primitive_dry,
-    new_id,
     open_run_db,
     record_coverage_span,
     record_repro_failure,
@@ -52,22 +49,13 @@ from ajar.db import (
     set_certified_binding,
     transition_threat_assumption,
     upsert_threat_model,
-    utc_now_iso,
 )
-from ajar.domain import (
-    InvalidTransitionError,
-    assert_valid_primitive_transition,
-)
+from ajar.domain import InvalidTransitionError
 from ajar.epistemic_hooks import (
     claim_requires_release_ub_diff,
-    on_finding_confirmed,
-    on_primitive_added,
     parse_tag_list,
 )
-from ajar.gates import (
-    check_all_gates,
-    finding_attribution_for_claim,
-)
+from ajar.gates import check_all_gates
 from ajar.graph import export_attack_flow_graph
 from ajar.hooks import evaluate_claude_stop_hook, run_host_continuation_loop
 from ajar.mcp import serve_mcp_stdio
@@ -88,12 +76,14 @@ from ajar.repro_source import (
     run_repro_try,
     run_source_reproduction,
     unshare_netns_available,
-    validate_micropatch_diff,
 )
 from ajar.runner import run_autonomous_schedule
 from ajar.services import (
     add_anomaly,
+    add_primitive,
     add_surface,
+    add_surface_driver,
+    add_task,
     advance_phase,
     block_claim,
     block_task,
@@ -104,12 +94,17 @@ from ajar.services import (
     export_run_economics,
     falsify_claim,
     finish_run,
+    preflight_chain_proposal,
     propose_claim,
+    record_chain_proposal,
+    record_human_touch,
+    record_reproduction_outcome,
+    record_spend_entry,
     rescope_claim_service,
     survive_claim,
     write_restricted_json,
 )
-from ajar.store import assert_run_mutable, immediate_tx
+from ajar.store import assert_run_mutable
 from ajar.swarm import (
     ENV_BLOCKER_KINDS,
     VALID_FALLBACK_REASONS,
@@ -486,24 +481,15 @@ def cmd_driver(args: argparse.Namespace) -> int:
     conn = open_run_db(rid)
     try:
         if args.driver_cmd == "add":
-            did = new_id("drv")
-            conn.execute(
-                """
-                INSERT INTO surface_drivers(driver_id, surface_id, setup_cmd, invoke_template, teardown_cmd, notes, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    did,
-                    args.surface,
-                    scrub_text(args.setup_cmd),
-                    scrub_text(args.invoke_template),
-                    scrub_text(args.teardown_cmd or ""),
-                    scrub_text(args.notes or ""),
-                    utc_now_iso(),
-                ),
+            res = add_surface_driver(
+                conn,
+                surface_id=args.surface,
+                setup_cmd=args.setup_cmd,
+                invoke_template=args.invoke_template,
+                teardown_cmd=args.teardown_cmd or "",
+                notes=args.notes or "",
             )
-            log_event(conn, "worker", "driver_added", did, {"surface_id": args.surface})
-            _emit({"driver_id": did, "surface_id": args.surface}, True)
+            _emit(res, True)
             return EXIT_OK
         rows = list_rows(conn, "SELECT * FROM surface_drivers ORDER BY created_at ASC")
         _emit({"drivers": rows}, True)
@@ -520,41 +506,18 @@ def cmd_task(args: argparse.Namespace) -> int:
         tpath = pathlib.Path(run["target_path"]) if run else None
 
         if args.task_cmd == "add":
-            tid = new_id("task")
-            now_iso = utc_now_iso()
-            sub = args.subsystem or infer_subsystem(args.locus or "")
-            direction = getattr(args, "direction", "outside_in") or "outside_in"
-            draft = {
-                "priority": args.priority,
-                "subsystem": sub,
-                "locus": args.locus or "",
-                "reopened_boost": 0,
-            }
-            sal = compute_task_salience(conn, draft)
-            conn.execute(
-                """
-                INSERT INTO tasks(
-                    task_id, parent_task_id, surface_id, kind, direction, title, subsystem, locus,
-                    priority, status, salience_score, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
-                """,
-                (
-                    tid,
-                    args.parent,
-                    args.surface,
-                    args.kind,
-                    direction,
-                    scrub_text(args.title),
-                    sub,
-                    args.locus or "",
-                    args.priority,
-                    sal,
-                    now_iso,
-                    now_iso,
-                ),
+            res = add_task(
+                conn,
+                kind=args.kind,
+                title=args.title,
+                locus=args.locus or "",
+                subsystem=args.subsystem,
+                priority=args.priority,
+                direction=getattr(args, "direction", "outside_in") or "outside_in",
+                parent_task_id=args.parent,
+                surface_id=args.surface,
             )
-            log_event(conn, "worker", "task_added", tid, {"kind": args.kind, "direction": direction, "salience_score": sal})
-            _emit({"task_id": tid, "direction": direction, "salience_score": sal, "subsystem": sub}, True)
+            _emit(res, True)
             return EXIT_OK
 
         if args.task_cmd == "lease":
@@ -700,112 +663,26 @@ def cmd_primitive(args: argparse.Namespace) -> int:
     conn = open_run_db(rid)
     try:
         if args.primitive_cmd == "add":
-            pid = new_id("prim")
-            sub = infer_subsystem(args.locus)
-            role = (getattr(args, "role", None) or "capability").strip()
-            if role not in ("capability", "trust_gadget"):
-                raise AjarError(f"Unsupported --role {role!r}; choose 'capability' or 'trust_gadget'.", EXIT_USER_ERROR)
-            trusted_inv = scrub_text((getattr(args, "trusted_invariant", None) or "").strip())
-            syms = _parse_symbol_list(getattr(args, "symbols", None))
-            snap_id = (getattr(args, "snapshot", None) or "").strip()
-            mp_diff = ""
-            mp_arg = (getattr(args, "micropatch", None) or "").strip()
-            if mp_arg:
-                mp_file = pathlib.Path(mp_arg).expanduser().resolve()
-                if not mp_file.is_file():
-                    raise AjarError(f"Primitive --micropatch file not found: {mp_file}", EXIT_USER_ERROR)
-                raw_mp = mp_file.read_text(encoding="utf-8", errors="replace")
-                ok_mp, mp_msg, _ = validate_micropatch_diff(raw_mp, max_changed_lines=24, claim_locus=args.locus)
-                if not ok_mp:
-                    raise AjarError(f"Primitive --micropatch invalid: {mp_msg}", EXIT_GATE_BLOCKED)
-                mp_diff = scrub_text(raw_mp[:4000])
-
-            guarded_by = (getattr(args, "guarded_by", None) or "").strip()
-            guard_assumption = scrub_text(getattr(args, "guard_assumption", None) or "")
-            prov_tags = parse_tag_list(getattr(args, "provides_tags", None))
-            req_tags = parse_tag_list(getattr(args, "requires_tags", None))
-            conn.execute(
-                """
-                INSERT INTO primitives(
-                    primitive_id, surface_id, subsystem, locus, kind, role, trusted_invariant,
-                    symbols_json, preconditions, postconditions, guarded_by_locus, guard_assumption,
-                    provides_tags_json, requires_tags_json, micropatch_diff, snapshot_id,
-                    evidence_cmd, evidence_output, status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
-                """,
-                (
-                    pid,
-                    getattr(args, "surface", None),
-                    sub,
-                    args.locus,
-                    args.kind,
-                    role,
-                    trusted_inv,
-                    json.dumps(syms),
-                    scrub_text(args.preconditions),
-                    scrub_text(args.postconditions),
-                    guarded_by,
-                    guard_assumption,
-                    json.dumps(prov_tags),
-                    json.dumps(req_tags),
-                    mp_diff,
-                    snap_id,
-                    scrub_text(args.evidence_cmd),
-                    scrub_text(args.evidence_output or ""),
-                    utc_now_iso(),
-                ),
-            )
-            hooks = on_primitive_added(
+            res = add_primitive(
                 conn,
-                primitive_id=pid,
-                subsystem=sub,
                 locus=args.locus,
                 kind=args.kind,
-                guarded_by_locus=guarded_by,
-                provides_tags=prov_tags,
-                requires_tags=req_tags,
-                role=role,
-                trusted_invariant=trusted_inv,
-                symbols=syms,
-                snapshot_id=snap_id,
+                preconditions=args.preconditions,
                 postconditions=args.postconditions,
+                evidence_cmd=args.evidence_cmd,
+                evidence_output=args.evidence_output or "",
+                surface_id=getattr(args, "surface", None),
+                role=getattr(args, "role", None) or "capability",
+                trusted_invariant=getattr(args, "trusted_invariant", None) or "",
+                symbols=_parse_symbol_list(getattr(args, "symbols", None)),
+                guarded_by_locus=getattr(args, "guarded_by", None) or "",
+                guard_assumption=getattr(args, "guard_assumption", None) or "",
+                provides_tags=getattr(args, "provides_tags", None),
+                requires_tags=getattr(args, "requires_tags", None),
+                micropatch_path=getattr(args, "micropatch", None),
+                snapshot_id=getattr(args, "snapshot", None) or "",
             )
-            woken_doors = [
-                str(r["door_id"])
-                for r in conn.execute(
-                    "SELECT door_id FROM parked_doors WHERE status = 'ready' AND matched_by_json LIKE '%' || ? || '%'",
-                    (pid,),
-                ).fetchall()
-            ]
-            log_event(
-                conn,
-                "worker",
-                "primitive_added",
-                pid,
-                {
-                    "locus": args.locus,
-                    "kind": args.kind,
-                    "role": role,
-                    "guarded_by_locus": guarded_by,
-                    "provides_tags": prov_tags,
-                    "requires_tags": req_tags,
-                    "woken_doors": woken_doors,
-                },
-            )
-            _emit(
-                {
-                    "primitive_id": pid,
-                    "role": role,
-                    "subsystem": sub,
-                    "guarded_by_locus": guarded_by,
-                    "provides_tags": prov_tags,
-                    "requires_tags": req_tags,
-                    "symbols": syms,
-                    "woken_doors": woken_doors,
-                    "hooks_triggered": [h["hook_code"] for h in hooks],
-                },
-                True,
-            )
+            _emit(res, True)
             return EXIT_OK
 
         if args.primitive_cmd == "dry":
@@ -1154,162 +1031,20 @@ def cmd_claim(args: argparse.Namespace) -> int:
                 _emit({"reproduction": res, "claim_update": pivot}, True)
                 return EXIT_GATE_BLOCKED
 
-            ub_div = str(res.get("ub_divergence_class") or "")
-            if ub_div == "debug_assert_only" and str(clm["severity"]) in ("critical", "high"):
-                raise AjarError(
-                    f"Release-profile UB differential classified {args.claim_id} as debug_assert_only "
-                    f"(clean --release-cmd exited 0 without post-state violation); rescope severity to low/medium "
-                    "via `ajar claim rescope` before confirming.",
-                    EXIT_GATE_BLOCKED,
-                )
-
-            # Persist optional Arm-1 post-state snapshot (`repro_snapshots`).
-            snap_meta = res.get("post_state_snapshot")
-            snap_id = ""
-            if isinstance(snap_meta, dict) and snap_meta.get("ok") and snap_meta.get("snapshot_id"):
-                snap_id = str(snap_meta["snapshot_id"])
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO repro_snapshots(
-                        snapshot_id, claim_id, rel_dir, archive_path, sha256,
-                        size_bytes, manifest_json, source_cmd, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        snap_id,
-                        args.claim_id,
-                        str(snap_meta["rel_dir"]),
-                        str(snap_meta["archive_path"]),
-                        str(snap_meta["sha256"]),
-                        int(snap_meta["size_bytes"]),
-                        json.dumps(snap_meta.get("manifest") or {}, sort_keys=True),
-                        str(snap_meta.get("source_cmd") or ""),
-                        str(snap_meta.get("created_at") or utc_now_iso()),
-                    ),
-                )
-
-            arm1_obj = res.get("arm1_clean_poc") or {}
-            realism = evaluate_precondition_realism(
+            out_payload = record_reproduction_outcome(
                 conn,
+                claim_id=args.claim_id,
+                worker_id=args.worker,
                 poc_cmd=args.poc_cmd,
                 control_cmd=args.control_cmd,
-                stdout=str(arm1_obj.get("stdout", "")),
-                stderr=str(arm1_obj.get("stderr", "")),
-                severity=str(clm["severity"]),
-                config_gate=str(clm["config_gate"] if "config_gate" in clm.keys() else ""),
-                declared_steps=decl_steps,
-                target_locus=str(clm["locus"]),
-            )
-
-            # Promote to `findings`!
-            now_iso = utc_now_iso()
-            existing_f = conn.execute("SELECT finding_id FROM findings WHERE claim_id = ?", (args.claim_id,)).fetchone()
-            fid = existing_f["finding_id"] if existing_f else new_id("fnd")
-            attr = finding_attribution_for_claim(conn, clm)
-            conn.execute(
-                """
-                UPDATE claims
-                SET status = 'reproduced', research_state = 'confirmed', evidence_state = 'reproduced',
-                    remediation_state = CASE WHEN ? != '' THEN 'micropatched' ELSE remediation_state END,
-                    updated_at = ?
-                WHERE claim_id = ?
-                """,
-                (str(res.get("micropatch_diff") or ""), now_iso, args.claim_id),
-            )
-            conn.execute(
-                """
-                UPDATE tasks
-                SET status = 'done', worker_id = ?, lease_expires_at = NULL, updated_at = ?
-                WHERE parent_claim_id = ? AND kind = 'reproduce' AND status IN ('open', 'leased')
-                """,
-                (args.worker, now_iso, args.claim_id),
-            )
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO findings(
-                    finding_id, claim_id, title, severity, locus, root_cause, poc_cmd, control_cmd,
-                    micropatch_path, micropatch_diff, arm1_clean_poc_json, arm2_clean_ctrl_json,
-                    arm3_patch_poc_json, arm4_patch_ctrl_json, oracle_json,
-                    arm5a_release_poc_json, arm5b_release_ctrl_json, ub_divergence_class,
-                    provides_tags_json, snapshot_id, realism_tier, realism_json,
-                    attribution, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    fid,
-                    args.claim_id,
-                    clm["title"],
-                    clm["severity"],
-                    clm["locus"],
-                    clm["mechanism"],
-                    scrub_text(args.poc_cmd),
-                    scrub_text(args.control_cmd),
-                    str(args.micropatch or ""),
-                    str(res.get("micropatch_diff") or ""),
-                    json.dumps(res["arm1_clean_poc"], sort_keys=True),
-                    json.dumps(res["arm2_clean_control"], sort_keys=True),
-                    json.dumps(res["arm3_patch_poc"], sort_keys=True),
-                    json.dumps(res["arm4_patch_control"], sort_keys=True),
-                    json.dumps(oracle_dict or {}, sort_keys=True),
-                    json.dumps(res.get("arm5a_release_poc") or {}, sort_keys=True),
-                    json.dumps(res.get("arm5b_release_control") or {}, sort_keys=True),
-                    ub_div,
-                    json.dumps(prov_tags),
-                    snap_id,
-                    str(realism["realism_tier"]),
-                    json.dumps(realism, sort_keys=True),
-                    attr,
-                    now_iso,
-                ),
-            )
-            if realism["realism_tier"] == "crown_jewel" and realism.get("jewel_id"):
-                conn.execute(
-                    "UPDATE crown_jewels SET status = 'reached', reached_by_id = ?, updated_at = ? WHERE jewel_id = ?",
-                    (fid, now_iso, str(realism["jewel_id"])),
-                )
-            # Mark warm cross-killed sibling claims as `duplicate_root_cause`.
-            for dup_id in res.get("cross_killed_claim_ids") or []:
-                conn.execute(
-                    """
-                    UPDATE claims
-                    SET status = 'duplicate_root_cause', duplicate_of_claim_id = ?,
-                        research_state = 'rejected_during_research', updated_at = ?
-                    WHERE claim_id = ?
-                    """,
-                    (args.claim_id, now_iso, dup_id),
-                )
-            esc = on_finding_confirmed(
-                conn,
-                finding_id=fid,
-                claim_row=clm,
+                repro_result=res,
+                build_cmd=str(getattr(args, "build_cmd", None) or ""),
+                micropatch_path=str(args.micropatch or ""),
+                oracle_dict=oracle_dict,
                 provides_tags=prov_tags,
-                snapshot_id=snap_id,
-                realism_tier=str(realism["realism_tier"]),
+                declared_steps=decl_steps,
             )
-            log_event(
-                conn,
-                args.worker,
-                "finding_reproduced",
-                fid,
-                {
-                    "claim_id": args.claim_id,
-                    "attribution": attr,
-                    "realism_tier": realism["realism_tier"],
-                    "snapshot_id": snap_id,
-                    "ub_divergence_class": ub_div,
-                },
-            )
-            conn.commit()
             sync_run_to_shared_mirror(rid)
-            out_payload: dict[str, Any] = {
-                "finding_id": fid,
-                "attribution": attr,
-                "realism_tier": realism["realism_tier"],
-                "snapshot_id": snap_id,
-                "reproduction": res,
-            }
-            if esc is not None:
-                out_payload["post_confirm_escalation"] = esc
             _emit(out_payload, True)
             return EXIT_OK
 
@@ -1377,54 +1112,29 @@ def cmd_chain(args: argparse.Namespace) -> int:
                 _emit(res, True)
                 return EXIT_OK if res["verified"] else EXIT_GATE_BLOCKED
 
-            assert_run_mutable(conn, operation="chain_propose")
-            for sid in steps:
-                prow = conn.execute("SELECT status FROM primitives WHERE primitive_id = ?", (sid,)).fetchone()
-                if prow is not None:
-                    assert_valid_primitive_transition(str(prow["status"]), "chained", primitive_id=sid)
+            preflight_chain_proposal(conn, steps)
 
             cwd = run["workspace_path"] if run else "."
             env = scrubbed_subprocess_env()
             p1 = subprocess.run(["bash", "-c", args.poc_cmd], cwd=cwd, env=env, capture_output=True, timeout=60, check=False)
             p2 = subprocess.run(["bash", "-c", args.control_cmd], cwd=cwd, env=env, capture_output=True, timeout=60, check=False)
             verified = p1.returncode != 0 and p2.returncode == 0
-            cid = new_id("chn")
-            now_iso = utc_now_iso()
             ev = {
                 "poc_exit": int(p1.returncode),
                 "control_exit": int(p2.returncode),
                 "poc_stdout": scrub_text(p1.stdout.decode("utf-8", errors="replace")[:1500]),
             }
-            with immediate_tx(conn):
-                conn.execute(
-                    """
-                    INSERT INTO chains(chain_id, title, severity, step_ids_json, e2e_poc_cmd, control_cmd, verified, evidence_json, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        cid,
-                        scrub_text(args.title),
-                        args.severity,
-                        json.dumps(steps),
-                        scrub_text(args.poc_cmd),
-                        scrub_text(args.control_cmd),
-                        1 if verified else 0,
-                        json.dumps(ev, sort_keys=True),
-                        now_iso,
-                    ),
-                )
-                if verified:
-                    for sid in steps:
-                        conn.execute(
-                            "UPDATE primitives SET chained = 1, status = 'chained' WHERE primitive_id = ?",
-                            (sid,),
-                        )
-                        conn.execute(
-                            "UPDATE anomalies SET status = 'consumed_by_chain', consumed_by_id = ?, updated_at = ? WHERE anomaly_id = ?",
-                            (cid, now_iso, sid),
-                        )
-                log_event(conn, "worker", "chain_proposed", cid, {"verified": verified, "steps": steps})
-            _emit({"chain_id": cid, "verified": verified, "evidence": ev}, True)
+            out = record_chain_proposal(
+                conn,
+                title=args.title,
+                severity=args.severity,
+                steps=steps,
+                poc_cmd=args.poc_cmd,
+                control_cmd=args.control_cmd,
+                verified=verified,
+                evidence=ev,
+            )
+            _emit(out, True)
             return EXIT_OK if verified else EXIT_GATE_BLOCKED
 
         rows = list_rows(conn, "SELECT * FROM chains ORDER BY created_at ASC")
@@ -1457,13 +1167,8 @@ def cmd_touch(args: argparse.Namespace) -> int:
     conn = open_run_db(rid)
     try:
         if args.touch_cmd == "add":
-            tid = new_id("tch")
-            conn.execute(
-                "INSERT INTO human_touches(touch_id, kind, actor, notes, created_at) VALUES (?, ?, ?, ?, ?)",
-                (tid, args.kind, scrub_text(args.actor), scrub_text(args.notes), utc_now_iso()),
-            )
-            log_event(conn, args.actor, "human_touch_recorded", tid, {"kind": args.kind})
-            _emit({"touch_id": tid, "kind": args.kind}, True)
+            res = record_human_touch(conn, kind=args.kind, actor=args.actor, notes=args.notes)
+            _emit(res, True)
             return EXIT_OK
         rows = list_rows(conn, "SELECT * FROM human_touches ORDER BY created_at ASC")
         _emit({"human_touches": rows}, True)
@@ -1477,27 +1182,18 @@ def cmd_spend(args: argparse.Namespace) -> int:
     conn = open_run_db(rid)
     try:
         if args.spend_cmd == "add":
-            eid = new_id("spd")
-            surf = (getattr(args, "surface", None) or "").strip()
-            conn.execute(
-                """
-                INSERT INTO spend_ledger(entry_id, worker_id, surface_id, phase, model, tokens_in, tokens_out, cost_usd, notes, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    eid,
-                    args.worker,
-                    surf,
-                    args.phase,
-                    args.model or "",
-                    int(args.tokens_in),
-                    int(args.tokens_out),
-                    float(args.cost_usd),
-                    scrub_text(args.notes or ""),
-                    utc_now_iso(),
-                ),
+            res = record_spend_entry(
+                conn,
+                worker_id=args.worker,
+                surface_id=getattr(args, "surface", None) or "",
+                phase=args.phase,
+                model=args.model or "",
+                tokens_in=int(args.tokens_in),
+                tokens_out=int(args.tokens_out),
+                cost_usd=float(args.cost_usd),
+                notes=args.notes or "",
             )
-            _emit({"entry_id": eid, "surface_id": surf, "cost_usd": float(args.cost_usd)}, True)
+            _emit(res, True)
             return EXIT_OK
         rows = list_rows(conn, "SELECT * FROM spend_ledger ORDER BY created_at ASC")
         _emit({"spend_entries": rows}, True)

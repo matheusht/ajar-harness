@@ -41,6 +41,7 @@ from ajar.repro_source import (
     resolve_local_build_cache_dir,
     validate_no_static_source_cheat,
 )
+from ajar.store import immediate_tx
 
 STAGE_CONTEXT_INIT_PY = '''"""Auto-provisioned Ajar Composable State Builder runtime (`StageContext`)."""
 
@@ -383,70 +384,71 @@ def promote_primitive_helper(
     hid = str(existing_row["helper_id"]) if existing_row else new_id("hlp")
     verification_receipt = {"exploit_mode": exp_res, "benign_mode": ctrl_res}
 
-    conn.execute(
-        """
-        INSERT INTO primitive_helpers(
-            helper_id, primitive_id, module_name, rel_helper_path, sha256,
-            callable_name, language, requires_tags_json, provides_tags_json,
-            state_in_keys_json, state_out_keys_json, self_test_cmd,
-            verified, verification_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 'python', ?, ?, '[]', ?, ?, 1, ?, ?)
-        ON CONFLICT(module_name) DO UPDATE SET
-            sha256 = excluded.sha256,
-            callable_name = excluded.callable_name,
-            requires_tags_json = excluded.requires_tags_json,
-            provides_tags_json = excluded.provides_tags_json,
-            state_out_keys_json = excluded.state_out_keys_json,
-            self_test_cmd = excluded.self_test_cmd,
-            verified = 1,
-            verification_json = excluded.verification_json
-        """,
-        (
+    with immediate_tx(conn):
+        conn.execute(
+            """
+            INSERT INTO primitive_helpers(
+                helper_id, primitive_id, module_name, rel_helper_path, sha256,
+                callable_name, language, requires_tags_json, provides_tags_json,
+                state_in_keys_json, state_out_keys_json, self_test_cmd,
+                verified, verification_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 'python', ?, ?, '[]', ?, ?, 1, ?, ?)
+            ON CONFLICT(module_name) DO UPDATE SET
+                sha256 = excluded.sha256,
+                callable_name = excluded.callable_name,
+                requires_tags_json = excluded.requires_tags_json,
+                provides_tags_json = excluded.provides_tags_json,
+                state_out_keys_json = excluded.state_out_keys_json,
+                self_test_cmd = excluded.self_test_cmd,
+                verified = 1,
+                verification_json = excluded.verification_json
+            """,
+            (
+                hid,
+                primitive_id,
+                mod_name,
+                rel_helper_path,
+                sha256_hex,
+                callable_name.strip(),
+                json.dumps(merged_req),
+                json.dumps(merged_prov),
+                json.dumps(state_out_keys),
+                scrub_text(eff_cmd),
+                json.dumps(verification_receipt, sort_keys=True),
+                now_iso,
+            ),
+        )
+        conn.execute(
+            """
+            UPDATE primitives
+            SET helper_id = ?, provides_tags_json = ?, requires_tags_json = ?
+            WHERE primitive_id = ?
+            """,
+            (hid, json.dumps(merged_prov), json.dumps(merged_req), primitive_id),
+        )
+        hooks = on_primitive_added(
+            conn,
+            primitive_id=primitive_id,
+            subsystem=str(prim["subsystem"] or ""),
+            locus=str(prim["locus"] or ""),
+            kind=str(prim["kind"] or ""),
+            guarded_by_locus="",
+            provides_tags=merged_prov,
+            requires_tags=merged_req,
+            spawn_guard_task=False,
+        )
+        log_event(
+            conn,
+            worker_id,
+            "primitive_helper_promoted",
             hid,
-            primitive_id,
-            mod_name,
-            rel_helper_path,
-            sha256_hex,
-            callable_name.strip(),
-            json.dumps(merged_req),
-            json.dumps(merged_prov),
-            json.dumps(state_out_keys),
-            scrub_text(eff_cmd),
-            json.dumps(verification_receipt, sort_keys=True),
-            now_iso,
-        ),
-    )
-    conn.execute(
-        """
-        UPDATE primitives
-        SET helper_id = ?, provides_tags_json = ?, requires_tags_json = ?
-        WHERE primitive_id = ?
-        """,
-        (hid, json.dumps(merged_prov), json.dumps(merged_req), primitive_id),
-    )
-    hooks = on_primitive_added(
-        conn,
-        primitive_id=primitive_id,
-        subsystem=str(prim["subsystem"] or ""),
-        locus=str(prim["locus"] or ""),
-        kind=str(prim["kind"] or ""),
-        guarded_by_locus="",
-        provides_tags=merged_prov,
-        requires_tags=merged_req,
-        spawn_guard_task=False,
-    )
-    log_event(
-        conn,
-        worker_id,
-        "primitive_helper_promoted",
-        hid,
-        {
-            "primitive_id": primitive_id,
-            "module": f"ajar_helpers.{mod_name}",
-            "callable": callable_name.strip(),
-            "provides_tags": merged_prov,
-        },
-    )
+            {
+                "primitive_id": primitive_id,
+                "module": f"ajar_helpers.{mod_name}",
+                "callable": callable_name.strip(),
+                "provides_tags": merged_prov,
+            },
+        )
     return {
         "helper_id": hid,
         "primitive_id": primitive_id,
@@ -824,75 +826,76 @@ def run_chain_reproduction(
         "ablation_matrix": ablation_matrix,
         "realism": realism,
     }
-    conn.execute(
-        """
-        INSERT INTO chains(
-            chain_id, title, severity, step_ids_json, e2e_poc_cmd, control_cmd,
-            verified, evidence_json, slot_index, oracle_json, ablation_matrix_json,
-            realism_tier, realism_json, jewel_id, door_id, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            cid,
-            scrub_text(title),
-            severity,
-            json.dumps(clean_steps),
-            scrub_text(poc_cmd),
-            scrub_text(control_cmd),
-            1 if verified else 0,
-            json.dumps(ev, sort_keys=True),
-            slot_idx,
-            json.dumps(oracle or {}, sort_keys=True),
-            json.dumps(ablation_matrix, sort_keys=True),
-            str(realism["realism_tier"]),
-            json.dumps(realism, sort_keys=True),
-            str(realism["jewel_id"]),
-            door_id.strip(),
-            now_iso,
-        ),
-    )
-    resolved_doors: list[str] = []
-    if verified:
-        from ajar.epistemic_hooks import consume_hooks_for_locus
-
-        for sid in clean_steps:
-            conn.execute(
-                "UPDATE primitives SET chained = 1, status = 'chained' WHERE primitive_id = ?",
-                (sid,),
-            )
-            if sid in prim_rows and prim_rows[sid]["guarded_by_locus"]:
-                consume_hooks_for_locus(
-                    conn,
-                    locus=str(prim_rows[sid]["guarded_by_locus"]),
-                    source_entity_id=sid,
-                    hook_code="H1_GUARD_SYMMETRY",
-                )
-            conn.execute(
-                "UPDATE anomalies SET status = 'consumed_by_chain', consumed_by_id = ?, updated_at = ? WHERE anomaly_id = ?",
-                (cid, now_iso, sid),
-            )
-        resolved_doors = mark_chain_doors_and_jewels_resolved(
-            conn,
-            chain_id=cid,
-            step_ids=clean_steps,
-            door_id=door_id.strip(),
-            jewel_id=str(realism["jewel_id"]),
-            realism_tier=str(realism["realism_tier"]),
+    with immediate_tx(conn):
+        conn.execute(
+            """
+            INSERT INTO chains(
+                chain_id, title, severity, step_ids_json, e2e_poc_cmd, control_cmd,
+                verified, evidence_json, slot_index, oracle_json, ablation_matrix_json,
+                realism_tier, realism_json, jewel_id, door_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                cid,
+                scrub_text(title),
+                severity,
+                json.dumps(clean_steps),
+                scrub_text(poc_cmd),
+                scrub_text(control_cmd),
+                1 if verified else 0,
+                json.dumps(ev, sort_keys=True),
+                slot_idx,
+                json.dumps(oracle or {}, sort_keys=True),
+                json.dumps(ablation_matrix, sort_keys=True),
+                str(realism["realism_tier"]),
+                json.dumps(realism, sort_keys=True),
+                str(realism["jewel_id"]),
+                door_id.strip(),
+                now_iso,
+            ),
         )
-    log_event(
-        conn,
-        worker_id,
-        "chain_proposed",
-        cid,
-        {
-            "verified": verified,
-            "steps": clean_steps,
-            "ablated_steps": len(ablation_matrix),
-            "realism_tier": realism["realism_tier"],
-            "resolved_doors": resolved_doors,
-            "reason": reason[:200],
-        },
-    )
+        resolved_doors: list[str] = []
+        if verified:
+            from ajar.epistemic_hooks import consume_hooks_for_locus
+
+            for sid in clean_steps:
+                conn.execute(
+                    "UPDATE primitives SET chained = 1, status = 'chained' WHERE primitive_id = ?",
+                    (sid,),
+                )
+                if sid in prim_rows and prim_rows[sid]["guarded_by_locus"]:
+                    consume_hooks_for_locus(
+                        conn,
+                        locus=str(prim_rows[sid]["guarded_by_locus"]),
+                        source_entity_id=sid,
+                        hook_code="H1_GUARD_SYMMETRY",
+                    )
+                conn.execute(
+                    "UPDATE anomalies SET status = 'consumed_by_chain', consumed_by_id = ?, updated_at = ? WHERE anomaly_id = ?",
+                    (cid, now_iso, sid),
+                )
+            resolved_doors = mark_chain_doors_and_jewels_resolved(
+                conn,
+                chain_id=cid,
+                step_ids=clean_steps,
+                door_id=door_id.strip(),
+                jewel_id=str(realism["jewel_id"]),
+                realism_tier=str(realism["realism_tier"]),
+            )
+        log_event(
+            conn,
+            worker_id,
+            "chain_proposed",
+            cid,
+            {
+                "verified": verified,
+                "steps": clean_steps,
+                "ablated_steps": len(ablation_matrix),
+                "realism_tier": realism["realism_tier"],
+                "resolved_doors": resolved_doors,
+                "reason": reason[:200],
+            },
+        )
     return {
         "chain_id": cid,
         "verified": verified,
@@ -1106,58 +1109,59 @@ def run_claim_instrumentation(
     now_iso = utc_now_iso()
     trace_excerpt = scrub_text((res["stdout"] + "\n" + res["stderr"]).strip()[:600])
     anomaly_id: str | None = None
-    if record_anomaly and trace_excerpt:
-        anomaly_id = new_id("anom")
+    with immediate_tx(conn):
+        if record_anomaly and trace_excerpt:
+            anomaly_id = new_id("anom")
+            conn.execute(
+                """
+                INSERT INTO anomalies(
+                    anomaly_id, surface_id, source_claim_id, subsystem, locus,
+                    observation, repro_cmd, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'consumed_by_claim', ?, ?)
+                """,
+                (
+                    anomaly_id,
+                    clm["surface_id"],
+                    claim_id,
+                    clm["subsystem"],
+                    clm["locus"],
+                    f"[instrument trace exit={res['exit_code']}] {trace_excerpt[:300]}",
+                    scrub_text(probe_cmd),
+                    now_iso,
+                    now_iso,
+                ),
+            )
+            conn.execute("UPDATE anomalies SET consumed_by_id = ? WHERE anomaly_id = ?", (claim_id, anomaly_id))
+
         conn.execute(
             """
-            INSERT INTO anomalies(
-                anomaly_id, surface_id, source_claim_id, subsystem, locus,
-                observation, repro_cmd, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'consumed_by_claim', ?, ?)
+            UPDATE claims
+            SET instrumented_since_fail = 1,
+                status = CASE WHEN status = 'needs_instrumentation' THEN 'survived_falsify' ELSE status END,
+                updated_at = ?
+            WHERE claim_id = ?
             """,
-            (
-                anomaly_id,
-                clm["surface_id"],
-                claim_id,
-                clm["subsystem"],
-                clm["locus"],
-                f"[instrument trace exit={res['exit_code']}] {trace_excerpt[:300]}",
-                scrub_text(probe_cmd),
-                now_iso,
-                now_iso,
-            ),
+            (now_iso, claim_id),
         )
-        conn.execute("UPDATE anomalies SET consumed_by_id = ? WHERE anomaly_id = ?", (claim_id, anomaly_id))
-
-    conn.execute(
-        """
-        UPDATE claims
-        SET instrumented_since_fail = 1,
-            status = CASE WHEN status = 'needs_instrumentation' THEN 'survived_falsify' ELSE status END,
-            updated_at = ?
-        WHERE claim_id = ?
-        """,
-        (now_iso, claim_id),
-    )
-    conn.execute(
-        """
-        UPDATE tasks
-        SET status = 'done', worker_id = ?, summary = ?, updated_at = ?
-        WHERE kind = 'instrument' AND status IN ('open', 'leased')
-          AND (parent_claim_id = ? OR locus = ?)
-        """,
-        (worker_id, f"Completed slot-inst probe for {claim_id}", now_iso, claim_id, clm["locus"]),
-    )
-    log_event(
-        conn,
-        worker_id,
-        "claim_instrumented",
-        claim_id,
-        {"exit_code": res["exit_code"], "anomaly_id": anomaly_id},
-    )
-    updated_status = str(
-        conn.execute("SELECT status FROM claims WHERE claim_id = ?", (claim_id,)).fetchone()["status"]
-    )
+        conn.execute(
+            """
+            UPDATE tasks
+            SET status = 'done', worker_id = ?, summary = ?, updated_at = ?
+            WHERE kind = 'instrument' AND status IN ('open', 'leased')
+              AND (parent_claim_id = ? OR locus = ?)
+            """,
+            (worker_id, f"Completed slot-inst probe for {claim_id}", now_iso, claim_id, clm["locus"]),
+        )
+        log_event(
+            conn,
+            worker_id,
+            "claim_instrumented",
+            claim_id,
+            {"exit_code": res["exit_code"], "anomaly_id": anomaly_id},
+        )
+        updated_status = str(
+            conn.execute("SELECT status FROM claims WHERE claim_id = ?", (claim_id,)).fetchone()["status"]
+        )
     return {
         "claim_id": claim_id,
         "status": updated_status,

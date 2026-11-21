@@ -21,6 +21,7 @@ from ajar import EXIT_GATE_BLOCKED, EXIT_USER_ERROR
 from ajar.db import AjarError, infer_subsystem, log_event, new_id, utc_now_iso
 from ajar.epistemic_hooks import parse_tag_list, register_epistemic_hook
 from ajar.redact import scrub_text
+from ajar.store import immediate_tx
 
 VALID_IMPACT_CLASSES: tuple[str, ...] = (
     "rce",
@@ -420,114 +421,115 @@ def _activate_door_ready(
 
     eff_snap = str(door["snapshot_id"] or "") or snapshot_id
     resume_tid = str(door["resume_task_id"] or "")
-    existing_task = (
-        conn.execute("SELECT * FROM tasks WHERE task_id = ?", (resume_tid,)).fetchone()
-        if resume_tid
-        else None
-    )
+    with immediate_tx(conn):
+        existing_task = (
+            conn.execute("SELECT * FROM tasks WHERE task_id = ?", (resume_tid,)).fetchone()
+            if resume_tid
+            else None
+        )
 
-    held = _parse_symbol_list(str(door["held_ids_json"] or "[]"))
-    step_preview = ",".join([*held, str(matched_entry["id"])]) or str(matched_entry["id"])
-    snap_note = f" snapshot={eff_snap}" if eff_snap else ""
-    jewel_note = f" -> jewel={door['jewel_id']}" if door["jewel_id"] else ""
+        held = _parse_symbol_list(str(door["held_ids_json"] or "[]"))
+        step_preview = ",".join([*held, str(matched_entry["id"])]) or str(matched_entry["id"])
+        snap_note = f" snapshot={eff_snap}" if eff_snap else ""
+        jewel_note = f" -> jewel={door['jewel_id']}" if door["jewel_id"] else ""
 
-    if existing_task is not None and str(existing_task["status"]) in ("open", "leased", "conditional_blocked"):
+        if existing_task is not None and str(existing_task["status"]) in ("open", "leased", "conditional_blocked"):
+            conn.execute(
+                """
+                UPDATE tasks
+                SET status = CASE WHEN status = 'conditional_blocked' THEN 'open' ELSE status END,
+                    priority = 'critical',
+                    salience_score = MAX(salience_score, 96),
+                    summary = ?,
+                    updated_at = ?
+                WHERE task_id = ?
+                """,
+                (
+                    f"Open Door {did} WOKEN by {matched_entry['id']} ({','.join(matched_entry['modes'])}): "
+                    f"compose [{step_preview}] @ {door['anchor_locus']}{snap_note}{jewel_note}.",
+                    now_iso,
+                    resume_tid,
+                ),
+            )
+            chain_tid = resume_tid
+        else:
+            chain_tid = new_id("task")
+            sub = str(door["subsystem"] or infer_subsystem(str(door["anchor_locus"])))
+            conn.execute(
+                """
+                INSERT INTO tasks(
+                    task_id, kind, direction, title, subsystem, locus, priority, status,
+                    salience_score, door_id, summary, created_at, updated_at
+                ) VALUES (?, 'chain', 'outside_in', ?, ?, ?, 'critical', 'open', 96, ?, ?, ?, ?)
+                """,
+                (
+                    chain_tid,
+                    f"Integrate woken Open Door {did} ({step_preview}) -> {door['anchor_locus']}",
+                    sub,
+                    str(door["anchor_locus"]),
+                    did,
+                    f"Open Door {did} woken via {','.join(matched_entry['modes'])}: "
+                    f"combine [{step_preview}]{snap_note}{jewel_note} and verify causal ablation (`ajar chain propose`).",
+                    now_iso,
+                    now_iso,
+                ),
+            )
+
+        # Close any unleased `bridge` tasks for this door now that a concrete match arrived.
         conn.execute(
             """
             UPDATE tasks
-            SET status = CASE WHEN status = 'conditional_blocked' THEN 'open' ELSE status END,
-                priority = 'critical',
-                salience_score = MAX(salience_score, 96),
-                summary = ?,
-                updated_at = ?
-            WHERE task_id = ?
+            SET status = 'done', summary = 'Superseded: parked door woken by matching capability', updated_at = ?
+            WHERE door_id = ? AND kind = 'bridge' AND status = 'open'
             """,
-            (
-                f"Open Door {did} WOKEN by {matched_entry['id']} ({','.join(matched_entry['modes'])}): "
-                f"compose [{step_preview}] @ {door['anchor_locus']}{snap_note}{jewel_note}.",
-                now_iso,
-                resume_tid,
-            ),
+            (now_iso, did),
         )
-        chain_tid = resume_tid
-    else:
-        chain_tid = new_id("task")
-        sub = str(door["subsystem"] or infer_subsystem(str(door["anchor_locus"])))
+
         conn.execute(
             """
-            INSERT INTO tasks(
-                task_id, kind, direction, title, subsystem, locus, priority, status,
-                salience_score, door_id, summary, created_at, updated_at
-            ) VALUES (?, 'chain', 'outside_in', ?, ?, ?, 'critical', 'open', 96, ?, ?, ?, ?)
+            UPDATE parked_doors
+            SET status = 'ready',
+                matched_by_json = ?,
+                snapshot_id = ?,
+                resume_task_id = ?,
+                updated_at = ?
+            WHERE door_id = ?
             """,
-            (
-                chain_tid,
-                f"Integrate woken Open Door {did} ({step_preview}) -> {door['anchor_locus']}",
-                sub,
-                str(door["anchor_locus"]),
-                did,
-                f"Open Door {did} woken via {','.join(matched_entry['modes'])}: "
-                f"combine [{step_preview}]{snap_note}{jewel_note} and verify causal ablation (`ajar chain propose`).",
-                now_iso,
-                now_iso,
-            ),
+            (json.dumps(prev_matches), eff_snap, chain_tid, now_iso, did),
         )
 
-    # Close any unleased `bridge` tasks for this door now that a concrete match arrived.
-    conn.execute(
-        """
-        UPDATE tasks
-        SET status = 'done', summary = 'Superseded: parked door woken by matching capability', updated_at = ?
-        WHERE door_id = ? AND kind = 'bridge' AND status = 'open'
-        """,
-        (now_iso, did),
-    )
-
-    conn.execute(
-        """
-        UPDATE parked_doors
-        SET status = 'ready',
-            matched_by_json = ?,
-            snapshot_id = ?,
-            resume_task_id = ?,
-            updated_at = ?
-        WHERE door_id = ?
-        """,
-        (json.dumps(prev_matches), eff_snap, chain_tid, now_iso, did),
-    )
-
-    register_epistemic_hook(
-        conn,
-        hook_code="H4_TYPED_STATE_BRIDGE",
-        trigger_cmd=trigger_cmd,
-        source_entity_id=did,
-        dedup_material=f"door_wake:{did}:{matched_entry['id']}",
-        subsystem=str(door["subsystem"] or infer_subsystem(str(door["anchor_locus"]))),
-        target_locus=str(door["anchor_locus"]),
-        spawned_task_id=chain_tid,
-        max_leases=2,
-        directive_text=(
-            f"Open Door {did} unlocked by {matched_entry['id']}@{matched_entry['locus']}; "
-            f"probe{snap_note} and verify [{step_preview}] -> {door['anchor_locus']}."
-        ),
-        kill_rule=(
-            f"STOP, mark dry, and keep door parked if state from {matched_entry['id']} "
-            f"is sanitized prior to {door['anchor_locus']}."
-        ),
-    )
-    log_event(
-        conn,
-        "planner",
-        "door_woken",
-        did,
-        {
-            "matched_id": matched_entry["id"],
-            "modes": matched_entry["modes"],
-            "score": matched_entry["score"],
-            "chain_task_id": chain_tid,
-            "snapshot_id": eff_snap,
-        },
-    )
+        register_epistemic_hook(
+            conn,
+            hook_code="H4_TYPED_STATE_BRIDGE",
+            trigger_cmd=trigger_cmd,
+            source_entity_id=did,
+            dedup_material=f"door_wake:{did}:{matched_entry['id']}",
+            subsystem=str(door["subsystem"] or infer_subsystem(str(door["anchor_locus"]))),
+            target_locus=str(door["anchor_locus"]),
+            spawned_task_id=chain_tid,
+            max_leases=2,
+            directive_text=(
+                f"Open Door {did} unlocked by {matched_entry['id']}@{matched_entry['locus']}; "
+                f"probe{snap_note} and verify [{step_preview}] -> {door['anchor_locus']}."
+            ),
+            kill_rule=(
+                f"STOP, mark dry, and keep door parked if state from {matched_entry['id']} "
+                f"is sanitized prior to {door['anchor_locus']}."
+            ),
+        )
+        log_event(
+            conn,
+            "planner",
+            "door_woken",
+            did,
+            {
+                "matched_id": matched_entry["id"],
+                "modes": matched_entry["modes"],
+                "score": matched_entry["score"],
+                "chain_task_id": chain_tid,
+                "snapshot_id": eff_snap,
+            },
+        )
     return {"door_id": did, "chain_task_id": chain_tid, "matched": matched_entry, "snapshot_id": eff_snap}
 
 
@@ -687,58 +689,59 @@ def _spawn_door_bridge_hunters(conn: sqlite3.Connection, door: sqlite3.Row | dic
 
     spawned: list[str] = []
     now_iso = utc_now_iso()
-    for loc, direction, note in candidates[:budget]:
-        tid = new_id("task")
-        sub = infer_subsystem(loc)
-        conn.execute(
-            """
-            INSERT INTO tasks(
-                task_id, kind, direction, title, subsystem, locus, priority, status,
-                salience_score, door_id, summary, created_at, updated_at
-            ) VALUES (?, 'bridge', ?, ?, ?, ?, 'high', 'open', 78, ?, ?, ?, ?)
-            """,
-            (
-                tid,
-                direction,
-                f"Bridge hunt for {did}: {str(door['missing_link_summary'])[:72]}",
-                sub,
-                loc,
-                did,
-                f"{note} | Missing: {str(door['missing_link_summary'])[:140]}",
-                now_iso,
-                now_iso,
-            ),
-        )
-        register_epistemic_hook(
-            conn,
-            hook_code="H4_TYPED_STATE_BRIDGE",
-            trigger_cmd="door.park",
-            source_entity_id=did,
-            dedup_material=f"bridge_hunt:{did}:{loc}",
-            subsystem=sub,
-            target_locus=loc,
-            spawned_task_id=tid,
-            max_leases=1,
-            directive_text=(
-                f"Missing-link hunt ({did}): check if {loc} emits ({str(door['missing_link_summary'])[:65]}) "
-                f"to unlock {door['anchor_locus']}."
-            ),
-            kill_rule=(
-                f"STOP and mark dry after auditing cone if no path breaks {blk_locus or 'guard'} "
-                f"or satisfies {did}."
-            ),
-        )
-        spawned.append(tid)
+    with immediate_tx(conn):
+        for loc, direction, note in candidates[:budget]:
+            tid = new_id("task")
+            sub = infer_subsystem(loc)
+            conn.execute(
+                """
+                INSERT INTO tasks(
+                    task_id, kind, direction, title, subsystem, locus, priority, status,
+                    salience_score, door_id, summary, created_at, updated_at
+                ) VALUES (?, 'bridge', ?, ?, ?, ?, 'high', 'open', 78, ?, ?, ?, ?)
+                """,
+                (
+                    tid,
+                    direction,
+                    f"Bridge hunt for {did}: {str(door['missing_link_summary'])[:72]}",
+                    sub,
+                    loc,
+                    did,
+                    f"{note} | Missing: {str(door['missing_link_summary'])[:140]}",
+                    now_iso,
+                    now_iso,
+                ),
+            )
+            register_epistemic_hook(
+                conn,
+                hook_code="H4_TYPED_STATE_BRIDGE",
+                trigger_cmd="door.park",
+                source_entity_id=did,
+                dedup_material=f"bridge_hunt:{did}:{loc}",
+                subsystem=sub,
+                target_locus=loc,
+                spawned_task_id=tid,
+                max_leases=1,
+                directive_text=(
+                    f"Missing-link hunt ({did}): check if {loc} emits ({str(door['missing_link_summary'])[:65]}) "
+                    f"to unlock {door['anchor_locus']}."
+                ),
+                kill_rule=(
+                    f"STOP and mark dry after auditing cone if no path breaks {blk_locus or 'guard'} "
+                    f"or satisfies {did}."
+                ),
+            )
+            spawned.append(tid)
 
-    if spawned:
-        conn.execute(
-            """
-            UPDATE parked_doors
-            SET status = 'bridging', bridge_attempts = bridge_attempts + ?, updated_at = ?
-            WHERE door_id = ?
-            """,
-            (len(spawned), now_iso, did),
-        )
+        if spawned:
+            conn.execute(
+                """
+                UPDATE parked_doors
+                SET status = 'bridging', bridge_attempts = bridge_attempts + ?, updated_at = ?
+                WHERE door_id = ?
+                """,
+                (len(spawned), now_iso, did),
+            )
     return spawned
 
 
@@ -795,156 +798,157 @@ def park_open_door(
     wish = scrub_text((wishlist_query or missing_link_summary).strip())
     miss = scrub_text(missing_link_summary.strip())
 
-    conn.execute(
-        """
-        INSERT INTO parked_doors(
-            door_id, jewel_id, direction, anchor_locus, blocker_locus, subsystem,
-            held_ids_json, snapshot_id, missing_link_summary, wanted_tags_json,
-            wanted_symbols_json, wishlist_query, status, matched_by_json,
-            bridge_attempts, max_bridge_attempts, resume_task_id, created_by_worker,
-            created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked', '[]', 0, ?, '', ?, ?, ?)
-        """,
-        (
-            did,
-            (jewel_id or "").strip(),
-            dir_clean,
-            anchor_locus.strip(),
-            blocker_locus.strip(),
-            sub,
-            json.dumps(held_list),
-            eff_snap,
-            miss,
-            json.dumps(w_tags),
-            json.dumps(w_syms),
-            wish,
-            max(0, min(4, int(max_bridge_attempts))),
-            worker_id,
-            now_iso,
-            now_iso,
-        ),
-    )
-    conn.execute(
-        """
-        INSERT INTO door_fts(door_id, anchor_locus, blocker_locus, wanted_symbols, missing_link_summary, wishlist_query)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (did, anchor_locus.strip(), blocker_locus.strip(), " ".join(w_syms), miss, wish),
-    )
-
-    door_row = conn.execute("SELECT * FROM parked_doors WHERE door_id = ?", (did,)).fetchone()
-
-    # Retroactively check already-discovered active primitives, findings, and anomalies in `run.db`!
-    existing_artifacts: list[dict[str, Any]] = []
-    for p in conn.execute(
-        "SELECT * FROM primitives WHERE status != 'dry' ORDER BY created_at ASC"
-    ).fetchall():
-        existing_artifacts.append(
-            {
-                "id": str(p["primitive_id"]),
-                "kind": str(p["role"] if "role" in p.keys() else "capability"),
-                "locus": str(p["locus"]),
-                "subsystem": str(p["subsystem"]),
-                "text": f"{p['kind']} {p['preconditions']} {p['postconditions']} {p['trusted_invariant'] if 'trusted_invariant' in p.keys() else ''}",
-                "tags": parse_tag_list(p["provides_tags_json"]),
-                "symbols": _parse_symbol_list(p["symbols_json"] if "symbols_json" in p.keys() else "[]"),
-                "snapshot_id": str(p["snapshot_id"] if "snapshot_id" in p.keys() else ""),
-            }
+    with immediate_tx(conn):
+        conn.execute(
+            """
+            INSERT INTO parked_doors(
+                door_id, jewel_id, direction, anchor_locus, blocker_locus, subsystem,
+                held_ids_json, snapshot_id, missing_link_summary, wanted_tags_json,
+                wanted_symbols_json, wishlist_query, status, matched_by_json,
+                bridge_attempts, max_bridge_attempts, resume_task_id, created_by_worker,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked', '[]', 0, ?, '', ?, ?, ?)
+            """,
+            (
+                did,
+                (jewel_id or "").strip(),
+                dir_clean,
+                anchor_locus.strip(),
+                blocker_locus.strip(),
+                sub,
+                json.dumps(held_list),
+                eff_snap,
+                miss,
+                json.dumps(w_tags),
+                json.dumps(w_syms),
+                wish,
+                max(0, min(4, int(max_bridge_attempts))),
+                worker_id,
+                now_iso,
+                now_iso,
+            ),
         )
-    for f in conn.execute("SELECT * FROM findings ORDER BY created_at ASC").fetchall():
-        existing_artifacts.append(
-            {
-                "id": str(f["finding_id"]),
-                "kind": "finding",
-                "locus": str(f["locus"]),
-                "subsystem": infer_subsystem(str(f["locus"])),
-                "text": f"{f['title']} {f['root_cause']}",
-                "tags": parse_tag_list(f["provides_tags_json"] if "provides_tags_json" in f.keys() else "[]"),
-                "symbols": [],
-                "snapshot_id": str(f["snapshot_id"] if "snapshot_id" in f.keys() else ""),
-            }
-        )
-    for a in conn.execute("SELECT * FROM anomalies WHERE status = 'unexplained' ORDER BY created_at ASC").fetchall():
-        existing_artifacts.append(
-            {
-                "id": str(a["anomaly_id"]),
-                "kind": "anomaly",
-                "locus": str(a["locus"]),
-                "subsystem": str(a["subsystem"]),
-                "text": str(a["observation"]),
-                "tags": [],
-                "symbols": [],
-                "snapshot_id": "",
-            }
+        conn.execute(
+            """
+            INSERT INTO door_fts(door_id, anchor_locus, blocker_locus, wanted_symbols, missing_link_summary, wishlist_query)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (did, anchor_locus.strip(), blocker_locus.strip(), " ".join(w_syms), miss, wish),
         )
 
-    retro_wake: dict[str, Any] | None = None
-    for art in existing_artifacts:
-        if art["id"] in held_list:
-            continue
-        code_syms = _extract_artifact_code_symbols(
-            conn,
-            locus=art["locus"],
-            text_blob=art["text"],
-            explicit_symbols=art["symbols"],
-        )
-        fts_q = _safe_fts_or_query(list(_extract_domain_tokens(f"{art['locus']} {art['text']}") | code_syms))
-        fts_hits: set[str] = set()
-        if fts_q:
-            try:
-                fr = conn.execute(
-                    "SELECT door_id FROM door_fts WHERE door_id = ? AND door_fts MATCH ?",
-                    (did, fts_q),
-                ).fetchone()
-                if fr is not None:
-                    fts_hits.add(did)
-            except sqlite3.OperationalError:
-                pass
-        score, modes = _score_door_match(
-            conn,
-            door_row,
-            artifact_id=art["id"],
-            locus=art["locus"],
-            text_blob=art["text"],
-            provides_tags=art["tags"],
-            code_symbols=code_syms,
-            fts_hit_ids=fts_hits,
-        )
-        if score >= 0.65 and modes:
-            retro_wake = _activate_door_ready(
+        door_row = conn.execute("SELECT * FROM parked_doors WHERE door_id = ?", (did,)).fetchone()
+
+        # Retroactively check already-discovered active primitives, findings, and anomalies in `run.db`!
+        existing_artifacts: list[dict[str, Any]] = []
+        for p in conn.execute(
+            "SELECT * FROM primitives WHERE status != 'dry' ORDER BY created_at ASC"
+        ).fetchall():
+            existing_artifacts.append(
+                {
+                    "id": str(p["primitive_id"]),
+                    "kind": str(p["role"] if "role" in p.keys() else "capability"),
+                    "locus": str(p["locus"]),
+                    "subsystem": str(p["subsystem"]),
+                    "text": f"{p['kind']} {p['preconditions']} {p['postconditions']} {p['trusted_invariant'] if 'trusted_invariant' in p.keys() else ''}",
+                    "tags": parse_tag_list(p["provides_tags_json"]),
+                    "symbols": _parse_symbol_list(p["symbols_json"] if "symbols_json" in p.keys() else "[]"),
+                    "snapshot_id": str(p["snapshot_id"] if "snapshot_id" in p.keys() else ""),
+                }
+            )
+        for f in conn.execute("SELECT * FROM findings ORDER BY created_at ASC").fetchall():
+            existing_artifacts.append(
+                {
+                    "id": str(f["finding_id"]),
+                    "kind": "finding",
+                    "locus": str(f["locus"]),
+                    "subsystem": infer_subsystem(str(f["locus"])),
+                    "text": f"{f['title']} {f['root_cause']}",
+                    "tags": parse_tag_list(f["provides_tags_json"] if "provides_tags_json" in f.keys() else "[]"),
+                    "symbols": [],
+                    "snapshot_id": str(f["snapshot_id"] if "snapshot_id" in f.keys() else ""),
+                }
+            )
+        for a in conn.execute("SELECT * FROM anomalies WHERE status = 'unexplained' ORDER BY created_at ASC").fetchall():
+            existing_artifacts.append(
+                {
+                    "id": str(a["anomaly_id"]),
+                    "kind": "anomaly",
+                    "locus": str(a["locus"]),
+                    "subsystem": str(a["subsystem"]),
+                    "text": str(a["observation"]),
+                    "tags": [],
+                    "symbols": [],
+                    "snapshot_id": "",
+                }
+            )
+
+        retro_wake: dict[str, Any] | None = None
+        for art in existing_artifacts:
+            if art["id"] in held_list:
+                continue
+            code_syms = _extract_artifact_code_symbols(
+                conn,
+                locus=art["locus"],
+                text_blob=art["text"],
+                explicit_symbols=art["symbols"],
+            )
+            fts_q = _safe_fts_or_query(list(_extract_domain_tokens(f"{art['locus']} {art['text']}") | code_syms))
+            fts_hits: set[str] = set()
+            if fts_q:
+                try:
+                    fr = conn.execute(
+                        "SELECT door_id FROM door_fts WHERE door_id = ? AND door_fts MATCH ?",
+                        (did, fts_q),
+                    ).fetchone()
+                    if fr is not None:
+                        fts_hits.add(did)
+                except sqlite3.OperationalError:
+                    pass
+            score, modes = _score_door_match(
                 conn,
                 door_row,
-                matched_entry={
-                    "id": art["id"],
-                    "kind": art["kind"],
-                    "locus": art["locus"],
-                    "subsystem": art["subsystem"],
-                    "modes": modes,
-                    "score": score,
-                },
-                snapshot_id=art["snapshot_id"],
-                trigger_cmd="door.park",
+                artifact_id=art["id"],
+                locus=art["locus"],
+                text_blob=art["text"],
+                provides_tags=art["tags"],
+                code_symbols=code_syms,
+                fts_hit_ids=fts_hits,
             )
-            break
+            if score >= 0.65 and modes:
+                retro_wake = _activate_door_ready(
+                    conn,
+                    door_row,
+                    matched_entry={
+                        "id": art["id"],
+                        "kind": art["kind"],
+                        "locus": art["locus"],
+                        "subsystem": art["subsystem"],
+                        "modes": modes,
+                        "score": score,
+                    },
+                    snapshot_id=art["snapshot_id"],
+                    trigger_cmd="door.park",
+                )
+                break
 
-    spawned_hunters: list[str] = []
-    if retro_wake is None and spawn_hunters:
-        spawned_hunters = _spawn_door_bridge_hunters(conn, door_row)
+        spawned_hunters: list[str] = []
+        if retro_wake is None and spawn_hunters:
+            spawned_hunters = _spawn_door_bridge_hunters(conn, door_row)
 
-    final_row = conn.execute("SELECT * FROM parked_doors WHERE door_id = ?", (did,)).fetchone()
-    log_event(
-        conn,
-        worker_id,
-        "door_parked",
-        did,
-        {
-            "anchor_locus": anchor_locus.strip(),
-            "blocker_locus": blocker_locus.strip(),
-            "status": str(final_row["status"]),
-            "spawned_bridge_tasks": spawned_hunters,
-            "snapshot_id": str(final_row["snapshot_id"]),
-        },
-    )
+        final_row = conn.execute("SELECT * FROM parked_doors WHERE door_id = ?", (did,)).fetchone()
+        log_event(
+            conn,
+            worker_id,
+            "door_parked",
+            did,
+            {
+                "anchor_locus": anchor_locus.strip(),
+                "blocker_locus": blocker_locus.strip(),
+                "status": str(final_row["status"]),
+                "spawned_bridge_tasks": spawned_hunters,
+                "snapshot_id": str(final_row["snapshot_id"]),
+            },
+        )
     return {
         "door_id": did,
         "status": str(final_row["status"]),
@@ -956,34 +960,35 @@ def park_open_door(
 
 def reconcile_door_bridge_tasks(conn: sqlite3.Connection) -> list[str]:
     """Transition `bridging` (or `ready`-closed-`dry`) doors to `exhausted_locked` once active tasks finish."""
-    bridging = conn.execute("SELECT door_id, bridge_attempts, max_bridge_attempts FROM parked_doors WHERE status = 'bridging'").fetchall()
     exhausted: list[str] = []
     now_iso = utc_now_iso()
-    for d in bridging:
-        did = str(d["door_id"])
-        active_b = conn.execute(
-            "SELECT COUNT(*) AS c FROM tasks WHERE door_id = ? AND kind = 'bridge' AND status IN ('open', 'leased', 'conditional_blocked')",
-            (did,),
-        ).fetchone()["c"]
-        if int(active_b) == 0:
-            conn.execute(
-                "UPDATE parked_doors SET status = 'exhausted_locked', updated_at = ? WHERE door_id = ?",
-                (now_iso, did),
-            )
-            exhausted.append(did)
+    with immediate_tx(conn):
+        bridging = conn.execute("SELECT door_id, bridge_attempts, max_bridge_attempts FROM parked_doors WHERE status = 'bridging'").fetchall()
+        for d in bridging:
+            did = str(d["door_id"])
+            active_b = conn.execute(
+                "SELECT COUNT(*) AS c FROM tasks WHERE door_id = ? AND kind = 'bridge' AND status IN ('open', 'leased', 'conditional_blocked')",
+                (did,),
+            ).fetchone()["c"]
+            if int(active_b) == 0:
+                conn.execute(
+                    "UPDATE parked_doors SET status = 'exhausted_locked', updated_at = ? WHERE door_id = ?",
+                    (now_iso, did),
+                )
+                exhausted.append(did)
 
-    ready_rows = conn.execute(
-        "SELECT door_id, resume_task_id FROM parked_doors WHERE status = 'ready' AND resume_task_id != ''"
-    ).fetchall()
-    for rd in ready_rows:
-        trow = conn.execute("SELECT status FROM tasks WHERE task_id = ?", (str(rd["resume_task_id"]),)).fetchone()
-        if trow is not None and str(trow["status"]) == "dry":
-            did = str(rd["door_id"])
-            conn.execute(
-                "UPDATE parked_doors SET status = 'exhausted_locked', updated_at = ? WHERE door_id = ?",
-                (now_iso, did),
-            )
-            exhausted.append(did)
+        ready_rows = conn.execute(
+            "SELECT door_id, resume_task_id FROM parked_doors WHERE status = 'ready' AND resume_task_id != ''"
+        ).fetchall()
+        for rd in ready_rows:
+            trow = conn.execute("SELECT status FROM tasks WHERE task_id = ?", (str(rd["resume_task_id"]),)).fetchone()
+            if trow is not None and str(trow["status"]) == "dry":
+                did = str(rd["door_id"])
+                conn.execute(
+                    "UPDATE parked_doors SET status = 'exhausted_locked', updated_at = ? WHERE door_id = ?",
+                    (now_iso, did),
+                )
+                exhausted.append(did)
     return exhausted
 
 
@@ -1103,49 +1108,50 @@ def mark_chain_doors_and_jewels_resolved(
     resolved_doors: list[str] = []
     step_set = set(step_ids)
 
-    candidates = conn.execute(
-        "SELECT * FROM parked_doors WHERE status IN ('ready', 'parked', 'bridging')"
-    ).fetchall()
-    for d in candidates:
-        did = str(d["door_id"])
-        is_match = bool(door_id and did == door_id)
-        if not is_match and step_set:
-            held = set(_parse_symbol_list(str(d["held_ids_json"] or "[]")))
-            try:
-                m_entries = json.loads(str(d["matched_by_json"] or "[]"))
-            except json.JSONDecodeError:
-                m_entries = []
-            matched_ids = {str(m.get("id")) for m in m_entries if isinstance(m, dict) and m.get("id")}
-            if held and matched_ids and (held & step_set) and (matched_ids & step_set):
-                is_match = True
-            elif held and not matched_ids and held.issubset(step_set) and len(step_set) >= 2:
-                is_match = True
-        if is_match:
-            conn.execute(
-                "UPDATE parked_doors SET status = 'chained', updated_at = ? WHERE door_id = ?",
-                (now_iso, did),
-            )
+    with immediate_tx(conn):
+        candidates = conn.execute(
+            "SELECT * FROM parked_doors WHERE status IN ('ready', 'parked', 'bridging')"
+        ).fetchall()
+        for d in candidates:
+            did = str(d["door_id"])
+            is_match = bool(door_id and did == door_id)
+            if not is_match and step_set:
+                held = set(_parse_symbol_list(str(d["held_ids_json"] or "[]")))
+                try:
+                    m_entries = json.loads(str(d["matched_by_json"] or "[]"))
+                except json.JSONDecodeError:
+                    m_entries = []
+                matched_ids = {str(m.get("id")) for m in m_entries if isinstance(m, dict) and m.get("id")}
+                if held and matched_ids and (held & step_set) and (matched_ids & step_set):
+                    is_match = True
+                elif held and not matched_ids and held.issubset(step_set) and len(step_set) >= 2:
+                    is_match = True
+            if is_match:
+                conn.execute(
+                    "UPDATE parked_doors SET status = 'chained', updated_at = ? WHERE door_id = ?",
+                    (now_iso, did),
+                )
+                conn.execute(
+                    """
+                    UPDATE tasks
+                    SET status = 'done', summary = ?, updated_at = ?
+                    WHERE door_id = ? AND kind IN ('chain', 'bridge') AND status IN ('open', 'leased')
+                    """,
+                    (f"Resolved by verified chain {chain_id}", now_iso, did),
+                )
+                resolved_doors.append(did)
+                if not jewel_id and d["jewel_id"]:
+                    jewel_id = str(d["jewel_id"])
+
+        if realism_tier == "crown_jewel" and jewel_id:
             conn.execute(
                 """
-                UPDATE tasks
-                SET status = 'done', summary = ?, updated_at = ?
-                WHERE door_id = ? AND kind IN ('chain', 'bridge') AND status IN ('open', 'leased')
+                UPDATE crown_jewels
+                SET status = 'reached', reached_by_id = ?, updated_at = ?
+                WHERE jewel_id = ?
                 """,
-                (f"Resolved by verified chain {chain_id}", now_iso, did),
+                (chain_id, now_iso, jewel_id),
             )
-            resolved_doors.append(did)
-            if not jewel_id and d["jewel_id"]:
-                jewel_id = str(d["jewel_id"])
-
-    if realism_tier == "crown_jewel" and jewel_id:
-        conn.execute(
-            """
-            UPDATE crown_jewels
-            SET status = 'reached', reached_by_id = ?, updated_at = ?
-            WHERE jewel_id = ?
-            """,
-            (chain_id, now_iso, jewel_id),
-        )
     return resolved_doors
 
 

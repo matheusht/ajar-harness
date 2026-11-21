@@ -34,6 +34,7 @@ from ajar.db import (
 )
 from ajar.domain import derive_claim_axes
 from ajar.redact import scrub_text, scrubbed_subprocess_env
+from ajar.store import immediate_tx
 
 WIRE_PROFILE_LADDER: tuple[str, ...] = ("direct", "swarm_patch_first", "regression_tdd")
 VALID_SWARM_STAGES: tuple[str, ...] = ("investigate", "falsify", "reproduce", "chain", "bridge", "portfolio")
@@ -949,96 +950,97 @@ def reopen_run(
         )
 
         now_iso = utc_now_iso()
-        conn.execute(
-            "UPDATE runs SET status = 'active', stop_reason = '', finished_at = NULL WHERE run_id = ?",
-            (run_id,),
-        )
-        (base_home / "current_run").write_text(f"{run_id}\n", encoding="utf-8")
-
-        # Scrub any legacy `.git/hooks/*` or `#!/bin/sh` tails in `claims.mechanism` so fresh workers stay clean.
         scrubbed_claim_ids: list[str] = []
-        all_claims = conn.execute("SELECT claim_id, mechanism FROM claims").fetchall()
-        for crow in all_claims:
-            cleaned_mech, changed = scrub_weaponized_hook_prose(str(crow["mechanism"] or ""))
-            if changed:
-                conn.execute(
-                    "UPDATE claims SET mechanism = ?, updated_at = ? WHERE claim_id = ?",
-                    (scrub_text(cleaned_mech), now_iso, crow["claim_id"]),
-                )
-                scrubbed_claim_ids.append(str(crow["claim_id"]))
-
         unblocked_claim_ids: list[str] = []
-        if unblock_zero_attempt_claims:
-            blocked_rows = conn.execute("SELECT * FROM claims WHERE status = 'blocked' ORDER BY created_at ASC").fetchall()
-            for bc in blocked_rows:
-                fails = int(bc["failed_repro_count"] or 0)
-                env_b = str(bc["env_blocker"] or "").strip() if "env_blocker" in bc.keys() else ""
-                is_policy_deferred = bool(POLICY_REFUSAL_BLOCK_RE.search(str(bc["blocker_reason"] or "")))
-                if not is_policy_deferred and env_b in ZERO_ATTEMPT_EXEMPT_ENV_BLOCKERS:
-                    continue
-                if is_policy_deferred or fails == 0:
-                    fals_id = str(bc["falsifier_worker_id"] or "").strip()
-                    prop_id = str(bc["proposer_worker_id"] or "").strip()
-                    has_falsifier = bool(fals_id) and (fals_id != prop_id)
-                    next_status = "survived_falsify" if has_falsifier else "proposed"
-                    axes = derive_claim_axes(next_status)
-                    preserved_notes = str(bc["falsify_notes"] or "").strip()
-                    if not preserved_notes and bc["blocker_reason"]:
-                        stripped_note = POLICY_REFUSAL_BLOCK_RE.sub("", str(bc["blocker_reason"])).strip()
-                        preserved_notes = stripped_note[:600]
-                    conn.execute(
-                        """
-                        UPDATE claims
-                        SET status = ?, research_state = ?, evidence_state = ?,
-                            blocker_reason = '', env_blocker = '',
-                            falsify_notes = ?, updated_at = ?
-                        WHERE claim_id = ?
-                        """,
-                        (
-                            next_status,
-                            axes.research_state.value,
-                            axes.evidence_state.value,
-                            scrub_text(preserved_notes),
-                            now_iso,
-                            bc["claim_id"],
-                        ),
-                    )
-                    conn.execute(
-                        """
-                        UPDATE tasks
-                        SET status = 'open', updated_at = ?
-                        WHERE parent_claim_id = ? AND kind IN ('reproduce', 'falsify') AND status IN ('done', 'dry')
-                        """,
-                        (now_iso, bc["claim_id"]),
-                    )
-                    unblocked_claim_ids.append(str(bc["claim_id"]))
-
-        # Ensure Stage-5 Converge (`chain`) re-evaluates once unblocked claims reproduce!
-        if unblocked_claim_ids:
+        with immediate_tx(conn):
             conn.execute(
-                "UPDATE tasks SET status = 'open', updated_at = ? WHERE kind = 'chain' AND status IN ('done', 'dry')",
-                (now_iso,),
+                "UPDATE runs SET status = 'active', stop_reason = '', finished_at = NULL WHERE run_id = ?",
+                (run_id,),
             )
 
-        ready_repro = conn.execute(
-            "SELECT claim_id FROM claims WHERE status = 'survived_falsify' ORDER BY created_at ASC"
-        ).fetchall()
-        ready_falsify = conn.execute(
-            "SELECT claim_id FROM claims WHERE status = 'proposed' ORDER BY created_at ASC"
-        ).fetchall()
+            # Scrub any legacy `.git/hooks/*` or `#!/bin/sh` tails in `claims.mechanism` so fresh workers stay clean.
+            all_claims = conn.execute("SELECT claim_id, mechanism FROM claims").fetchall()
+            for crow in all_claims:
+                cleaned_mech, changed = scrub_weaponized_hook_prose(str(crow["mechanism"] or ""))
+                if changed:
+                    conn.execute(
+                        "UPDATE claims SET mechanism = ?, updated_at = ? WHERE claim_id = ?",
+                        (scrub_text(cleaned_mech), now_iso, crow["claim_id"]),
+                    )
+                    scrubbed_claim_ids.append(str(crow["claim_id"]))
 
-        log_event(
-            conn,
-            "operator",
-            "run_reopened",
-            run_id,
-            {
-                "hydrated_from_shared_mirror": hydrated,
-                "target_reconstructed": target_reconstructed,
-                "unblocked_claim_ids": unblocked_claim_ids,
-                "scrubbed_claim_ids": scrubbed_claim_ids,
-            },
-        )
+            if unblock_zero_attempt_claims:
+                blocked_rows = conn.execute("SELECT * FROM claims WHERE status = 'blocked' ORDER BY created_at ASC").fetchall()
+                for bc in blocked_rows:
+                    fails = int(bc["failed_repro_count"] or 0)
+                    env_b = str(bc["env_blocker"] or "").strip() if "env_blocker" in bc.keys() else ""
+                    is_policy_deferred = bool(POLICY_REFUSAL_BLOCK_RE.search(str(bc["blocker_reason"] or "")))
+                    if not is_policy_deferred and env_b in ZERO_ATTEMPT_EXEMPT_ENV_BLOCKERS:
+                        continue
+                    if is_policy_deferred or fails == 0:
+                        fals_id = str(bc["falsifier_worker_id"] or "").strip()
+                        prop_id = str(bc["proposer_worker_id"] or "").strip()
+                        has_falsifier = bool(fals_id) and (fals_id != prop_id)
+                        next_status = "survived_falsify" if has_falsifier else "proposed"
+                        axes = derive_claim_axes(next_status)
+                        preserved_notes = str(bc["falsify_notes"] or "").strip()
+                        if not preserved_notes and bc["blocker_reason"]:
+                            stripped_note = POLICY_REFUSAL_BLOCK_RE.sub("", str(bc["blocker_reason"])).strip()
+                            preserved_notes = stripped_note[:600]
+                        conn.execute(
+                            """
+                            UPDATE claims
+                            SET status = ?, research_state = ?, evidence_state = ?,
+                                blocker_reason = '', env_blocker = '',
+                                falsify_notes = ?, updated_at = ?
+                            WHERE claim_id = ?
+                            """,
+                            (
+                                next_status,
+                                axes.research_state.value,
+                                axes.evidence_state.value,
+                                scrub_text(preserved_notes),
+                                now_iso,
+                                bc["claim_id"],
+                            ),
+                        )
+                        conn.execute(
+                            """
+                            UPDATE tasks
+                            SET status = 'open', updated_at = ?
+                            WHERE parent_claim_id = ? AND kind IN ('reproduce', 'falsify') AND status IN ('done', 'dry')
+                            """,
+                            (now_iso, bc["claim_id"]),
+                        )
+                        unblocked_claim_ids.append(str(bc["claim_id"]))
+
+            # Ensure Stage-5 Converge (`chain`) re-evaluates once unblocked claims reproduce!
+            if unblocked_claim_ids:
+                conn.execute(
+                    "UPDATE tasks SET status = 'open', updated_at = ? WHERE kind = 'chain' AND status IN ('done', 'dry')",
+                    (now_iso,),
+                )
+
+            ready_repro = conn.execute(
+                "SELECT claim_id FROM claims WHERE status = 'survived_falsify' ORDER BY created_at ASC"
+            ).fetchall()
+            ready_falsify = conn.execute(
+                "SELECT claim_id FROM claims WHERE status = 'proposed' ORDER BY created_at ASC"
+            ).fetchall()
+
+            log_event(
+                conn,
+                "operator",
+                "run_reopened",
+                run_id,
+                {
+                    "hydrated_from_shared_mirror": hydrated,
+                    "target_reconstructed": target_reconstructed,
+                    "unblocked_claim_ids": unblocked_claim_ids,
+                    "scrubbed_claim_ids": scrubbed_claim_ids,
+                },
+            )
+        (base_home / "current_run").write_text(f"{run_id}\n", encoding="utf-8")
     finally:
         conn.close()
 

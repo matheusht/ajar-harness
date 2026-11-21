@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from ajar.domain.enums import RunStatus
 from ajar.domain.models import InvalidTransitionError
 
-CURRENT_SCHEMA_VERSION: int = 330
+CURRENT_SCHEMA_VERSION: int = 331
 
 _SAVEPOINT_SEQ = itertools.count(1)
 

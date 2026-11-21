@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import secrets
 import sqlite3
 from typing import Any
@@ -19,6 +20,9 @@ from ajar.db import utc_now_iso
 from ajar.domain import AjarError
 from ajar.gates import compute_attribution_and_economics
 from ajar.redact import scrub_text
+
+HEX_SALT_RE = re.compile(r"^[0-9a-fA-F]{16,128}$")
+SHA256_HEX_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
 
 def export_run_economics(conn: sqlite3.Connection) -> dict[str, Any]:
@@ -71,8 +75,11 @@ def _canonical_json_bytes(obj: dict[str, Any]) -> bytes:
 
 def verify_commit_preimage(preimage: dict[str, Any], commitment_sha256: str) -> bool:
     """Deterministically verify that a revealed preimage matches a published SHA-256 commitment."""
-    digest = hashlib.sha256(_canonical_json_bytes(preimage)).hexdigest()
-    return secrets.compare_digest(digest, commitment_sha256.strip().lower())
+    candidate = commitment_sha256.strip()
+    if not SHA256_HEX_RE.match(candidate):
+        return False
+    digest = hashlib.sha256(_canonical_json_bytes(preimage)).hexdigest().encode("ascii")
+    return secrets.compare_digest(digest, candidate.lower().encode("ascii"))
 
 
 def build_commit_preimage(
@@ -85,8 +92,10 @@ def build_commit_preimage(
 ) -> dict[str, Any]:
     """Build a gapless `P0-3` commit-before-submit SHA-256 ledger commitment for a confirmed finding.
 
-    All text fields are passed through `scrub_text` so raw exploit payloads, credentials, or
+    All string fields are passed through `scrub_text` so raw exploit payloads, credentials, or
     tokens can never leak into either the public commitment record or private reveal preimage.
+    Passing an explicit `--salt` produces a 100% deterministic `commitment_sha256` across calls
+    because the preimage hashes the finding's immutable `created_at` timestamp rather than wall time.
     """
     fid = finding_id.strip()
     if not fid:
@@ -95,27 +104,40 @@ def build_commit_preimage(
     if finding is None:
         raise AjarError(f"Unknown finding_id: {fid}", EXIT_USER_ERROR)
 
-    run = conn.execute("SELECT run_id, target_path, commitment_hash FROM runs LIMIT 1").fetchone()
+    if salt is not None:
+        salt_hex = salt.strip().lower()
+        if not HEX_SALT_RE.match(salt_hex):
+            raise AjarError(
+                "Invalid --salt: expected 16–128 hexadecimal characters.",
+                EXIT_USER_ERROR,
+            )
+    else:
+        salt_hex = secrets.token_hex(16)
+
+    run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
+    run_keys = set(run.keys()) if run is not None else set()
     run_id = str(run["run_id"]) if run is not None else ""
     derived_slug = (target_slug or "").strip()
     if not derived_slug and run is not None and run["target_path"]:
         derived_slug = pathlib.Path(str(run["target_path"])).name
-    derived_commit = (commit_sha or "").strip() or (str(run["commitment_hash"]) if run is not None else "")
-    salt_hex = (salt or "").strip() or secrets.token_hex(16)
-    created_at = utc_now_iso()
+
+    head_sha = str(run["head_sha"] or "").strip() if (run is not None and "head_sha" in run_keys) else ""
+    run_commit_fallback = str(run["commitment_hash"] or "").strip() if run is not None else ""
+    derived_commit = (commit_sha or "").strip() or head_sha or run_commit_fallback
+    finding_created_at = str(finding["created_at"] or "").strip()
 
     preimage: dict[str, Any] = {
         "schema_version": "ajar-ledger-preimage/1",
-        "run_id": run_id,
-        "finding_id": fid,
-        "claim_id": str(finding["claim_id"]),
+        "run_id": scrub_text(run_id),
+        "finding_id": scrub_text(fid),
+        "claim_id": scrub_text(str(finding["claim_id"])),
         "target_slug": scrub_text(derived_slug),
         "commit_sha": scrub_text(derived_commit),
-        "severity": str(finding["severity"]),
+        "severity": scrub_text(str(finding["severity"])),
         "title": scrub_text(str(finding["title"])),
         "locus": scrub_text(str(finding["locus"])),
-        "attribution": str(finding["attribution"]),
-        "created_at": created_at,
+        "attribution": scrub_text(str(finding["attribution"])),
+        "created_at": scrub_text(finding_created_at),
         "salt": salt_hex,
     }
     commitment_sha256 = hashlib.sha256(_canonical_json_bytes(preimage)).hexdigest()
@@ -123,12 +145,13 @@ def build_commit_preimage(
     public_record: dict[str, Any] = {
         "schema_version": "ajar-ledger-commitment/1",
         "commitment_sha256": commitment_sha256,
-        "finding_id": fid,
+        "finding_id": preimage["finding_id"],
         "target_slug": preimage["target_slug"],
         "commit_sha": preimage["commit_sha"],
         "severity": preimage["severity"],
         "attribution": preimage["attribution"],
-        "committed_at": created_at,
+        "finding_created_at": preimage["created_at"],
+        "committed_at": utc_now_iso(),
     }
 
     return {
@@ -140,12 +163,23 @@ def build_commit_preimage(
 
 
 def write_restricted_json(path: pathlib.Path, payload: dict[str, Any], *, mode: int = 0o600) -> None:
-    """Atomically write JSON with restrictive permissions (used for private reveal preimages)."""
+    """Atomically write JSON with restrictive permissions, refusing symlinks."""
+    if path.is_symlink():
+        raise AjarError(f"Refusing to write private preimage through symlink: {path}", EXIT_USER_ERROR)
     path.parent.mkdir(parents=True, exist_ok=True)
     data = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
-    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    tmp_path = path.parent / f".{path.name}.{secrets.token_hex(8)}.tmp"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(str(tmp_path), flags, mode)
     try:
-        os.write(fd, data)
-    finally:
-        os.close(fd)
-    os.chmod(path, mode)
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+        os.replace(str(tmp_path), str(path))
+    except BaseException:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise

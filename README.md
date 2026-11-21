@@ -64,14 +64,14 @@ ajar run /path/to/target --mode source --until exhaustive-high --workers 3 --dis
 
 | Stage | Command | Arms Enforced |
 | --- | --- | --- |
-| **Finding Proof (`reproduced`)** | `ajar claim reproduce` | **Arms 1–4 + Locus Match (+ Arms 5A/5B on `H6`):** Clean+PoC fires, Clean+Control passes, `1–5` line micro-patch at `claim.locus` blocks PoC, Micro-patch+Control passes |
+| **Finding Proof (`reproduced`)** | `ajar claim reproduce` | **Arms 1–4 + Locus Match (+ Arms 5A/5B on `H6`):** Clean+PoC fires, Clean+Control passes, `1–16` line micro-patch at `claim.locus` blocks PoC, Micro-patch+Control passes |
 | **Production Fix (`verified_local` / `maintainer_patched`)** | `ajar patch verify` | **Arms 1–9 (`remediate` phase):** Arms 1–4 + **Arm 5** full test suite + **Arm 6** `>= 3` bypass variants blocked + **Arm 7** caller NULL/error-return audit + **Arm 8** sibling-route/peer-hook symmetry audit + **Arm 9** `git apply -R` revert proof |
 
 ## Core CLI Commands
 
 | Command | Purpose |
 | --- | --- |
-| `ajar quote <target> [--diff <base..head>]` | Preview deterministic `Code` LOC quote (`$0.05/LoC`, `$25` min) and `35%` COGS cap |
+| `ajar quote <target> [--diff <base..head>]` | Preview deterministic `Code` LOC quote (`$0.04/LoC`, `$10` min, `$40` cap up to 8K LoC) and `35%` COGS cap |
 | `ajar init <target>` | Create `~/.ajar/runs/<run_id>/run.db`, mirror/worktree slots, and batched FTS5 indexes |
 | `ajar phase show\|advance --to remediate` | Enforce monotonic `hunt -> remediate -> full` campaign phase split |
 | `ajar steer add\|list\|revoke` | Manage attributable workspace `Steers` (`scope_authority` vs `research_steering`) |

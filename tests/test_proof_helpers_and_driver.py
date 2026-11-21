@@ -20,6 +20,7 @@ from ajar.services import (
     build_commit_preimage,
     export_run_economics,
     verify_commit_preimage,
+    write_restricted_json,
 )
 from ajar.store import immediate_tx
 
@@ -42,6 +43,9 @@ def _seed_run_with_finding(
     *,
     run_id: str = "proof-run-1",
     finding_title: str = "Auth bypass on empty nonce",
+    spend_usd: float = 20.0,
+    code_quote_usd: float = 100.0,
+    head_sha: str = "abc1234567890def",
 ) -> str:
     with mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}):
         conn = open_run_db(run_id, create=True)
@@ -53,20 +57,20 @@ def _seed_run_with_finding(
                     INSERT INTO runs(
                         run_id, target_path, workspace_path, target_mode, workspace_mode,
                         goal, stopping_criterion, campaign_phase, status,
-                        in_scope_loc, code_quote_usd, cogs_cap_usd, commitment_hash, created_at
+                        in_scope_loc, code_quote_usd, cogs_cap_usd, commitment_hash, head_sha, created_at
                     ) VALUES (?, '/tmp/demo-target', '/tmp/demo-target', 'source', 'in_place',
                               'proof test', 'exhaustive-high', 'hunt', 'active',
-                              2000, 100.0, 35.0, 'deadbeefcafe', ?)
+                              2000, ?, 35.0, 'deadbeefcafe', ?, ?)
                     """,
-                    (run_id, now),
+                    (run_id, code_quote_usd, head_sha, now),
                 )
                 conn.execute(
                     """
                     INSERT INTO spend_ledger(
                         entry_id, worker_id, phase, model, tokens_in, tokens_out, cost_usd, created_at
-                    ) VALUES ('spd-1', 'w1', 'explore', 'host-model', 4000, 1200, 20.0, ?)
+                    ) VALUES ('spd-1', 'w1', 'explore', 'host-model', 4000, 1200, ?, ?)
                     """,
-                    (now,),
+                    (spend_usd, now),
                 )
                 conn.execute(
                     """
@@ -112,7 +116,7 @@ class ProofHelpersAndDriverTests(unittest.TestCase):
             base = pathlib.Path(td)
             ajar_home = base / "ajar_home"
             out_file = base / "out" / "econ.json"
-            run_id = _seed_run_with_finding(ajar_home)
+            run_id = _seed_run_with_finding(ajar_home, spend_usd=20.0, code_quote_usd=100.0)
 
             with mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}):
                 conn = open_run_db(run_id)
@@ -140,7 +144,32 @@ class ProofHelpersAndDriverTests(unittest.TestCase):
                 written = json.loads(out_file.read_text(encoding="utf-8"))
                 self.assertEqual(written["implied_gross_margin_pct"], 80.0)
 
-    def test_commit_preimage_determinism_redaction_and_file_permissions(self) -> None:
+                # Over-cap run: gross_margin_floor_pass=False, yet runs.status remains strictly untouched ('active')
+                over_id = _seed_run_with_finding(ajar_home, run_id="proof-over", spend_usd=60.0, code_quote_usd=100.0)
+                conn_over = open_run_db(over_id)
+                try:
+                    over_econ = export_run_economics(conn_over)
+                    self.assertFalse(over_econ["gross_margin_floor_pass"])
+                    self.assertEqual(over_econ["implied_gross_margin_pct"], 40.0)
+                    st = str(conn_over.execute("SELECT status FROM runs LIMIT 1").fetchone()["status"])
+                    self.assertEqual(st, "active")
+                finally:
+                    conn_over.close()
+
+                # Zero-quote edge case & missing runs row edge case
+                zero_id = _seed_run_with_finding(ajar_home, run_id="proof-zero", spend_usd=5.0, code_quote_usd=0.0)
+                conn_z = open_run_db(zero_id)
+                try:
+                    z_econ = export_run_economics(conn_z)
+                    self.assertIsNone(z_econ["implied_gross_margin_pct"])
+                    with immediate_tx(conn_z):
+                        conn_z.execute("DELETE FROM runs")
+                    with self.assertRaises(AjarError):
+                        export_run_economics(conn_z)
+                finally:
+                    conn_z.close()
+
+    def test_commit_preimage_determinism_redaction_security_and_stdout_isolation(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             base = pathlib.Path(td)
             ajar_home = base / "ajar_home"
@@ -151,33 +180,51 @@ class ProofHelpersAndDriverTests(unittest.TestCase):
             run_id = _seed_run_with_finding(
                 ajar_home,
                 finding_title=f"Token leak exposes {fake_secret} in error response",
+                head_sha="cafebabe12345678",
             )
 
             with mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}):
                 conn = open_run_db(run_id)
                 try:
-                    res = build_commit_preimage(
-                        conn,
-                        finding_id="fnd-proof1",
-                        target_slug="acme/gateway",
-                        commit_sha="0123456789abcdef",
-                        salt="0011223344556677",
-                    )
-                    self.assertEqual(res["schema_version"], "ajar-ledger-commitment/1")
-                    self.assertEqual(len(str(res["commitment_sha256"])), 64)
-                    self.assertTrue(verify_commit_preimage(res["private_preimage"], str(res["commitment_sha256"])))
-                    # Tampering with preimage MUST fail verification
-                    tampered = dict(res["private_preimage"])
+                    # Cross-call determinism even if wall clock advances between calls
+                    with mock.patch("ajar.services.proof.utc_now_iso", side_effect=["2026-11-21T00:00:01Z", "2026-11-21T00:09:59Z"]):
+                        res1 = build_commit_preimage(
+                            conn,
+                            finding_id="fnd-proof1",
+                            target_slug="acme/gateway",
+                            salt="0011223344556677",
+                        )
+                        res2 = build_commit_preimage(
+                            conn,
+                            finding_id="fnd-proof1",
+                            target_slug="acme/gateway",
+                            salt="0011223344556677",
+                        )
+                    self.assertEqual(res1["commitment_sha256"], res2["commitment_sha256"])
+                    self.assertEqual(res1["private_preimage"]["commit_sha"], "cafebabe12345678")
+                    self.assertEqual(len(str(res1["commitment_sha256"])), 64)
+                    self.assertTrue(verify_commit_preimage(res1["private_preimage"], str(res1["commitment_sha256"])))
+                    # Tampering or non-ASCII commitment MUST return False (never TypeError)
+                    tampered = dict(res1["private_preimage"])
                     tampered["severity"] = "critical"
-                    self.assertFalse(verify_commit_preimage(tampered, str(res["commitment_sha256"])))
+                    self.assertFalse(verify_commit_preimage(tampered, str(res1["commitment_sha256"])))
+                    self.assertFalse(verify_commit_preimage(res1["private_preimage"], "🔥" * 64))
+                    self.assertFalse(verify_commit_preimage(res1["private_preimage"], "not-a-hex-digest"))
                     # Raw secret MUST be scrubbed from preimage and public record
-                    self.assertNotIn(fake_secret, json.dumps(res))
-                    self.assertIn("<REDACTED>", str(res["private_preimage"]["title"]))
-                    # Unknown finding raises AjarError
+                    self.assertNotIn(fake_secret, json.dumps(res1))
+                    self.assertIn("<REDACTED>", str(res1["private_preimage"]["title"]))
+                    # Invalid salt or unknown finding raises AjarError
+                    with self.assertRaises(AjarError):
+                        build_commit_preimage(conn, finding_id="fnd-proof1", salt="too-short!")
                     with self.assertRaises(AjarError):
                         build_commit_preimage(conn, finding_id="fnd-does-not-exist")
                 finally:
                     conn.close()
+
+                # Pre-create a world-readable file at priv_path; atomic replacement MUST yield strict 0o600
+                priv_path.parent.mkdir(parents=True, exist_ok=True)
+                priv_path.write_text("stale", encoding="utf-8")
+                os.chmod(priv_path, 0o644)
 
                 rc, cli_res = _run_cli(
                     [
@@ -188,8 +235,6 @@ class ProofHelpersAndDriverTests(unittest.TestCase):
                         run_id,
                         "--target-slug",
                         "acme/gateway",
-                        "--commit-sha",
-                        "0123456789abcdef",
                         "--salt",
                         "0011223344556677",
                         "--public-out",
@@ -199,6 +244,9 @@ class ProofHelpersAndDriverTests(unittest.TestCase):
                     ]
                 )
                 self.assertEqual(rc, 0)
+                # When --preimage-out is passed, stdout MUST NOT leak private_preimage!
+                self.assertNotIn("private_preimage", cli_res)
+                self.assertEqual(cli_res["preimage_out"], str(priv_path))
                 self.assertTrue(pub_path.is_file())
                 self.assertTrue(priv_path.is_file())
                 priv_mode = stat.S_IMODE(priv_path.stat().st_mode)
@@ -209,7 +257,16 @@ class ProofHelpersAndDriverTests(unittest.TestCase):
                 self.assertTrue(verify_commit_preimage(priv_obj, pub_obj["commitment_sha256"]))
                 self.assertNotIn(fake_secret, priv_path.read_text(encoding="utf-8"))
 
-    def test_verify_repo_driver_syntax_and_help(self) -> None:
+                # Symlink target at --preimage-out MUST be refused cleanly without modifying symlink target
+                victim = base / "victim.txt"
+                victim.write_text("untouched", encoding="utf-8")
+                sym = base / "symlink_out.json"
+                sym.symlink_to(victim)
+                with self.assertRaises(AjarError):
+                    write_restricted_json(sym, {"secret": "x"})
+                self.assertEqual(victim.read_text(encoding="utf-8"), "untouched")
+
+    def test_verify_repo_driver_syntax_help_and_option_validation(self) -> None:
         driver = REPO_ROOT / "scripts" / "verify-repo.sh"
         self.assertTrue(driver.is_file())
         syn = subprocess.run(["bash", "-n", str(driver)], capture_output=True, text=True, check=False)
@@ -218,6 +275,13 @@ class ProofHelpersAndDriverTests(unittest.TestCase):
         self.assertEqual(hlp.returncode, 0, hlp.stderr)
         self.assertIn("--fast", hlp.stdout)
         self.assertIn("--full", hlp.stdout)
+        self.assertNotIn("set -euo pipefail", hlp.stdout)
+        bad = subprocess.run(["bash", str(driver), "--bogus-flag"], capture_output=True, text=True, check=False)
+        self.assertEqual(bad.returncode, 2)
+        bad_combo = subprocess.run(
+            ["bash", str(driver), "--fast", "--strict-legacy"], capture_output=True, text=True, check=False
+        )
+        self.assertEqual(bad_combo.returncode, 2)
 
 
 if __name__ == "__main__":

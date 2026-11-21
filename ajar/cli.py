@@ -1888,6 +1888,16 @@ def cmd_ledger(args: argparse.Namespace) -> int:
         pub_p.write_text(json.dumps(res["public_record"], indent=2, sort_keys=True) + "\n", encoding="utf-8")
     if args.preimage_out:
         write_restricted_json(pathlib.Path(args.preimage_out), res["private_preimage"], mode=0o600)
+        emit_payload: dict[str, Any] = {
+            "schema_version": res["schema_version"],
+            "commitment_sha256": res["commitment_sha256"],
+            "public_record": res["public_record"],
+            "preimage_out": str(args.preimage_out),
+        }
+        if args.public_out:
+            emit_payload["public_out"] = str(args.public_out)
+        _emit(emit_payload, True)
+        return EXIT_OK
     _emit(res, True)
     return EXIT_OK
 

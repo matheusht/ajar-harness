@@ -261,13 +261,15 @@ class SwarmResilienceAndSelfHealingTests(unittest.TestCase):
                 _prepare_slot_worktree(mirror_dir, slot1)
                 self.assertFalse(stale_lock.exists())
 
-                # 3. Failing run_source_reproduction persists replayable scrubbed failure receipt!
+                # 3. Failing run_source_reproduction persists replayable scrubbed valid-JSON failure receipt
+                # even when poc_cmd contains HTTP cookie headers and provider tokens!
                 fake_tok = "ghp_" + ("1234567890" * 3) + "123456"
+                fake_cookie = "Cook" + "ie: session=abc1234567890"
                 res_fail = run_source_reproduction(
                     run_dir=rdir,
                     target_dir=target,
                     claim_id="clm-fail-1",
-                    poc_cmd=f"python3 -c 'print(\"token={fake_tok}\")'",
+                    poc_cmd=f"curl -H '{fake_cookie}' http://127.0.0.1/?t={fake_tok}",
                     control_cmd="python3 -c 'pass'",
                     micropatch_path=rdir / "does-not-exist.diff",
                 )
@@ -278,9 +280,29 @@ class SwarmResilienceAndSelfHealingTests(unittest.TestCase):
                 self.assertTrue(art_path.is_file())
                 art_raw = art_path.read_text(encoding="utf-8")
                 self.assertNotIn(fake_tok, art_raw)
+                self.assertNotIn("abc1234567890", art_raw)
                 art_json = json.loads(art_raw)
                 self.assertEqual(art_json["schema"], "ajar-repro-failure/1")
                 self.assertEqual(art_json["claim_id"], "clm-fail-1")
+                self.assertIn("<REDACTED>", art_json["replay"]["poc_cmd"])
+
+                # 3b. MCP AjarError with Cookie header in details still returns valid scrubbed JSON!
+                from ajar.domain import AjarError
+
+                with mock.patch(
+                    "ajar.mcp.dispatch_mcp_tool",
+                    side_effect=AjarError("blocked", details={"hdr": fake_cookie}),
+                ):
+                    cookie_resp = handle_jsonrpc_message(
+                        {"jsonrpc": "2.0", "id": 10, "method": "tools/call", "params": {"name": "ajar_status", "arguments": {}}},
+                        run_id="run-repro-ops",
+                        ajar_home=ajar_home,
+                    )
+                    assert cookie_resp is not None
+                    self.assertTrue(cookie_resp["result"]["isError"])
+                    cookie_err = json.loads(cookie_resp["result"]["content"][0]["text"])
+                    self.assertNotIn("abc1234567890", cookie_err["details"]["hdr"])
+                    self.assertIn("<REDACTED>", cookie_err["details"]["hdr"])
 
                 # 4. `ajar doctor --run <id> --prune-slots` reports health, skips locked slots, prunes unlocked slots!
                 slot0 = repro_dir / "slot-0"

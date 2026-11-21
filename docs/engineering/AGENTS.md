@@ -39,7 +39,7 @@ Read this file before modifying `ajar/`, `skills/`, `benchmarks/`, `docs/`, or `
 | `ajar/report.py` | Markdown and JSON report compiler including `realism_tier`, `ub_divergence_class`, `ablation_matrix_json`, `patch_verifications`, and `CLOSEOUT_RECEIPT` |
 | `ajar/redact.py` | Pure-stdlib secret scanner/redactor and `scrubbed_subprocess_env` preserving `SDKROOT`/macOS `xcrun`, offline `rustup`/`cargo` toolchains, `$AJAR_RUN_DIR`, and dangling-symlink-clean `PATH` |
 | `ajar/cli/` | Cohesive CLI package (`__init__.py`, `__main__.py`, `common.py`, `hunt.py`, `claims.py`, `ops.py`, `parser.py`) delegating all state mutations to `ajar/services/` (`0` inline SQL writes) |
-| `tools/arch_lint.py` | Mechanical architecture & invariant linter (9 rules, AST-cached, self-healing `fix_hint` diagnostics) |
+| `tools/arch_lint.py` | Mechanical architecture & invariant linter (10 rules, AST-cached, self-healing `fix_hint` diagnostics) |
 
 ## Rule-to-Enforcer Map
 

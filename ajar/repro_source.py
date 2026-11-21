@@ -29,7 +29,7 @@ import tempfile
 import time
 from typing import Any, Mapping
 
-from ajar.redact import scrub_text, scrubbed_subprocess_env
+from ajar.redact import scrub_json_value, scrub_text, scrubbed_subprocess_env
 from ajar.repro_helpers import ensure_helpers_runtime
 from ajar.store import new_id, utc_now_iso
 
@@ -878,7 +878,7 @@ def _acquire_slot(repro_dir: pathlib.Path, max_slots: int = 8) -> tuple[int, Any
 def _clear_stale_slot_git_locks(slot_dir: pathlib.Path) -> list[str]:
     """Remove stale git index/shallow lock files inside a slot worktree while holding `slot-<k>.lock`."""
     git_dir = slot_dir / ".git"
-    if not git_dir.is_dir():
+    if git_dir.is_symlink() or not git_dir.is_dir():
         return []
     cleared: list[str] = []
     for lock_name in ("index.lock", "shallow.lock"):
@@ -927,29 +927,31 @@ def _persist_repro_failure_artifact(
     failures_dir = run_dir / "repro" / "failures"
     failures_dir.mkdir(parents=True, exist_ok=True)
     safe_cid = re.sub(r"[^A-Za-z0-9_.-]+", "_", (claim_id or "claim").strip())[:64] or "claim"
-    receipt = {
-        "schema": "ajar-repro-failure/1",
-        "recorded_at": utc_now_iso(),
-        "claim_id": claim_id,
-        "error_class": str(result.get("error_class") or ""),
-        "reason": scrub_text(str(result.get("reason") or "")),
-        "observation_hash": str(result.get("observation_hash") or ""),
-        "replay": {
-            "poc_cmd": scrub_text(poc_cmd),
-            "control_cmd": scrub_text(control_cmd),
-            "build_cmd": scrub_text(build_cmd),
-            "micropatch_path": scrub_text(str(micropatch_path)),
-        },
-        "arms": {
-            "arm1_clean_poc": result.get("arm1_clean_poc") or {},
-            "arm2_clean_control": result.get("arm2_clean_control") or {},
-            "arm3_patch_poc": result.get("arm3_patch_poc") or {},
-            "arm4_patch_control": result.get("arm4_patch_control") or {},
-            "arm5a_release_poc": result.get("arm5a_release_poc") or {},
-            "arm5b_release_control": result.get("arm5b_release_control") or {},
-        },
-    }
-    encoded = (scrub_text(json.dumps(receipt, indent=2, sort_keys=True, default=str)) + "\n").encode("utf-8")
+    receipt = scrub_json_value(
+        {
+            "schema": "ajar-repro-failure/1",
+            "recorded_at": utc_now_iso(),
+            "claim_id": claim_id,
+            "error_class": str(result.get("error_class") or ""),
+            "reason": str(result.get("reason") or ""),
+            "observation_hash": str(result.get("observation_hash") or ""),
+            "replay": {
+                "poc_cmd": poc_cmd,
+                "control_cmd": control_cmd,
+                "build_cmd": build_cmd,
+                "micropatch_path": str(micropatch_path),
+            },
+            "arms": {
+                "arm1_clean_poc": result.get("arm1_clean_poc") or {},
+                "arm2_clean_control": result.get("arm2_clean_control") or {},
+                "arm3_patch_poc": result.get("arm3_patch_poc") or {},
+                "arm4_patch_control": result.get("arm4_patch_control") or {},
+                "arm5a_release_poc": result.get("arm5a_release_poc") or {},
+                "arm5b_release_control": result.get("arm5b_release_control") or {},
+            },
+        }
+    )
+    encoded = (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode("utf-8")
     seq = 1
     while True:
         fname = f"{safe_cid}-{seq}.json"
@@ -959,10 +961,8 @@ def _persist_repro_failure_artifact(
         except FileExistsError:
             seq += 1
             continue
-        try:
-            os.write(fd, encoded)
-        finally:
-            os.close(fd)
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(encoded)
         return f"repro/failures/{fname}"
 
 
@@ -1496,17 +1496,19 @@ def _run_source_reproduction_impl(
             "post_state_snapshot": captured_snapshot,
         }
     finally:
-        if not verified_success and captured_snapshot and captured_snapshot.get("archive_path"):
-            raw_snap = pathlib.Path(str(captured_snapshot["archive_path"]))
-            snap_file = raw_snap if raw_snap.is_absolute() else (run_dir / raw_snap)
-            snap_file.unlink(missing_ok=True)
-        if (slot_dir / ".git").exists():
-            _clear_stale_slot_git_locks(slot_dir)
-            subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
-            _clean_slot_preserving_objects(slot_dir, check=False)
-            _bump_files_mtime(slot_dir, touched_files, watermark_file)
-        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
-        lock_fh.close()
+        try:
+            if not verified_success and captured_snapshot and captured_snapshot.get("archive_path"):
+                raw_snap = pathlib.Path(str(captured_snapshot["archive_path"]))
+                snap_file = raw_snap if raw_snap.is_absolute() else (run_dir / raw_snap)
+                snap_file.unlink(missing_ok=True)
+            if (slot_dir / ".git").exists():
+                _clear_stale_slot_git_locks(slot_dir)
+                subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
+                _clean_slot_preserving_objects(slot_dir, check=False)
+                _bump_files_mtime(slot_dir, touched_files, watermark_file)
+        finally:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+            lock_fh.close()
 
 
 def run_repro_try(
@@ -1595,11 +1597,13 @@ def run_repro_try(
             "result": res,
         }
     finally:
-        if (slot_dir / ".git").exists():
-            _clear_stale_slot_git_locks(slot_dir)
-            subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
-            _clean_slot_preserving_objects(slot_dir, check=False)
-            if touched:
-                _bump_files_mtime(slot_dir, touched, watermark_file)
-        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
-        lock_fh.close()
+        try:
+            if (slot_dir / ".git").exists():
+                _clear_stale_slot_git_locks(slot_dir)
+                subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
+                _clean_slot_preserving_objects(slot_dir, check=False)
+                if touched:
+                    _bump_files_mtime(slot_dir, touched, watermark_file)
+        finally:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+            lock_fh.close()

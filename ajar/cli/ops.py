@@ -76,7 +76,7 @@ from ajar.workspace import init_run_workspace
 
 def _dir_size_bytes(path: pathlib.Path) -> int:
     total = 0
-    if not path.exists():
+    if path.is_symlink() or not path.exists():
         return 0
     for item in path.rglob("*"):
         if item.is_file() and not item.is_symlink():
@@ -116,7 +116,9 @@ def _diagnose_run_health(run_id: str, *, prune_slots: bool = False) -> dict[str,
     pruned_slots: list[str] = []
     reclaimed_bytes = 0
     if repro_dir.is_dir():
-        for slot_dir in sorted(p for p in repro_dir.iterdir() if p.is_dir() and p.name.startswith("slot-")):
+        for slot_dir in sorted(
+            p for p in repro_dir.iterdir() if not p.is_symlink() and p.is_dir() and p.name.startswith("slot-")
+        ):
             lock_path = repro_dir / f"{slot_dir.name}.lock"
             locked = False
             fh = open(lock_path, "a+", encoding="utf-8")

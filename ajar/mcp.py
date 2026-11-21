@@ -25,7 +25,7 @@ from ajar.db import (
 from ajar.gates import check_all_gates
 from ajar.graph import export_attack_flow_graph
 from ajar.oracles import query_oracle
-from ajar.redact import scrub_text
+from ajar.redact import scrub_json_value, scrub_text
 from ajar.repomap import build_repomap
 from ajar.services import (
     add_anomaly,
@@ -432,7 +432,7 @@ def handle_jsonrpc_message(
                 "error": scrub_text(str(exc)),
                 "error_type": type(exc).__name__,
                 "exit_code": int(exc.exit_code),
-                "details": json.loads(scrub_text(json.dumps(exc.details, sort_keys=True, default=str))),
+                "details": scrub_json_value(exc.details),
             }
             return {
                 "jsonrpc": "2.0",

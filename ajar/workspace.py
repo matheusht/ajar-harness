@@ -168,6 +168,7 @@ def init_run_workspace(
     workspace_mode: str = "envelope",
     goal: str = "Identify, falsify, and reproduce high-severity software vulnerabilities.",
     stopping_criterion: str = "exhaustive-high",
+    campaign_phase: str = "hunt",
     budget_usd: float | None = None,
     uncapped: bool = False,
     brief_file: str | None = None,
@@ -189,6 +190,10 @@ def init_run_workspace(
         raise AjarError(f"Unsupported --mode {target_mode!r}.", EXIT_USER_ERROR)
     if workspace_mode not in ("envelope", "in_place"):
         raise AjarError(f"Unsupported workspace mode {workspace_mode!r}.", EXIT_USER_ERROR)
+    if stopping_criterion not in ("exhaustive-high", "first-verified-high", "crown-jewel"):
+        raise AjarError(f"Unsupported --until/--stopping {stopping_criterion!r}.", EXIT_USER_ERROR)
+    if campaign_phase not in ("hunt", "remediate", "full"):
+        raise AjarError(f"Unsupported --phase {campaign_phase!r}.", EXIT_USER_ERROR)
     if uncapped and budget_usd is not None:
         raise AjarError("Cannot combine --uncapped with an explicit --budget / --cogs-cap.", EXIT_USER_ERROR)
 
@@ -307,9 +312,9 @@ def init_run_workspace(
             """
             INSERT INTO runs(
                 run_id, target_path, workspace_path, target_mode, workspace_mode,
-                goal, stopping_criterion, budget_usd, in_scope_loc, code_quote_usd,
+                goal, stopping_criterion, campaign_phase, budget_usd, in_scope_loc, code_quote_usd,
                 cogs_cap_usd, pricing_mode, commitment_hash, status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
             """,
             (
                 rid,
@@ -319,6 +324,7 @@ def init_run_workspace(
                 workspace_mode,
                 clean_goal,
                 stopping_criterion,
+                campaign_phase,
                 eff_cogs_cap,
                 int(loc_info["total_loc"]),
                 quote_usd,
@@ -388,6 +394,8 @@ def init_run_workspace(
             {
                 "target_mode": target_mode,
                 "workspace_mode": workspace_mode,
+                "stopping_criterion": stopping_criterion,
+                "campaign_phase": campaign_phase,
                 "in_scope_loc": loc_info["total_loc"],
                 "code_quote_usd": quote_usd,
                 "cogs_cap_usd": eff_cogs_cap,
@@ -411,6 +419,8 @@ def init_run_workspace(
         "target_path": target_path_str,
         "target_mode": target_mode,
         "workspace_mode": workspace_mode,
+        "stopping_criterion": stopping_criterion,
+        "campaign_phase": campaign_phase,
         "in_scope_loc": int(loc_info["total_loc"]),
         "code_quote_usd": quote_usd,
         "cogs_cap_usd": eff_cogs_cap,

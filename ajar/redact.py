@@ -126,8 +126,46 @@ SAFE_SUBPROCESS_ENV_KEYS: frozenset[str] = frozenset(
         "NODE_PATH",
         "CC",
         "CXX",
+        "SDKROOT",
+        "DEVELOPER_DIR",
+        "MACOSX_DEPLOYMENT_TARGET",
+        "PKG_CONFIG_PATH",
+        "CPATH",
+        "C_INCLUDE_PATH",
+        "CPLUS_INCLUDE_PATH",
+        "LIBRARY_PATH",
+        "AJAR_RUN_DIR",
+        "AJAR_RUN_ID",
     }
 )
+
+_DARWIN_SDKROOT_CACHE: str | None = None
+
+
+def _resolve_darwin_sdkroot() -> str:
+    """Resolve macOS SDK path once via xcrun when raw clang is invoked without SDKROOT."""
+    global _DARWIN_SDKROOT_CACHE
+    if _DARWIN_SDKROOT_CACHE is not None:
+        return _DARWIN_SDKROOT_CACHE
+    import subprocess
+    import sys
+
+    if sys.platform != "darwin":
+        _DARWIN_SDKROOT_CACHE = ""
+        return ""
+    try:
+        cp = subprocess.run(
+            ["/usr/bin/xcrun", "--show-sdk-path"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        sdk = cp.stdout.strip() if cp.returncode == 0 else ""
+        _DARWIN_SDKROOT_CACHE = sdk if (sdk and pathlib.Path(sdk).is_dir()) else ""
+    except OSError:
+        _DARWIN_SDKROOT_CACHE = ""
+    return _DARWIN_SDKROOT_CACHE
 
 
 def detect_secret_classes(data: bytes) -> list[str]:
@@ -175,6 +213,54 @@ def scrub_text(text: str, extra_literals: tuple[str, ...] = ()) -> str:
     )
 
 
+def _sanitize_path_entries(existing_path: str) -> str:
+    kept: list[str] = []
+    for part in existing_path.split(os.pathsep):
+        if not part:
+            continue
+        p = pathlib.Path(part)
+        if p.is_symlink() and not p.exists():
+            continue
+        kept.append(part)
+    return os.pathsep.join(kept) if kept else "/usr/local/bin:/usr/bin:/bin"
+
+
+def _prepend_path_dirs(existing_path: str, extra_dirs: list[pathlib.Path]) -> str:
+    parts = [p for p in _sanitize_path_entries(existing_path).split(os.pathsep) if p]
+    seen = set(parts)
+    prefix: list[str] = []
+    for d in extra_dirs:
+        s = str(d)
+        if s and s not in seen and d.is_dir():
+            prefix.append(s)
+            seen.add(s)
+    return os.pathsep.join(prefix + parts) if (prefix or parts) else "/usr/local/bin:/usr/bin:/bin"
+
+
+def _resolve_rustup_toolchain_bin(rhome: pathlib.Path, preferred_tc: str = "") -> tuple[str, pathlib.Path | None]:
+    settings = rhome / "settings.toml"
+    tdir = rhome / "toolchains"
+    resolved_tc = preferred_tc.strip()
+    if not resolved_tc and settings.is_file():
+        m = re.search(
+            r'^\s*default_toolchain\s*=\s*"([^"]+)"',
+            settings.read_text(encoding="utf-8", errors="ignore"),
+            re.MULTILINE,
+        )
+        if m:
+            resolved_tc = m.group(1).strip()
+    if resolved_tc and (tdir / resolved_tc / "bin").is_dir():
+        return resolved_tc, tdir / resolved_tc / "bin"
+    if tdir.is_dir():
+        tchains = sorted(d.name for d in tdir.iterdir() if d.is_dir())
+        if tchains:
+            stable = [n for n in tchains if n.startswith("stable")]
+            picked = stable[0] if stable else tchains[0]
+            if (tdir / picked / "bin").is_dir():
+                return picked, tdir / picked / "bin"
+    return "", None
+
+
 def _preserve_rust_toolchain_env(
     src: Mapping[str, str],
     clean: dict[str, str],
@@ -182,48 +268,71 @@ def _preserve_rust_toolchain_env(
 ) -> None:
     """Keep `rustup`/`cargo` working offline when `HOME` is isolated, without exposing `credentials.toml`."""
     caller_home = src.get("HOME", "").strip()
-    if "RUSTUP_HOME" not in clean:
-        candidates: list[pathlib.Path] = []
-        if caller_home:
-            candidates.append(pathlib.Path(caller_home) / ".rustup")
-        candidates.extend([pathlib.Path("/usr/local/rustup"), pathlib.Path("/usr/share/rust/.rustup")])
-        for cand in candidates:
-            if not cand.is_dir():
-                continue
-            settings = cand / "settings.toml"
-            tdir = cand / "toolchains"
-            has_tchain = tdir.is_dir() and any(d.is_dir() for d in tdir.iterdir())
-            has_default = settings.is_file() and "default_toolchain" in settings.read_text(
-                encoding="utf-8", errors="ignore"
-            )
-            if has_tchain or has_default:
-                clean["RUSTUP_HOME"] = str(cand)
-                break
+    extra_bins: list[pathlib.Path] = []
+    home_rustup = (pathlib.Path(caller_home) / ".rustup") if caller_home else None
 
-    if "RUSTUP_TOOLCHAIN" not in clean and "RUSTUP_HOME" in clean:
-        rhome = pathlib.Path(clean["RUSTUP_HOME"])
-        settings = rhome / "settings.toml"
-        has_default = settings.is_file() and "default_toolchain" in settings.read_text(encoding="utf-8", errors="ignore")
-        tdir = rhome / "toolchains"
-        if not has_default and tdir.is_dir():
-            tchains = sorted(d.name for d in tdir.iterdir() if d.is_dir())
-            if tchains:
-                stable = [n for n in tchains if n.startswith("stable")]
-                clean["RUSTUP_TOOLCHAIN"] = stable[0] if stable else tchains[0]
+    candidates: list[pathlib.Path] = []
+    if home_rustup is not None:
+        candidates.append(home_rustup)
+    if "RUSTUP_HOME" in clean:
+        candidates.append(pathlib.Path(clean["RUSTUP_HOME"]))
+    candidates.extend([pathlib.Path("/usr/local/rustup"), pathlib.Path("/usr/share/rust/.rustup")])
 
-    if isolated_home is not None and "CARGO_HOME" not in clean and caller_home:
+    seen_rhomes: set[str] = set()
+    preferred_tc = clean.get("RUSTUP_TOOLCHAIN", "").strip()
+    for cand in candidates:
+        cand_str = str(cand)
+        if cand_str in seen_rhomes or not cand.is_dir():
+            continue
+        seen_rhomes.add(cand_str)
+        settings = cand / "settings.toml"
+        tdir = cand / "toolchains"
+        has_tchain = tdir.is_dir() and any(d.is_dir() for d in tdir.iterdir())
+        has_default = settings.is_file() and "default_toolchain" in settings.read_text(
+            encoding="utf-8", errors="ignore"
+        )
+        if has_tchain or has_default:
+            if "RUSTUP_HOME" not in clean:
+                clean["RUSTUP_HOME"] = cand_str
+        tc_name, tc_bin = _resolve_rustup_toolchain_bin(cand, preferred_tc)
+        if tc_bin is not None:
+            extra_bins.append(tc_bin)
+            if cand == home_rustup and "RUSTUP_HOME" not in src:
+                clean["RUSTUP_HOME"] = cand_str
+            if tc_name and not clean.get("RUSTUP_TOOLCHAIN"):
+                clean["RUSTUP_TOOLCHAIN"] = tc_name
+
+    cargo_bin_dir: pathlib.Path | None = None
+    if "CARGO_HOME" in clean:
+        cbin = pathlib.Path(clean["CARGO_HOME"]) / "bin"
+        if cbin.is_dir():
+            cargo_bin_dir = cbin
+    elif caller_home:
         src_cargo = pathlib.Path(caller_home) / ".cargo"
         if src_cargo.is_dir():
-            iso_cargo = isolated_home / ".cargo"
-            iso_cargo.mkdir(parents=True, exist_ok=True)
-            for sub in ("bin", "registry", "git"):
-                target_sub = src_cargo / sub
-                link_sub = iso_cargo / sub
-                if target_sub.exists() and not link_sub.exists():
-                    try:
-                        link_sub.symlink_to(target_sub)
-                    except OSError:
-                        pass
+            if isolated_home is not None:
+                iso_cargo = isolated_home / ".cargo"
+                iso_cargo.mkdir(parents=True, exist_ok=True)
+                for sub in ("bin", "registry", "git"):
+                    target_sub = src_cargo / sub
+                    link_sub = iso_cargo / sub
+                    if link_sub.is_symlink() and not link_sub.exists():
+                        link_sub.unlink(missing_ok=True)
+                    if target_sub.is_dir() and not link_sub.exists():
+                        try:
+                            link_sub.symlink_to(target_sub.resolve())
+                        except OSError:
+                            pass
+                if (iso_cargo / "bin").is_dir():
+                    cargo_bin_dir = iso_cargo / "bin"
+            if cargo_bin_dir is None and (src_cargo / "bin").is_dir():
+                cargo_bin_dir = src_cargo / "bin"
+
+    if cargo_bin_dir is not None:
+        extra_bins.append(cargo_bin_dir)
+    if extra_bins or "RUSTUP_HOME" in clean or "CARGO_HOME" in clean:
+        clean["PATH"] = _prepend_path_dirs(clean.get("PATH", "/usr/local/bin:/usr/bin:/bin"), extra_bins)
+        clean.setdefault("CARGO_NET_OFFLINE", "true")
 
 
 def scrubbed_subprocess_env(
@@ -231,6 +340,7 @@ def scrubbed_subprocess_env(
     base_env: Mapping[str, str] | None = None,
     overrides: Mapping[str, str] | None = None,
     tmp_dir: os.PathLike[str] | str | None = None,
+    run_dir: os.PathLike[str] | str | None = None,
 ) -> dict[str, str]:
     """Build a clean subprocess environment stripped of ambient host credentials."""
     src = os.environ if base_env is None else base_env
@@ -238,10 +348,18 @@ def scrubbed_subprocess_env(
     for key in SAFE_SUBPROCESS_ENV_KEYS:
         if key in src:
             clean[key] = src[key]
-    clean.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
+    clean["PATH"] = _sanitize_path_entries(clean.get("PATH", "/usr/local/bin:/usr/bin:/bin"))
     clean.setdefault("LANG", "C.UTF-8")
     clean["PAGER"] = "cat"
     clean["GIT_TERMINAL_PROMPT"] = "0"
+    if not clean.get("SDKROOT"):
+        sdk = _resolve_darwin_sdkroot()
+        if sdk:
+            clean["SDKROOT"] = sdk
+    if run_dir is not None:
+        rpath = pathlib.Path(run_dir).resolve()
+        clean.setdefault("AJAR_RUN_DIR", str(rpath))
+        clean.setdefault("AJAR_ARTIFACTS_DIR", str(rpath / "artifacts"))
     iso_home: pathlib.Path | None = None
     if tmp_dir is not None:
         iso_home = pathlib.Path(tmp_dir).resolve()

@@ -126,7 +126,7 @@ def check_guarded_primitive_dry_block(
     guarded = conn.execute(
         """
         SELECT primitive_id, locus, kind, guarded_by_locus FROM primitives
-        WHERE chained = 0 AND guarded_by_locus != ''
+        WHERE chained = 0 AND status != 'dry' AND guarded_by_locus != ''
           AND (
               (? != '' AND surface_id = ?)
               OR (? != '' AND locus = ?)
@@ -145,6 +145,16 @@ def check_guarded_primitive_dry_block(
         pid = str(gp["primitive_id"])
         if t_loc == gloc and ploc != gloc and dry_locus.strip() == gloc:
             continue
+        door_tracked = conn.execute(
+            """
+            SELECT 1 FROM parked_doors
+            WHERE blocker_locus = ? OR anchor_locus = ? OR held_ids_json LIKE '%' || ? || '%'
+            LIMIT 1
+            """,
+            (gloc, ploc, pid),
+        ).fetchone()
+        if door_tracked is not None:
+            continue
         tracked = conn.execute(
             """
             SELECT 1 FROM tasks
@@ -152,7 +162,7 @@ def check_guarded_primitive_dry_block(
               AND (
                   (status = 'conditional_blocked' AND blocker_check_locus = ?)
                   OR (
-                      kind = 'chain' AND status IN ('done', 'dry')
+                      kind IN ('chain', 'bridge') AND status IN ('open', 'leased', 'done', 'dry')
                       AND (locus = ? OR summary LIKE '%' || ? || '%' OR summary LIKE '%' || ? || '%')
                   )
                   OR (
@@ -168,8 +178,8 @@ def check_guarded_primitive_dry_block(
             return (
                 False,
                 f"Anti-premature-dry gate: guarded primitive {pid} ({gp['kind']} @ {gp['locus']}) "
-                f"is only blocked by upstream guard {gloc}. Park this task via `ajar task block {cur_tid} "
-                f"--predicate 'break guard {gloc}' --check-locus {gloc}` or complete a `chain`/guard-audit task on {gloc} before closing `dry`.",
+                f"is only blocked by upstream guard {gloc}. Park an Open Door (`ajar door park --anchor-locus {ploc} "
+                f"--blocker-locus {gloc} --missing '...'`) or audit {gloc} before closing `dry`.",
             )
     return (True, "ok")
 
@@ -238,12 +248,17 @@ def check_all_gates(
     auto_enqueue_chain: bool = True,
 ) -> dict[str, Any]:
     """Evaluate gates `G1` through `G5` and return structured pass/blocker details."""
+    from ajar.chain_planner import reconcile_door_bridge_tasks
+
     run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
     if run is None:
         return {"passed": False, "gates": {}, "blockers": ["Run metadata missing in run.db."]}
 
+    reconcile_door_bridge_tasks(conn)
+
     stopping = str(run["stopping_criterion"] or "exhaustive-high")
     target_mode = str(run["target_mode"] or "source")
+    in_hunt_phase = bool("campaign_phase" in run.keys() and str(run["campaign_phase"] or "hunt") == "hunt")
     gates: dict[str, dict[str, Any]] = {}
     all_blockers: list[str] = []
 
@@ -253,13 +268,29 @@ def check_all_gates(
     high_findings = conn.execute(
         "SELECT COUNT(*) AS c FROM findings WHERE severity IN ('critical', 'high')"
     ).fetchone()["c"]
+    crown_jewels_reached = conn.execute(
+        "SELECT COUNT(*) AS c FROM crown_jewels WHERE status = 'reached'"
+    ).fetchone()["c"]
+    crown_jewel_chains = conn.execute(
+        "SELECT COUNT(*) AS c FROM chains WHERE verified = 1 AND realism_tier = 'crown_jewel'"
+    ).fetchone()["c"]
+    crown_jewel_findings = conn.execute(
+        "SELECT COUNT(*) AS c FROM findings WHERE realism_tier = 'crown_jewel' AND severity IN ('critical', 'high')"
+    ).fetchone()["c"]
+    has_crown_jewel_win = (int(crown_jewels_reached) + int(crown_jewel_chains) + int(crown_jewel_findings)) >= 1
 
-    if stopping == "first-verified-high" and high_findings >= 1:
+    if stopping == "first-verified-high" and int(high_findings) >= 1:
         leased_active = conn.execute(
             "SELECT COUNT(*) AS c FROM tasks WHERE status = 'leased' AND kind IN ('falsify', 'reproduce')"
         ).fetchone()["c"]
         if leased_active > 0:
             g1_issues.append(f"{leased_active} active verification task(s) still leased.")
+    elif stopping == "crown-jewel" and has_crown_jewel_win:
+        leased_active = conn.execute(
+            "SELECT COUNT(*) AS c FROM tasks WHERE status = 'leased' AND kind IN ('falsify', 'reproduce', 'chain')"
+        ).fetchone()["c"]
+        if leased_active > 0:
+            g1_issues.append(f"{leased_active} active verification/chain task(s) still leased.")
     else:
         if surface_count == 0:
             g1_issues.append("No surfaces mapped yet (`ajar surface add`).")
@@ -269,8 +300,10 @@ def check_all_gates(
             FROM tasks t
             LEFT JOIN surfaces s ON t.surface_id = s.surface_id
             WHERE t.status IN ('open', 'leased')
+              AND (? = 0 OR t.kind != 'patch')
               AND (t.priority IN ('critical', 'high') OR s.priority IN ('critical', 'high'))
-            """
+            """,
+            (1 if in_hunt_phase else 0,),
         ).fetchall()
         if open_high:
             sample = ", ".join(f"{r['task_id']}[{r['kind']}]" for r in open_high[:5])
@@ -290,8 +323,13 @@ def check_all_gates(
             sample = ", ".join(f"{r['surface_id']}({r['name']})" for r in uncovered_surfaces[:5])
             g1_issues.append(f"{len(uncovered_surfaces)} critical/high surface(s) have zero completed tasks: {sample}.")
 
-        if stopping == "first-verified-high" and high_findings == 0 and surface_count > 0 and not open_high:
-            pass
+        if stopping == "crown-jewel" and not has_crown_jewel_win:
+            bridging_doors = conn.execute(
+                "SELECT door_id, anchor_locus FROM parked_doors WHERE status = 'bridging'"
+            ).fetchall()
+            if bridging_doors:
+                sample = ", ".join(f"{r['door_id']}@{r['anchor_locus']}" for r in bridging_doors[:4])
+                g1_issues.append(f"{len(bridging_doors)} Open Door(s) still actively bridging ({sample}).")
 
     gates["G1_surface_coverage"] = {"passed": len(g1_issues) == 0, "issues": g1_issues}
     all_blockers.extend(f"[G1] {m}" for m in g1_issues)
@@ -422,7 +460,7 @@ def check_all_gates(
     gates["G4_zero_skill_and_dry_rigor"] = {"passed": len(g4_issues) == 0, "issues": g4_issues}
     all_blockers.extend(f"[G4] {m}" for m in g4_issues)
 
-    # --- G5: Stage-5 Converge (Orphaned Anomalies, Invariant-Pair Guard Breaking & Multi-Primitive Chains) ---
+    # --- G5: Stage-5 Converge (Orphaned Anomalies, Woken Open Doors, Invariant-Pair Guard Breaking & Multi-Primitive Chains) ---
     g5_issues: list[str] = []
     unexplained = conn.execute(
         "SELECT anomaly_id, locus, observation FROM anomalies WHERE status = 'unexplained'"
@@ -434,9 +472,18 @@ def check_all_gates(
             "Explain via `ajar anomaly explain` or consume in a claim/chain."
         )
 
-    prim_count = conn.execute("SELECT COUNT(*) AS c FROM primitives").fetchone()["c"]
+    ready_doors = conn.execute(
+        "SELECT door_id, anchor_locus FROM parked_doors WHERE status = 'ready'"
+    ).fetchall()
+    if ready_doors and not (stopping == "crown-jewel" and has_crown_jewel_win):
+        sample = ", ".join(f"{r['door_id']}@{r['anchor_locus']}" for r in ready_doors[:4])
+        g5_issues.append(
+            f"{len(ready_doors)} woken Open Door(s) (`ready`) await chain verification (`ajar chain propose`): {sample}."
+        )
+
+    prim_count = conn.execute("SELECT COUNT(*) AS c FROM primitives WHERE status != 'dry'").fetchone()["c"]
     guarded_prim_count = conn.execute(
-        "SELECT COUNT(*) AS c FROM primitives WHERE guarded_by_locus != '' AND chained = 0"
+        "SELECT COUNT(*) AS c FROM primitives WHERE status != 'dry' AND guarded_by_locus != '' AND chained = 0"
     ).fetchone()["c"]
     closed_chain_tasks = conn.execute(
         "SELECT COUNT(*) AS c FROM tasks WHERE kind = 'chain' AND status IN ('done', 'dry')"
@@ -445,7 +492,7 @@ def check_all_gates(
         "SELECT COUNT(*) AS c FROM tasks WHERE kind = 'chain' AND status IN ('open', 'leased')"
     ).fetchone()["c"]
     needs_converge = int(prim_count) >= 2 or int(guarded_prim_count) >= 1
-    if needs_converge and int(closed_chain_tasks) == 0:
+    if needs_converge and int(closed_chain_tasks) == 0 and not (stopping == "crown-jewel" and has_crown_jewel_win):
         if auto_enqueue_chain and int(open_chain_tasks) == 0:
             cid = new_id("task")
             now_iso = utc_now_iso()
@@ -457,16 +504,16 @@ def check_all_gates(
                 """,
                 (
                     cid,
-                    f"Auto-enqueued by G5: {prim_count} primitives ({guarded_prim_count} guarded) and {len(finding_rows)} findings.",
+                    f"Auto-enqueued by G5: {prim_count} active primitives ({guarded_prim_count} guarded) and {len(finding_rows)} findings.",
                     now_iso,
                     now_iso,
                 ),
             )
             g5_issues.append(
-                f"Stage-5 Converge required ({prim_count} primitives, {guarded_prim_count} guarded); enqueued chain task {cid}."
+                f"Stage-5 Converge required ({prim_count} active primitives, {guarded_prim_count} guarded); enqueued chain task {cid}."
             )
         else:
-            g5_issues.append(f"{prim_count} primitives exist; complete open `chain` task before finishing.")
+            g5_issues.append(f"{prim_count} active primitives exist; complete open `chain` task before finishing.")
 
     gates["G5_anomalies_and_chains"] = {"passed": len(g5_issues) == 0, "issues": g5_issues}
     all_blockers.extend(f"[G5] {m}" for m in g5_issues)
@@ -474,6 +521,7 @@ def check_all_gates(
     return {
         "passed": len(all_blockers) == 0,
         "stopping_criterion": stopping,
+        "crown_jewel_reached": has_crown_jewel_win,
         "findings_count": len(finding_rows),
         "high_or_critical_findings": int(high_findings),
         "gates": gates,

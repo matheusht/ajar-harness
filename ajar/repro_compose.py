@@ -491,25 +491,110 @@ def run_chain_reproduction(
     oracle: dict[str, Any] | None = None,
     step_micropatches: Mapping[str, pathlib.Path] | None = None,
     ablate_steps: bool = True,
+    door_id: str = "",
+    jewel_id: str = "",
+    declared_steps: int | None = None,
     timeout_sec: int = 60,
     worker_id: str = "worker",
 ) -> dict[str, Any]:
     """Execute end-to-end chain verification inside `repro/slot-<k>` with $N$-step causal ablation."""
+    from ajar.chain_planner import (
+        evaluate_precondition_realism,
+        mark_chain_doors_and_jewels_resolved,
+    )
+
     clean_steps = [s.strip() for s in steps if s and s.strip()]
     if not clean_steps:
-        raise AjarError("Chain --steps requires at least one primitive, anomaly, or finding ID.", EXIT_USER_ERROR)
+        raise AjarError("Chain --steps requires at least one primitive, anomaly, claim, or finding ID.", EXIT_USER_ERROR)
+
+    # Pre-flight realism check (blocks self-override CLI/env flags in `< 1 ms`).
+    evaluate_precondition_realism(
+        conn,
+        poc_cmd=poc_cmd,
+        control_cmd=control_cmd,
+        severity=severity,
+        step_ids=clean_steps,
+        declared_steps=declared_steps,
+        explicit_jewel_id=jewel_id,
+    )
 
     prim_rows: dict[str, sqlite3.Row] = {}
+    finding_rows: dict[str, sqlite3.Row] = {}
+    step_roles: dict[str, str] = {}
     chain_touched_files: list[str] = []
+    invariant_breaking_count = 0
+    auto_patch_dir = run_dir / "repro" / "auto_step_patches"
+    patch_map = dict(step_micropatches or {})
+
     for sid in clean_steps:
         prow = conn.execute("SELECT * FROM primitives WHERE primitive_id = ?", (sid,)).fetchone()
         if prow is not None:
             prim_rows[sid] = prow
+            prole = str(prow["role"] if "role" in prow.keys() else "capability")
+            step_roles[sid] = prole
+            if prole != "trust_gadget":
+                invariant_breaking_count += 1
             ploc = str(prow["locus"] or "").split(":", 1)[0].strip()
             if ploc and ploc not in chain_touched_files:
                 chain_touched_files.append(ploc)
+            if sid not in patch_map and "micropatch_diff" in prow.keys() and str(prow["micropatch_diff"] or "").strip():
+                auto_patch_dir.mkdir(parents=True, exist_ok=True)
+                ap_file = auto_patch_dir / f"{sid}.diff"
+                ap_file.write_text(str(prow["micropatch_diff"]), encoding="utf-8")
+                patch_map[sid] = ap_file
+            continue
 
-    patch_map = dict(step_micropatches or {})
+        frow = conn.execute("SELECT * FROM findings WHERE finding_id = ?", (sid,)).fetchone()
+        if frow is None and sid.startswith("clm-"):
+            frow = conn.execute("SELECT * FROM findings WHERE claim_id = ?", (sid,)).fetchone()
+        if frow is not None:
+            finding_rows[sid] = frow
+            step_roles[sid] = "finding"
+            invariant_breaking_count += 1
+            floc = str(frow["locus"] or "").split(":", 1)[0].strip()
+            if floc and floc not in chain_touched_files:
+                chain_touched_files.append(floc)
+            if sid not in patch_map:
+                mp_path = pathlib.Path(str(frow["micropatch_path"] or ""))
+                if mp_path.is_file():
+                    patch_map[sid] = mp_path
+                elif str(frow["micropatch_diff"] or "").strip():
+                    auto_patch_dir.mkdir(parents=True, exist_ok=True)
+                    ap_file = auto_patch_dir / f"{sid}.diff"
+                    ap_file.write_text(str(frow["micropatch_diff"]), encoding="utf-8")
+                    patch_map[sid] = ap_file
+            continue
+
+        crow = conn.execute("SELECT * FROM claims WHERE claim_id = ?", (sid,)).fetchone()
+        if crow is not None:
+            step_roles[sid] = "claim"
+            invariant_breaking_count += 1
+            cloc = str(crow["locus"] or "").split(":", 1)[0].strip()
+            if cloc and cloc not in chain_touched_files:
+                chain_touched_files.append(cloc)
+            continue
+
+        arow = conn.execute("SELECT * FROM anomalies WHERE anomaly_id = ?", (sid,)).fetchone()
+        if arow is not None:
+            step_roles[sid] = "anomaly"
+            invariant_breaking_count += 1
+            aloc = str(arow["locus"] or "").split(":", 1)[0].strip()
+            if aloc and aloc not in chain_touched_files:
+                chain_touched_files.append(aloc)
+            continue
+
+        raise AjarError(
+            f"Unknown chain step ID {sid!r}; pass verified `fnd-*`, `clm-*`, `prim-*`, or `anom-*` IDs.",
+            EXIT_USER_ERROR,
+        )
+
+    if invariant_breaking_count == 0:
+        raise AjarError(
+            "Gadget-only chain rejected: `--steps` contains only `trust_gadget` normal-code transitions with zero "
+            "invariant-breaking `capability`, `finding`, or `anomaly` steps.",
+            EXIT_GATE_BLOCKED,
+        )
+
     for pfile in patch_map.values():
         for ln in pfile.read_text(encoding="utf-8", errors="ignore").splitlines():
             if ln.startswith("+++ ") and ln[4:].strip() != "/dev/null":
@@ -556,14 +641,14 @@ def run_chain_reproduction(
         subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
         _clean_slot_preserving_objects(slot_dir, check=True)
 
-        # 2. Benign Control Arm (`benign_control`) -> oracle MUST NOT fire and must exit 0.
+        # 2. Benign Control Arm (`benign_control`, zero ablated steps so control_cmd tests benign input directly) -> MUST pass cleanly.
         ctrl_res = _run_shell_in_slot(
             control_cmd,
             slot_dir=slot_dir,
             cache_dir=cache_dir,
             timeout_sec=timeout_sec,
             helpers_dir=helpers_dir,
-            extra_env={"AJAR_REPRO_MODE": "benign_control", "AJAR_ABLATE_STEPS": ",".join(prim_rows.keys())},
+            extra_env={"AJAR_REPRO_MODE": "benign_control", "AJAR_ABLATE_STEPS": ""},
         )
         ctrl_fired = _evaluate_defect_fired(
             ctrl_res["exit_code"], ctrl_res["stdout"], ctrl_res["stderr"], ctrl_res["timed_out"], oracle
@@ -578,26 +663,52 @@ def run_chain_reproduction(
         ablation_failure_reason = ""
 
         # 3. Automated $N$-Step Marginal-Contribution Ablation:
-        uses_composable_ablation = (
-            bool(patch_map)
-            or any(bool(r["helper_id"]) for r in prim_rows.values() if "helper_id" in r.keys())
-            or ("AJAR_ABLATE_STEPS" in poc_cmd)
+        env_ablatable = (
+            ("AJAR_ABLATE_STEPS" in poc_cmd)
             or ("StageContext" in poc_cmd)
             or ("ajar_helpers" in poc_cmd)
         )
+        uses_composable_ablation = (
+            bool(patch_map)
+            or any(bool(r["helper_id"]) for r in prim_rows.values() if "helper_id" in r.keys())
+            or env_ablatable
+        )
 
-        if full_fired and ctrl_passed and ablate_steps and prim_rows:
-            if len(prim_rows) >= 2 and not uses_composable_ablation:
+        if full_fired and ctrl_passed and ablate_steps:
+            non_gadget_steps = [s for s in clean_steps if step_roles.get(s) != "trust_gadget"]
+            if len(clean_steps) >= 2 and not uses_composable_ablation:
                 ablation_passed = False
                 ablation_failure_reason = (
-                    "Marginal-contribution gate: multi-primitive chains require step-ablatable capabilities "
-                    "(`StageContext` / `AJAR_ABLATE_STEPS` helper or `--step-micropatch <prim_id>:<diff>`) "
-                    "to prove no step is redundant."
+                    "Marginal-contribution gate: multi-step chains require step-ablatable capabilities "
+                    "(`fnd-*` with verified micropatch, `prim-*` `--micropatch`, `--step-micropatch <id>:<diff>`, "
+                    "or `AJAR_ABLATE_STEPS`) to prove causal necessity."
                 )
             elif uses_composable_ablation:
+                causally_ablated_count = 0
                 for step_id in clean_steps:
-                    if step_id not in prim_rows and step_id not in patch_map:
+                    has_helper = bool(step_id in prim_rows and "helper_id" in prim_rows[step_id].keys() and prim_rows[step_id]["helper_id"])
+                    can_ablate_this_step = (step_id in patch_map) or has_helper or env_ablatable
+                    if not can_ablate_this_step:
+                        if step_roles.get(step_id) == "trust_gadget":
+                            ablation_matrix.append(
+                                {
+                                    "step_id": step_id,
+                                    "ablated_via": "trust_gadget_bridge",
+                                    "defect_still_fired": False,
+                                    "exit_code": 0,
+                                    "causally_required": True,
+                                }
+                            )
+                            continue
+                        if len(non_gadget_steps) >= 2:
+                            ablation_passed = False
+                            ablation_failure_reason = (
+                                f"Marginal-contribution gate: non-gadget step {step_id} lacks a micropatch or "
+                                f"`AJAR_ABLATE_STEPS` hook (`--step-micropatch {step_id}:<diff>`)."
+                            )
+                            break
                         continue
+
                     touched_step_files: list[str] = []
                     if step_id in patch_map:
                         pfile = patch_map[step_id]
@@ -654,6 +765,13 @@ def run_chain_reproduction(
                             f"Remove redundant padding step {step_id} from --steps."
                         )
                         break
+                    causally_ablated_count += 1
+
+                if ablation_passed and len(clean_steps) >= 2 and causally_ablated_count == 0:
+                    ablation_passed = False
+                    ablation_failure_reason = (
+                        "Marginal-contribution gate: at least one upstream capability/finding step must be causally ablated."
+                    )
     finally:
         if (slot_dir / ".git").exists():
             subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
@@ -662,6 +780,20 @@ def run_chain_reproduction(
         lock_fh.close()
 
     verified = bool(full_fired and ctrl_passed and ablation_passed)
+    tail_locus = chain_touched_files[-1] if chain_touched_files else ""
+    realism = evaluate_precondition_realism(
+        conn,
+        poc_cmd=poc_cmd,
+        control_cmd=control_cmd,
+        stdout=str(full_res.get("stdout", "")),
+        stderr=str(full_res.get("stderr", "")),
+        severity=severity,
+        step_ids=clean_steps,
+        declared_steps=declared_steps,
+        target_locus=tail_locus,
+        explicit_jewel_id=jewel_id,
+    )
+
     if not full_fired:
         reason = f"Full chain PoC did not trigger defect oracle (exit={full_res['exit_code']})."
     elif not ctrl_passed:
@@ -669,7 +801,10 @@ def run_chain_reproduction(
     elif not ablation_passed:
         reason = ablation_failure_reason
     else:
-        reason = f"Verified end-to-end chain in slot-{slot_idx} ({len(ablation_matrix)} step(s) causally ablated)."
+        reason = (
+            f"Verified end-to-end chain in slot-{slot_idx} "
+            f"({len(ablation_matrix)} step(s) verified, realism_tier={realism['realism_tier']})."
+        )
 
     cid = new_id("chn")
     now_iso = utc_now_iso()
@@ -681,13 +816,15 @@ def run_chain_reproduction(
         "poc_stdout": full_res["stdout"][:1500],
         "poc_stderr": full_res["stderr"][:800],
         "ablation_matrix": ablation_matrix,
+        "realism": realism,
     }
     conn.execute(
         """
         INSERT INTO chains(
             chain_id, title, severity, step_ids_json, e2e_poc_cmd, control_cmd,
-            verified, evidence_json, slot_index, oracle_json, ablation_matrix_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            verified, evidence_json, slot_index, oracle_json, ablation_matrix_json,
+            realism_tier, realism_json, jewel_id, door_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             cid,
@@ -701,14 +838,22 @@ def run_chain_reproduction(
             slot_idx,
             json.dumps(oracle or {}, sort_keys=True),
             json.dumps(ablation_matrix, sort_keys=True),
+            str(realism["realism_tier"]),
+            json.dumps(realism, sort_keys=True),
+            str(realism["jewel_id"]),
+            door_id.strip(),
             now_iso,
         ),
     )
+    resolved_doors: list[str] = []
     if verified:
         from ajar.epistemic_hooks import consume_hooks_for_locus
 
         for sid in clean_steps:
-            conn.execute("UPDATE primitives SET chained = 1 WHERE primitive_id = ?", (sid,))
+            conn.execute(
+                "UPDATE primitives SET chained = 1, status = 'chained' WHERE primitive_id = ?",
+                (sid,),
+            )
             if sid in prim_rows and prim_rows[sid]["guarded_by_locus"]:
                 consume_hooks_for_locus(
                     conn,
@@ -720,20 +865,154 @@ def run_chain_reproduction(
                 "UPDATE anomalies SET status = 'consumed_by_chain', consumed_by_id = ?, updated_at = ? WHERE anomaly_id = ?",
                 (cid, now_iso, sid),
             )
+        resolved_doors = mark_chain_doors_and_jewels_resolved(
+            conn,
+            chain_id=cid,
+            step_ids=clean_steps,
+            door_id=door_id.strip(),
+            jewel_id=str(realism["jewel_id"]),
+            realism_tier=str(realism["realism_tier"]),
+        )
     log_event(
         conn,
         worker_id,
         "chain_proposed",
         cid,
-        {"verified": verified, "steps": clean_steps, "ablated_steps": len(ablation_matrix), "reason": reason[:200]},
+        {
+            "verified": verified,
+            "steps": clean_steps,
+            "ablated_steps": len(ablation_matrix),
+            "realism_tier": realism["realism_tier"],
+            "resolved_doors": resolved_doors,
+            "reason": reason[:200],
+        },
     )
     return {
         "chain_id": cid,
         "verified": verified,
+        "realism_tier": realism["realism_tier"],
+        "jewel_id": realism["jewel_id"],
+        "resolved_doors": resolved_doors,
         "reason": reason,
         "slot_index": slot_idx,
         "ablation_matrix": ablation_matrix,
         "evidence": ev,
+    }
+
+
+def run_snapshot_chain_probe(
+    conn: sqlite3.Connection,
+    *,
+    run_dir: pathlib.Path,
+    target_dir: pathlib.Path,
+    snapshot_id: str,
+    cmd: str,
+    patch_path: pathlib.Path | None = None,
+    oracle: dict[str, Any] | None = None,
+    timeout_sec: int = 60,
+    worker_id: str = "worker",
+) -> dict[str, Any]:
+    """Hydrate a verified Stage-1 post-state `.tar.gz` snapshot into `slot-inst` in `< 50 ms` and execute Stage 2."""
+    import tarfile
+
+    srow = conn.execute("SELECT * FROM repro_snapshots WHERE snapshot_id = ?", (snapshot_id,)).fetchone()
+    if srow is None:
+        raise AjarError(f"Unknown snapshot_id: {snapshot_id}", EXIT_USER_ERROR)
+    if not cmd.strip():
+        raise AjarError("`ajar chain probe` requires a non-empty --cmd.", EXIT_USER_ERROR)
+
+    arch_path = pathlib.Path(str(srow["archive_path"]))
+    if not arch_path.is_file():
+        raise AjarError(f"Snapshot archive missing on disk: {arch_path}", EXIT_USER_ERROR)
+    actual_sha = hashlib.sha256(arch_path.read_bytes()).hexdigest()
+    if actual_sha != str(srow["sha256"]):
+        raise AjarError(f"Snapshot SHA-256 integrity mismatch for {snapshot_id}.", EXIT_GATE_BLOCKED)
+
+    helpers_dir = ensure_helpers_runtime(run_dir)
+    mirror_dir = init_source_mirror(run_dir, target_dir)
+    repro_dir = run_dir / "repro"
+    repro_dir.mkdir(parents=True, exist_ok=True)
+    lock_fh = open(repro_dir / "slot-inst.lock", "a+", encoding="utf-8")
+    fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+    slot_dir = repro_dir / "slot-inst"
+    cache_dir = resolve_local_build_cache_dir(run_dir, "cache-inst")
+    watermark_file = cache_dir / "watermark_ns"
+    touched: list[str] = []
+
+    try:
+        _prepare_slot_worktree(mirror_dir, slot_dir)
+
+        # Safe tar extraction into `slot-inst` preserving validated intra-slot relative symlinks.
+        with tarfile.open(arch_path, "r:gz") as tar:
+            safe_members: list[tarfile.TarInfo] = []
+            for member in tar.getmembers():
+                m_path = pathlib.PurePosixPath(member.name)
+                if m_path.is_absolute() or ".." in m_path.parts:
+                    raise AjarError(f"Unsafe tar member path in snapshot {snapshot_id}: {member.name!r}", EXIT_GATE_BLOCKED)
+                if member.ischr() or member.isblk() or member.isfifo():
+                    continue
+                if member.issym() or member.islnk():
+                    lnk = member.linkname
+                    if os.path.isabs(lnk):
+                        continue
+                    joined = os.path.normpath(os.path.join(os.path.dirname(member.name), lnk))
+                    if joined == ".." or joined.startswith("../"):
+                        continue
+                safe_members.append(member)
+            for member in safe_members:
+                dest = slot_dir / member.name
+                if dest.exists() or dest.is_symlink():
+                    if dest.is_symlink() or dest.is_file():
+                        dest.unlink(missing_ok=True)
+                tar.extract(member, path=str(slot_dir), set_attrs=False)
+
+        if patch_path is not None:
+            if not patch_path.is_file():
+                raise AjarError(f"Patch file not found: {patch_path}", EXIT_USER_ERROR)
+            ap = subprocess.run(
+                ["git", "-C", str(slot_dir), "apply", "--whitespace=nowarn", str(patch_path.resolve())],
+                capture_output=True,
+                text=True,
+                env=scrubbed_subprocess_env(),
+                check=False,
+            )
+            if ap.returncode != 0:
+                raise AjarError(f"Probe patch failed `git apply`: {scrub_text(ap.stderr[:240])}", EXIT_USER_ERROR)
+            for ln in patch_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                if ln.startswith("+++ ") and ln[4:].strip() != "/dev/null":
+                    touched.append(re.sub(r"^b/", "", ln[4:].split("\t", 1)[0].strip()))
+            _bump_files_mtime(slot_dir, touched, watermark_file)
+
+        res = _run_shell_in_slot(
+            cmd,
+            slot_dir=slot_dir,
+            cache_dir=cache_dir,
+            timeout_sec=timeout_sec,
+            helpers_dir=helpers_dir,
+            extra_env={"AJAR_SNAPSHOT_ID": snapshot_id},
+        )
+        fired = _evaluate_defect_fired(res["exit_code"], res["stdout"], res["stderr"], res["timed_out"], oracle)
+    finally:
+        if (slot_dir / ".git").exists():
+            subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
+            _clean_slot_preserving_objects(slot_dir, check=False)
+            if touched:
+                _bump_files_mtime(slot_dir, touched, watermark_file)
+        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+        lock_fh.close()
+
+    log_event(
+        conn,
+        worker_id,
+        "chain_snapshot_probed",
+        snapshot_id,
+        {"exit_code": res["exit_code"], "defect_fired": fired},
+    )
+    return {
+        "snapshot_id": snapshot_id,
+        "rel_dir": str(srow["rel_dir"]),
+        "defect_fired": fired,
+        "probe": res,
     }
 
 

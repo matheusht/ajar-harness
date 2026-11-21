@@ -312,6 +312,7 @@ def _extract_regex_symbols(rel_path: str, ext: str, text: str) -> list[dict[str,
     patterns = SYMBOL_PATTERNS.get(ext, ())
     if not patterns:
         return []
+    is_c_source = ext in {".c", ".cc", ".cpp", ".cxx"}
     symbols: list[dict[str, Any]] = []
     for idx, line in enumerate(text.splitlines(), start=1):
         for kind, pat in patterns:
@@ -319,6 +320,7 @@ def _extract_regex_symbols(rel_path: str, ext: str, text: str) -> list[dict[str,
             if m:
                 name = m.group(1)
                 if name not in {"if", "for", "while", "switch", "return", "sizeof"}:
+                    file_local = bool(is_c_source and re.match(r"^\s*static\b", line))
                     symbols.append(
                         {
                             "rel_path": rel_path,
@@ -326,6 +328,7 @@ def _extract_regex_symbols(rel_path: str, ext: str, text: str) -> list[dict[str,
                             "kind": kind,
                             "line_no": idx,
                             "signature": line.strip()[:120],
+                            "file_local": file_local,
                         }
                     )
                 break
@@ -499,7 +502,8 @@ def build_repomap(
         syms = _extract_python_symbols(rel, text) if ext == ".py" else _extract_regex_symbols(rel, ext, text)
         symbols_by_file[rel] = syms
         for s in syms:
-            defs_by_name.setdefault(str(s["name"]), set()).add(rel)
+            if not s.get("file_local", False):
+                defs_by_name.setdefault(str(s["name"]), set()).add(rel)
 
     nodes = sorted(file_texts.keys())
     out_edges: dict[str, dict[str, float]] = {u: {} for u in nodes}

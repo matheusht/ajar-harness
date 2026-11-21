@@ -318,14 +318,18 @@ def detect_capability_bridges(
     `requires_tags_json` on sinks/surfaces in `subsystem`, or whose `guarded_by_locus`
     targets `locus`/`subsystem`.
     """
+    from ajar.db import infer_subsystem
+
     all_prims = conn.execute(
         """
         SELECT p.*, ph.module_name AS helper_module, ph.callable_name AS helper_callable
         FROM primitives p
         LEFT JOIN primitive_helpers ph ON p.helper_id = ph.helper_id
+        WHERE p.status != 'dry'
         ORDER BY p.created_at ASC
         """
     ).fetchall()
+    all_findings = conn.execute("SELECT * FROM findings ORDER BY created_at ASC").fetchall()
     surfaces = conn.execute("SELECT * FROM surfaces ORDER BY created_at ASC").fetchall()
 
     providers_by_tag: dict[str, list[dict[str, Any]]] = {}
@@ -333,6 +337,20 @@ def detect_capability_bridges(
         p_dict = dict(p)
         for tag in parse_tag_list(p_dict.get("provides_tags_json", "[]")):
             providers_by_tag.setdefault(tag, []).append(p_dict)
+    for f in all_findings:
+        f_dict = dict(f)
+        ftags = parse_tag_list(f_dict.get("provides_tags_json", "[]"))
+        if ftags:
+            prov_entry = {
+                "primitive_id": str(f_dict["finding_id"]),
+                "locus": str(f_dict["locus"]),
+                "subsystem": infer_subsystem(str(f_dict["locus"])),
+                "kind": "finding",
+                "helper_module": "",
+                "helper_callable": "",
+            }
+            for tag in ftags:
+                providers_by_tag.setdefault(tag, []).append(prov_entry)
 
     bridges: list[dict[str, Any]] = []
     seen_keys: set[str] = set()
@@ -523,9 +541,15 @@ def on_primitive_added(
     guarded_by_locus: str = "",
     provides_tags: Sequence[str] = (),
     requires_tags: Sequence[str] = (),
+    role: str = "capability",
+    trusted_invariant: str = "",
+    symbols: Sequence[str] = (),
+    snapshot_id: str = "",
+    postconditions: str = "",
     spawn_guard_task: bool = True,
 ) -> list[dict[str, Any]]:
-    """Evaluate `H1_GUARD_SYMMETRY`, `H4_TYPED_STATE_BRIDGE`, and Adaptive Threat-Model assumptions when a primitive is recorded."""
+    """Evaluate `H1`, `H4`, Open-Door wakeup, and Adaptive Threat-Model assumptions when a primitive is recorded."""
+    from ajar.chain_planner import wake_matching_doors_for_artifact
     from ajar.db import (
         compute_task_salience,
         evaluate_adaptive_threat_assumptions,
@@ -570,7 +594,7 @@ def on_primitive_added(
                     ) VALUES (?, 'investigate', 'inside_out', ?, ?, ?, 'high', 'open', ?, ?, ?, ?)
                     """,
                     (
-                        spawned_tid,
+                        spawn_guard_task and spawned_tid or "",
                         f"Audit upstream guard {gloc} blocking {primitive_id} ({kind})",
                         gsub,
                         gloc,
@@ -651,7 +675,7 @@ def on_primitive_added(
                 spawned_task_id=chain_tid,
                 directive_text=(
                     f"Bridge {prov0['primitive_id']}@{prov0['locus']} provides [{tags_s}] "
-                    f"required by {br['sink_id']}@{br['sink_locus']}; compose via StageContext."
+                    f"required by {br['sink_id']}@{br['sink_locus']}; prove end-to-end via ajar chain propose."
                 ),
                 kill_rule=(
                     f"STOP and mark dry if {br['sink_locus']} re-verifies principal and digest "
@@ -660,6 +684,18 @@ def on_primitive_added(
             )
             fired.append(h4)
 
+    wake_matching_doors_for_artifact(
+        conn,
+        artifact_id=primitive_id,
+        artifact_kind=role or "capability",
+        locus=locus,
+        subsystem=subsystem,
+        text_blob=f"{kind} {postconditions} {trusted_invariant}",
+        provides_tags=provides_tags,
+        symbols=symbols,
+        snapshot_id=snapshot_id,
+        trigger_cmd="primitive.add",
+    )
     return fired
 
 
@@ -673,7 +709,9 @@ def on_anomaly_or_claim_recorded(
     text_blob: str,
     target_dir: pathlib.Path | None = None,
 ) -> list[dict[str, Any]]:
-    """Evaluate `H2`, `H7`, and `H8` on new anomalies/claims or their target source file."""
+    """Evaluate `H2`, `H7`, `H8`, and Open-Door wakeup on new anomalies/claims or their target source file."""
+    from ajar.chain_planner import wake_matching_doors_for_artifact
+
     fired: list[dict[str, Any]] = []
     combined = text_blob
     rel_file = locus.split(":", 1)[0].strip().lstrip("./")
@@ -716,6 +754,17 @@ def on_anomaly_or_claim_recorded(
                 ),
                 kill_rule="STOP and mark dry if fault N aborts isolated process state or rolls back atomically.",
             )
+        )
+
+    if entity_id.startswith("anom-"):
+        wake_matching_doors_for_artifact(
+            conn,
+            artifact_id=entity_id,
+            artifact_kind="anomaly",
+            locus=locus,
+            subsystem=subsystem,
+            text_blob=text_blob,
+            trigger_cmd=trigger_cmd,
         )
     return fired
 
@@ -820,8 +869,12 @@ def on_finding_confirmed(
     *,
     finding_id: str,
     claim_row: sqlite3.Row | dict[str, Any],
+    provides_tags: Sequence[str] = (),
+    snapshot_id: str = "",
+    realism_tier: str = "stepping_stone",
 ) -> dict[str, Any] | None:
-    """Evaluate Adaptive Threat-Model assumptions and `H5_POST_CONFIRM_ESCALATION` when a finding passes reproduction."""
+    """Evaluate Open-Door wakeup, Adaptive Threat-Model assumptions, and `H5_POST_CONFIRM_ESCALATION`."""
+    from ajar.chain_planner import wake_matching_doors_for_artifact
     from ajar.db import evaluate_adaptive_threat_assumptions, new_id, utc_now_iso
 
     sev = str(claim_row["severity"] or "").lower()
@@ -829,19 +882,39 @@ def on_finding_confirmed(
     loc = str(claim_row["locus"] or "")
     sub = str(claim_row["subsystem"] or "")
     consume_hooks_for_locus(conn, locus=loc, source_entity_id=cid, hook_code="H6_RELEASE_UB_DIFF")
-    evaluate_adaptive_threat_assumptions(conn, evidence_ref=finding_id, confirmed_locus=loc)
+    evaluate_adaptive_threat_assumptions(
+        conn,
+        evidence_ref=finding_id,
+        confirmed_locus=loc,
+        provided_tags=provides_tags,
+    )
+    woken = wake_matching_doors_for_artifact(
+        conn,
+        artifact_id=finding_id,
+        artifact_kind="finding",
+        locus=loc,
+        subsystem=sub,
+        text_blob=f"{claim_row['title']} {claim_row['mechanism']}",
+        provides_tags=provides_tags,
+        snapshot_id=snapshot_id,
+        trigger_cmd="claim.reproduce",
+    )
 
-    if sev not in ("low", "medium"):
-        return None
+    should_escalate = sev in ("low", "medium") or (sev == "high" and realism_tier == "stepping_stone")
+    if not should_escalate:
+        return {"woken_doors": woken} if woken else None
 
     rel_file = loc.split(":", 1)[0].strip().lstrip("./")
-    callers = [
-        str(r["src_file"])
-        for r in conn.execute(
-            "SELECT DISTINCT src_file FROM repomap_edges WHERE dst_file = ? LIMIT 4",
-            (rel_file,),
-        ).fetchall()
-    ]
+    callers: list[str] = []
+    for r in conn.execute(
+        "SELECT src_file FROM repomap_edges WHERE dst_file = ? ORDER BY weight DESC LIMIT 8",
+        (rel_file,),
+    ).fetchall():
+        sf = str(r["src_file"])
+        if sf and sf not in callers:
+            callers.append(sf)
+        if len(callers) >= 4:
+            break
     caller_hint = ", ".join(callers) if callers else "1-hop callers"
 
     esc_tid = new_id("task")
@@ -851,16 +924,16 @@ def on_finding_confirmed(
         INSERT INTO tasks(
             task_id, surface_id, parent_claim_id, kind, direction, title, subsystem, locus,
             priority, status, salience_score, summary, created_at, updated_at
-        ) VALUES (?, ?, ?, 'escalate', 'outside_in', ?, ?, ?, 'medium', 'open', 78, ?, ?, ?)
+        ) VALUES (?, ?, ?, 'escalate', 'outside_in', ?, ?, ?, 'high', 'open', 80, ?, ?, ?)
         """,
         (
             esc_tid,
             claim_row["surface_id"],
             cid,
-            f"Evaluate post-confirm escalation consumers of {finding_id} ({sev})",
+            f"Evaluate post-confirm escalation consumers of {finding_id} ({sev}/{realism_tier})",
             sub,
             loc,
-            f"Single-pass ceiling-breaker (`max_leases=1`): check whether {caller_hint} trust corrupted output from {finding_id}@{loc}.",
+            f"Single-pass ceiling-breaker (`max_leases=1`): check whether {caller_hint} trust output from {finding_id}@{loc} or park as an Open Door.",
             now_iso,
             now_iso,
         ),
@@ -876,9 +949,9 @@ def on_finding_confirmed(
         spawned_task_id=esc_tid,
         max_leases=1,
         directive_text=(
-            f"Finding {finding_id} ({sev}) is proven at {loc}; check consumers ({caller_hint}) "
-            "that trust its output for high/critical impact."
+            f"Finding {finding_id} ({sev}/{realism_tier}) is proven at {loc}; check consumers ({caller_hint}) "
+            "or park an Open Door (`ajar door park`) if a downstream sink needs one missing link."
         ),
         kill_rule="STOP and mark done unless every escalation hop uses verified code paths in target modules.",
     )
-    return {"escalate_task_id": esc_tid, "hook": hook}
+    return {"escalate_task_id": esc_tid, "hook": hook, "woken_doors": woken}

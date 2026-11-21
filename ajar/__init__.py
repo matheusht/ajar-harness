@@ -6,7 +6,7 @@ an external SQLite WAL database (`~/.ajar/runs/<run_id>/run.db`).
 
 from __future__ import annotations
 
-__version__ = "3.2.3"
+__version__ = "3.3.0"
 
 EXIT_OK = 0
 EXIT_USER_ERROR = 2

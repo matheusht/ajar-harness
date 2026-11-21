@@ -44,7 +44,9 @@ CREATE TABLE IF NOT EXISTS runs (
     workspace_mode TEXT NOT NULL CHECK(workspace_mode IN ('envelope', 'in_place')),
     goal TEXT NOT NULL,
     stopping_criterion TEXT NOT NULL DEFAULT 'exhaustive-high'
-        CHECK(stopping_criterion IN ('exhaustive-high', 'first-verified-high')),
+        CHECK(stopping_criterion IN ('exhaustive-high', 'first-verified-high', 'crown-jewel')),
+    campaign_phase TEXT NOT NULL DEFAULT 'hunt'
+        CHECK(campaign_phase IN ('hunt', 'remediate', 'full')),
     budget_usd REAL NOT NULL DEFAULT 14.0,
     in_scope_loc INTEGER NOT NULL DEFAULT 0,
     code_quote_usd REAL NOT NULL DEFAULT 10.0,
@@ -109,7 +111,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     parent_claim_id TEXT,
     surface_id TEXT,
     kind TEXT NOT NULL
-        CHECK(kind IN ('map', 'investigate', 'falsify', 'reproduce', 'instrument', 'chain', 'patch', 'escalate')),
+        CHECK(kind IN ('map', 'investigate', 'bridge', 'falsify', 'reproduce', 'instrument', 'chain', 'patch', 'escalate')),
     direction TEXT NOT NULL DEFAULT 'outside_in'
         CHECK(direction IN ('outside_in', 'inside_out', 'native_ffi', 'peer_symmetry')),
     title TEXT NOT NULL,
@@ -133,6 +135,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     slice_loc INTEGER NOT NULL DEFAULT 0,
     checkpoint_json TEXT NOT NULL DEFAULT '{}',
     diff_state TEXT NOT NULL DEFAULT '',
+    door_id TEXT NOT NULL DEFAULT '',
     summary TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -162,6 +165,10 @@ CREATE TABLE IF NOT EXISTS primitives (
     subsystem TEXT NOT NULL DEFAULT '',
     locus TEXT NOT NULL,
     kind TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'capability'
+        CHECK(role IN ('capability', 'trust_gadget')),
+    trusted_invariant TEXT NOT NULL DEFAULT '',
+    symbols_json TEXT NOT NULL DEFAULT '[]',
     preconditions TEXT NOT NULL,
     postconditions TEXT NOT NULL,
     guarded_by_locus TEXT NOT NULL DEFAULT '',
@@ -169,9 +176,15 @@ CREATE TABLE IF NOT EXISTS primitives (
     provides_tags_json TEXT NOT NULL DEFAULT '[]',
     requires_tags_json TEXT NOT NULL DEFAULT '[]',
     helper_id TEXT NOT NULL DEFAULT '',
+    micropatch_diff TEXT NOT NULL DEFAULT '',
+    snapshot_id TEXT NOT NULL DEFAULT '',
     evidence_cmd TEXT NOT NULL,
     evidence_output TEXT NOT NULL DEFAULT '',
     chained INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK(status IN ('active', 'chained', 'dry')),
+    dry_locus TEXT NOT NULL DEFAULT '',
+    dry_reason TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 
@@ -280,7 +293,7 @@ CREATE TABLE IF NOT EXISTS claims (
     customer_state TEXT NOT NULL DEFAULT 'pending'
         CHECK(customer_state IN ('pending', 'accepted', 'disputed')),
     remediation_state TEXT NOT NULL DEFAULT 'unpatched'
-        CHECK(remediation_state IN ('unpatched', 'micropatched', 'maintainer_patched')),
+        CHECK(remediation_state IN ('unpatched', 'micropatched', 'verified_local', 'maintainer_patched')),
     duplicate_of_claim_id TEXT,
     env_blocker TEXT NOT NULL DEFAULT '',
     blocker_reason TEXT NOT NULL DEFAULT '',
@@ -308,6 +321,12 @@ CREATE TABLE IF NOT EXISTS findings (
     arm5b_release_ctrl_json TEXT NOT NULL DEFAULT '{}',
     ub_divergence_class TEXT NOT NULL DEFAULT '',
     diff_state TEXT NOT NULL DEFAULT '',
+    provides_tags_json TEXT NOT NULL DEFAULT '[]',
+    snapshot_id TEXT NOT NULL DEFAULT '',
+    realism_tier TEXT NOT NULL DEFAULT 'stepping_stone'
+        CHECK(realism_tier IN ('crown_jewel', 'high_impact', 'stepping_stone')),
+    realism_json TEXT NOT NULL DEFAULT '{}',
+    calibration_notes TEXT NOT NULL DEFAULT '',
     attribution TEXT NOT NULL,
     created_at TEXT NOT NULL,
     FOREIGN KEY(claim_id) REFERENCES claims(claim_id)
@@ -326,6 +345,75 @@ CREATE TABLE IF NOT EXISTS chains (
     slot_index INTEGER NOT NULL DEFAULT -1,
     oracle_json TEXT NOT NULL DEFAULT '{}',
     ablation_matrix_json TEXT NOT NULL DEFAULT '[]',
+    realism_tier TEXT NOT NULL DEFAULT 'stepping_stone'
+        CHECK(realism_tier IN ('crown_jewel', 'high_impact', 'stepping_stone')),
+    realism_json TEXT NOT NULL DEFAULT '{}',
+    jewel_id TEXT NOT NULL DEFAULT '',
+    door_id TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS crown_jewels (
+    jewel_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    subsystem TEXT NOT NULL DEFAULT '',
+    locus TEXT NOT NULL,
+    impact_class TEXT NOT NULL DEFAULT 'rce'
+        CHECK(impact_class IN ('rce', 'sandbox_escape', 'fund_drain', 'auth_bypass', 'state_takeover', 'key_exfil', 'arbitrary_write', 'mem_corrupt')),
+    symbols_json TEXT NOT NULL DEFAULT '[]',
+    max_interaction_steps INTEGER NOT NULL DEFAULT 1,
+    require_default_config INTEGER NOT NULL DEFAULT 1,
+    forbid_visible_error INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'locked'
+        CHECK(status IN ('locked', 'reached', 'exhausted_unreachable')),
+    reached_by_id TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS parked_doors (
+    door_id TEXT PRIMARY KEY,
+    jewel_id TEXT NOT NULL DEFAULT '',
+    direction TEXT NOT NULL DEFAULT 'sink_to_source'
+        CHECK(direction IN ('sink_to_source', 'source_to_sink', 'bidirectional')),
+    anchor_locus TEXT NOT NULL,
+    blocker_locus TEXT NOT NULL DEFAULT '',
+    subsystem TEXT NOT NULL DEFAULT '',
+    held_ids_json TEXT NOT NULL DEFAULT '[]',
+    snapshot_id TEXT NOT NULL DEFAULT '',
+    missing_link_summary TEXT NOT NULL,
+    wanted_tags_json TEXT NOT NULL DEFAULT '[]',
+    wanted_symbols_json TEXT NOT NULL DEFAULT '[]',
+    wishlist_query TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'parked'
+        CHECK(status IN ('parked', 'bridging', 'ready', 'chained', 'exhausted_locked')),
+    matched_by_json TEXT NOT NULL DEFAULT '[]',
+    bridge_attempts INTEGER NOT NULL DEFAULT 0,
+    max_bridge_attempts INTEGER NOT NULL DEFAULT 2,
+    resume_task_id TEXT NOT NULL DEFAULT '',
+    created_by_worker TEXT NOT NULL DEFAULT 'worker',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS door_fts USING fts5(
+    door_id UNINDEXED,
+    anchor_locus,
+    blocker_locus,
+    wanted_symbols,
+    missing_link_summary,
+    wishlist_query
+);
+
+CREATE TABLE IF NOT EXISTS repro_snapshots (
+    snapshot_id TEXT PRIMARY KEY,
+    claim_id TEXT NOT NULL DEFAULT '',
+    rel_dir TEXT NOT NULL DEFAULT '.',
+    archive_path TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL DEFAULT 0,
+    manifest_json TEXT NOT NULL DEFAULT '{}',
+    source_cmd TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 
@@ -462,7 +550,7 @@ CREATE TABLE IF NOT EXISTS threat_assumptions (
 CREATE TABLE IF NOT EXISTS swarm_dispatches (
     dispatch_id TEXT PRIMARY KEY,
     worker_id TEXT NOT NULL,
-    stage TEXT NOT NULL CHECK(stage IN ('investigate', 'falsify', 'reproduce', 'chain')),
+    stage TEXT NOT NULL CHECK(stage IN ('investigate', 'bridge', 'falsify', 'reproduce', 'chain', 'portfolio')),
     wire_profile TEXT NOT NULL CHECK(wire_profile IN ('direct', 'swarm_patch_first', 'regression_tdd')),
     item_ids_json TEXT NOT NULL DEFAULT '[]',
     status TEXT NOT NULL DEFAULT 'dispatched'
@@ -473,6 +561,8 @@ CREATE TABLE IF NOT EXISTS swarm_dispatches (
 );
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status_salience ON tasks(status, salience_score DESC);
+CREATE INDEX IF NOT EXISTS idx_tasks_door_id ON tasks(door_id, status);
+CREATE INDEX IF NOT EXISTS idx_doors_status ON parked_doors(status, subsystem);
 CREATE INDEX IF NOT EXISTS idx_claims_locus_mech ON claims(locus, mechanism_key);
 CREATE INDEX IF NOT EXISTS idx_anomalies_status ON anomalies(status, subsystem);
 CREATE INDEX IF NOT EXISTS idx_hooks_status_sub ON epistemic_hooks(status, subsystem);
@@ -883,6 +973,331 @@ def _ensure_v322_schema(conn: sqlite3.Connection) -> None:
     )
 
 
+def _ensure_v33_schema(conn: sqlite3.Connection) -> None:
+    """Idempotently migrate v3.2.x SQLite databases to include v3.3 columns, enums, and tables."""
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    if not tables:
+        return
+
+    # 1. Rebuild `runs` if `crown-jewel` or `campaign_phase` is absent from DDL.
+    runs_ddl = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='runs'").fetchone()
+    if runs_ddl and ("'crown-jewel'" not in str(runs_ddl[0] or "") or "campaign_phase" not in str(runs_ddl[0] or "")):
+        rcols = [r[1] for r in conn.execute("PRAGMA table_info(runs)").fetchall()]
+        if "campaign_phase" not in rcols:
+            conn.execute("ALTER TABLE runs ADD COLUMN campaign_phase TEXT NOT NULL DEFAULT 'hunt'")
+            rcols.append("campaign_phase")
+        csv_rcols = ", ".join(rcols)
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.executescript(
+            f"""
+            BEGIN;
+            ALTER TABLE runs RENAME TO _runs_v32_old;
+            CREATE TABLE runs (
+                run_id TEXT PRIMARY KEY,
+                target_path TEXT NOT NULL,
+                workspace_path TEXT NOT NULL,
+                target_mode TEXT NOT NULL CHECK(target_mode IN ('source', 'binary', 'live')),
+                workspace_mode TEXT NOT NULL CHECK(workspace_mode IN ('envelope', 'in_place')),
+                goal TEXT NOT NULL,
+                stopping_criterion TEXT NOT NULL DEFAULT 'exhaustive-high'
+                    CHECK(stopping_criterion IN ('exhaustive-high', 'first-verified-high', 'crown-jewel')),
+                campaign_phase TEXT NOT NULL DEFAULT 'hunt'
+                    CHECK(campaign_phase IN ('hunt', 'remediate', 'full')),
+                budget_usd REAL NOT NULL DEFAULT 14.0,
+                in_scope_loc INTEGER NOT NULL DEFAULT 0,
+                code_quote_usd REAL NOT NULL DEFAULT 10.0,
+                cogs_cap_usd REAL NOT NULL DEFAULT 3.5,
+                pricing_mode TEXT NOT NULL DEFAULT 'commercial_code'
+                    CHECK(pricing_mode IN ('commercial_code', 'custom_or_bounty', 'uncapped_research')),
+                commitment_hash TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active'
+                    CHECK(status IN ('active', 'verify_only', 'finished', 'blocked')),
+                stop_reason TEXT DEFAULT '',
+                closed_task_counter INTEGER NOT NULL DEFAULT 0,
+                zero_skill_leases INTEGER NOT NULL DEFAULT 0,
+                domain_skill_leases INTEGER NOT NULL DEFAULT 0,
+                consecutive_stall_checks INTEGER NOT NULL DEFAULT 0,
+                last_stop_event_id INTEGER NOT NULL DEFAULT 0,
+                diff_range TEXT NOT NULL DEFAULT '',
+                base_sha TEXT NOT NULL DEFAULT '',
+                head_sha TEXT NOT NULL DEFAULT '',
+                parent_run_id TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                finished_at TEXT
+            );
+            INSERT INTO runs({csv_rcols}) SELECT {csv_rcols} FROM _runs_v32_old;
+            DROP TABLE _runs_v32_old;
+            COMMIT;
+            """
+        )
+        conn.execute("PRAGMA foreign_keys=ON")
+
+    # 2. Rebuild `tasks` if `'bridge'` or `door_id` is absent.
+    tasks_ddl = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").fetchone()
+    if tasks_ddl and ("'bridge'" not in str(tasks_ddl[0] or "") or "door_id" not in str(tasks_ddl[0] or "")):
+        tcols = [r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()]
+        if "door_id" not in tcols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN door_id TEXT NOT NULL DEFAULT ''")
+            tcols.append("door_id")
+        csv_tcols = ", ".join(tcols)
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.executescript(
+            f"""
+            BEGIN;
+            ALTER TABLE tasks RENAME TO _tasks_v32_old;
+            CREATE TABLE tasks (
+                task_id TEXT PRIMARY KEY,
+                parent_task_id TEXT,
+                parent_claim_id TEXT,
+                surface_id TEXT,
+                kind TEXT NOT NULL
+                    CHECK(kind IN ('map', 'investigate', 'bridge', 'falsify', 'reproduce', 'instrument', 'chain', 'patch', 'escalate')),
+                direction TEXT NOT NULL DEFAULT 'outside_in'
+                    CHECK(direction IN ('outside_in', 'inside_out', 'native_ffi', 'peer_symmetry')),
+                title TEXT NOT NULL,
+                subsystem TEXT NOT NULL DEFAULT '',
+                locus TEXT NOT NULL DEFAULT '',
+                priority TEXT NOT NULL DEFAULT 'high'
+                    CHECK(priority IN ('critical', 'high', 'medium', 'low')),
+                status TEXT NOT NULL DEFAULT 'open'
+                    CHECK(status IN ('open', 'leased', 'done', 'dry', 'conditional_blocked')),
+                worker_id TEXT,
+                skill_mode TEXT NOT NULL DEFAULT 'domain'
+                    CHECK(skill_mode IN ('domain', 'zero_skill')),
+                lease_expires_at REAL,
+                dry_control_locus TEXT,
+                dry_control_reason TEXT,
+                blocker_predicate TEXT,
+                blocker_check_locus TEXT,
+                salience_score INTEGER NOT NULL DEFAULT 60,
+                reopened_boost INTEGER NOT NULL DEFAULT 0,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                slice_loc INTEGER NOT NULL DEFAULT 0,
+                checkpoint_json TEXT NOT NULL DEFAULT '{{}}',
+                diff_state TEXT NOT NULL DEFAULT '',
+                door_id TEXT NOT NULL DEFAULT '',
+                summary TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                closed_epoch REAL
+            );
+            INSERT INTO tasks({csv_tcols}) SELECT {csv_tcols} FROM _tasks_v32_old;
+            DROP TABLE _tasks_v32_old;
+            CREATE INDEX IF NOT EXISTS idx_tasks_status_salience ON tasks(status, salience_score DESC);
+            CREATE INDEX IF NOT EXISTS idx_tasks_door_id ON tasks(door_id, status);
+            COMMIT;
+            """
+        )
+        conn.execute("PRAGMA foreign_keys=ON")
+
+    # 3. Rebuild `claims` if `'verified_local'` is absent from `remediation_state`.
+    claims_ddl = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='claims'").fetchone()
+    if claims_ddl and "'verified_local'" not in str(claims_ddl[0] or ""):
+        ccols = [r[1] for r in conn.execute("PRAGMA table_info(claims)").fetchall()]
+        csv_ccols = ", ".join(ccols)
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.executescript(
+            f"""
+            BEGIN;
+            ALTER TABLE claims RENAME TO _claims_v32_old;
+            CREATE TABLE claims (
+                claim_id TEXT PRIMARY KEY,
+                surface_id TEXT,
+                proposer_worker_id TEXT NOT NULL,
+                seeded_by_human INTEGER NOT NULL DEFAULT 0,
+                title TEXT NOT NULL,
+                subsystem TEXT NOT NULL DEFAULT '',
+                locus TEXT NOT NULL,
+                mechanism TEXT NOT NULL,
+                mechanism_key TEXT NOT NULL,
+                severity TEXT NOT NULL DEFAULT 'high'
+                    CHECK(severity IN ('critical', 'high', 'medium', 'low')),
+                falsification_prediction TEXT NOT NULL,
+                falsification_test TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'proposed'
+                    CHECK(status IN (
+                        'proposed',
+                        'survived_falsify',
+                        'falsified',
+                        'needs_instrumentation',
+                        'reproduced',
+                        'rejected_repro',
+                        'duplicate_root_cause',
+                        'blocked',
+                        'config_gated'
+                    )),
+                falsifier_worker_id TEXT,
+                falsify_notes TEXT NOT NULL DEFAULT '',
+                falsify_control_locus TEXT,
+                config_gate TEXT NOT NULL DEFAULT '',
+                diff_state TEXT NOT NULL DEFAULT '',
+                failed_repro_count INTEGER NOT NULL DEFAULT 0,
+                last_observation_hash TEXT NOT NULL DEFAULT '',
+                instrumented_since_fail INTEGER NOT NULL DEFAULT 0,
+                research_state TEXT NOT NULL DEFAULT 'candidate'
+                    CHECK(research_state IN ('candidate', 'rejected_during_research', 'confirmed')),
+                evidence_state TEXT NOT NULL DEFAULT 'unverified'
+                    CHECK(evidence_state IN ('unverified', 'falsified', 'reproduced')),
+                customer_state TEXT NOT NULL DEFAULT 'pending'
+                    CHECK(customer_state IN ('pending', 'accepted', 'disputed')),
+                remediation_state TEXT NOT NULL DEFAULT 'unpatched'
+                    CHECK(remediation_state IN ('unpatched', 'micropatched', 'verified_local', 'maintainer_patched')),
+                duplicate_of_claim_id TEXT,
+                env_blocker TEXT NOT NULL DEFAULT '',
+                blocker_reason TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO claims({csv_ccols}) SELECT {csv_ccols} FROM _claims_v32_old;
+            DROP TABLE _claims_v32_old;
+            CREATE INDEX IF NOT EXISTS idx_claims_locus_mech ON claims(locus, mechanism_key);
+            COMMIT;
+            """
+        )
+        conn.execute("PRAGMA foreign_keys=ON")
+
+    # 4. Rebuild `swarm_dispatches` if `'bridge'` or `'portfolio'` is absent.
+    sd_ddl = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='swarm_dispatches'").fetchone()
+    if sd_ddl and "'portfolio'" not in str(sd_ddl[0] or ""):
+        scols = [r[1] for r in conn.execute("PRAGMA table_info(swarm_dispatches)").fetchall()]
+        csv_scols = ", ".join(scols)
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.executescript(
+            f"""
+            BEGIN;
+            ALTER TABLE swarm_dispatches RENAME TO _sd_v32_old;
+            CREATE TABLE swarm_dispatches (
+                dispatch_id TEXT PRIMARY KEY,
+                worker_id TEXT NOT NULL,
+                stage TEXT NOT NULL CHECK(stage IN ('investigate', 'bridge', 'falsify', 'reproduce', 'chain', 'portfolio')),
+                wire_profile TEXT NOT NULL CHECK(wire_profile IN ('direct', 'swarm_patch_first', 'regression_tdd')),
+                item_ids_json TEXT NOT NULL DEFAULT '[]',
+                status TEXT NOT NULL DEFAULT 'dispatched'
+                    CHECK(status IN ('dispatched', 'completed', 'filter_blocked', 'idle_no_return', 'refused')),
+                notes TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO swarm_dispatches({csv_scols}) SELECT {csv_scols} FROM _sd_v32_old;
+            DROP TABLE _sd_v32_old;
+            CREATE INDEX IF NOT EXISTS idx_swarm_dispatches_stage ON swarm_dispatches(stage, status, created_at DESC);
+            COMMIT;
+            """
+        )
+        conn.execute("PRAGMA foreign_keys=ON")
+
+    # 5. Additive columns on `primitives`, `findings`, and `chains`.
+    if "primitives" in tables:
+        pcols = {r[1] for r in conn.execute("PRAGMA table_info(primitives)").fetchall()}
+        for cname, cdef in (
+            ("role", "TEXT NOT NULL DEFAULT 'capability'"),
+            ("trusted_invariant", "TEXT NOT NULL DEFAULT ''"),
+            ("symbols_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("micropatch_diff", "TEXT NOT NULL DEFAULT ''"),
+            ("snapshot_id", "TEXT NOT NULL DEFAULT ''"),
+            ("status", "TEXT NOT NULL DEFAULT 'active'"),
+            ("dry_locus", "TEXT NOT NULL DEFAULT ''"),
+            ("dry_reason", "TEXT NOT NULL DEFAULT ''"),
+        ):
+            if cname not in pcols:
+                conn.execute(f"ALTER TABLE primitives ADD COLUMN {cname} {cdef}")
+        conn.execute("UPDATE primitives SET status = 'chained' WHERE chained = 1 AND status = 'active'")
+
+    if "findings" in tables:
+        fcols = {r[1] for r in conn.execute("PRAGMA table_info(findings)").fetchall()}
+        for cname, cdef in (
+            ("provides_tags_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("snapshot_id", "TEXT NOT NULL DEFAULT ''"),
+            ("realism_tier", "TEXT NOT NULL DEFAULT 'stepping_stone'"),
+            ("realism_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("calibration_notes", "TEXT NOT NULL DEFAULT ''"),
+        ):
+            if cname not in fcols:
+                conn.execute(f"ALTER TABLE findings ADD COLUMN {cname} {cdef}")
+
+    if "chains" in tables:
+        chcols = {r[1] for r in conn.execute("PRAGMA table_info(chains)").fetchall()}
+        for cname, cdef in (
+            ("realism_tier", "TEXT NOT NULL DEFAULT 'stepping_stone'"),
+            ("realism_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("jewel_id", "TEXT NOT NULL DEFAULT ''"),
+            ("door_id", "TEXT NOT NULL DEFAULT ''"),
+        ):
+            if cname not in chcols:
+                conn.execute(f"ALTER TABLE chains ADD COLUMN {cname} {cdef}")
+
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS crown_jewels (
+            jewel_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            subsystem TEXT NOT NULL DEFAULT '',
+            locus TEXT NOT NULL,
+            impact_class TEXT NOT NULL DEFAULT 'rce'
+                CHECK(impact_class IN ('rce', 'sandbox_escape', 'fund_drain', 'auth_bypass', 'state_takeover', 'key_exfil', 'arbitrary_write', 'mem_corrupt')),
+            symbols_json TEXT NOT NULL DEFAULT '[]',
+            max_interaction_steps INTEGER NOT NULL DEFAULT 1,
+            require_default_config INTEGER NOT NULL DEFAULT 1,
+            forbid_visible_error INTEGER NOT NULL DEFAULT 1,
+            status TEXT NOT NULL DEFAULT 'locked'
+                CHECK(status IN ('locked', 'reached', 'exhausted_unreachable')),
+            reached_by_id TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS parked_doors (
+            door_id TEXT PRIMARY KEY,
+            jewel_id TEXT NOT NULL DEFAULT '',
+            direction TEXT NOT NULL DEFAULT 'sink_to_source'
+                CHECK(direction IN ('sink_to_source', 'source_to_sink', 'bidirectional')),
+            anchor_locus TEXT NOT NULL,
+            blocker_locus TEXT NOT NULL DEFAULT '',
+            subsystem TEXT NOT NULL DEFAULT '',
+            held_ids_json TEXT NOT NULL DEFAULT '[]',
+            snapshot_id TEXT NOT NULL DEFAULT '',
+            missing_link_summary TEXT NOT NULL,
+            wanted_tags_json TEXT NOT NULL DEFAULT '[]',
+            wanted_symbols_json TEXT NOT NULL DEFAULT '[]',
+            wishlist_query TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'parked'
+                CHECK(status IN ('parked', 'bridging', 'ready', 'chained', 'exhausted_locked')),
+            matched_by_json TEXT NOT NULL DEFAULT '[]',
+            bridge_attempts INTEGER NOT NULL DEFAULT 0,
+            max_bridge_attempts INTEGER NOT NULL DEFAULT 2,
+            resume_task_id TEXT NOT NULL DEFAULT '',
+            created_by_worker TEXT NOT NULL DEFAULT 'worker',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS door_fts USING fts5(
+            door_id UNINDEXED,
+            anchor_locus,
+            blocker_locus,
+            wanted_symbols,
+            missing_link_summary,
+            wishlist_query
+        );
+
+        CREATE TABLE IF NOT EXISTS repro_snapshots (
+            snapshot_id TEXT PRIMARY KEY,
+            claim_id TEXT NOT NULL DEFAULT '',
+            rel_dir TEXT NOT NULL DEFAULT '.',
+            archive_path TEXT NOT NULL,
+            sha256 TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL DEFAULT 0,
+            manifest_json TEXT NOT NULL DEFAULT '{}',
+            source_cmd TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_tasks_door_id ON tasks(door_id, status);
+        CREATE INDEX IF NOT EXISTS idx_doors_status ON parked_doors(status, subsystem);
+        """
+    )
+
+
 def open_run_db(
     run_id_or_path: str | pathlib.Path,
     *,
@@ -917,6 +1332,7 @@ def open_run_db(
         _ensure_v31_schema(conn)
         _ensure_v32_schema(conn)
         _ensure_v322_schema(conn)
+        _ensure_v33_schema(conn)
     return conn
 
 
@@ -966,6 +1382,11 @@ def compute_commitment_hash(target_sha256: str, goal: str, stopping_criterion: s
 
 
 def compute_task_salience(conn: sqlite3.Connection, task_row: sqlite3.Row | dict[str, Any]) -> int:
+    kind = str(task_row["kind"] if "kind" in task_row.keys() else "")
+    door_id = str(task_row["door_id"] if "door_id" in task_row.keys() else "")
+    if kind == "chain" and door_id:
+        return max(96, int(task_row["salience_score"] or 96))
+
     priority = str(task_row["priority"] or "high")
     subsystem = str(task_row["subsystem"] or "")
     locus = str(task_row["locus"] or "")
@@ -1001,7 +1422,7 @@ def compute_task_salience(conn: sqlite3.Connection, task_row: sqlite3.Row | dict
 
     if locus:
         unchained_prim = conn.execute(
-            "SELECT COUNT(*) AS c FROM primitives WHERE chained = 0 AND (locus = ? OR subsystem = ?)",
+            "SELECT COUNT(*) AS c FROM primitives WHERE chained = 0 AND status != 'dry' AND (locus = ? OR subsystem = ?)",
             (locus, subsystem),
         ).fetchone()["c"]
         if unchained_prim > 0:
@@ -1082,20 +1503,18 @@ def lease_next_task(
     ttl_sec: int = 900,
     recover: bool = False,
 ) -> dict[str, Any] | None:
-    """Atomically lease the highest-salience open task and enforce Zero-Skill quota."""
+    """Atomically lease the highest-salience open task with portfolio balance and Zero-Skill quota."""
     now = time.time()
     now_iso = utc_now_iso()
     conn.execute("BEGIN IMMEDIATE")
     try:
-        # Expire stale leases first (`escalate` tasks are single-pass `max_leases=1` and close instead of looping).
         conn.execute(
             """
             UPDATE tasks
-            SET status = CASE WHEN kind = 'escalate' THEN 'done' ELSE 'open' END,
-                worker_id = CASE WHEN kind = 'escalate' THEN worker_id ELSE NULL END,
+            SET status = 'open',
+                worker_id = NULL,
                 lease_expires_at = NULL,
                 attempt_count = attempt_count + 1,
-                summary = CASE WHEN kind = 'escalate' AND summary = '' THEN 'Single-pass escalate lease expired' ELSE summary END,
                 updated_at = ?
             WHERE status = 'leased' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
             """,
@@ -1119,9 +1538,13 @@ def lease_next_task(
 
         run_row = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
         verify_only = bool(run_row and run_row["status"] == "verify_only")
+        in_hunt_phase = bool(
+            run_row and "campaign_phase" in run_row.keys() and str(run_row["campaign_phase"] or "hunt") == "hunt"
+        )
 
+        row: sqlite3.Row | None = None
         if kind:
-            if verify_only and kind in ("map", "investigate"):
+            if verify_only and kind in ("map", "investigate", "bridge"):
                 conn.commit()
                 return None
             row = conn.execute(
@@ -1134,23 +1557,81 @@ def lease_next_task(
                 (kind,),
             ).fetchone()
         elif verify_only:
+            allowed = ("falsify", "reproduce", "instrument", "chain", "escalate") if in_hunt_phase else (
+                "falsify", "reproduce", "instrument", "chain", "patch", "escalate"
+            )
+            placeholders = ",".join("?" for _ in allowed)
             row = conn.execute(
-                """
+                f"""
                 SELECT * FROM tasks
-                WHERE status = 'open' AND kind IN ('falsify', 'reproduce', 'instrument', 'chain', 'patch', 'escalate')
+                WHERE status = 'open' AND kind IN ({placeholders})
                 ORDER BY salience_score DESC, created_at ASC
                 LIMIT 1
-                """
+                """,
+                allowed,
             ).fetchone()
         else:
-            row = conn.execute(
-                """
-                SELECT * FROM tasks
-                WHERE status = 'open'
-                ORDER BY salience_score DESC, created_at ASC
-                LIMIT 1
-                """
-            ).fetchone()
+            # 1. Woken Open-Door / Percolated `chain` tasks (`salience >= 96`) take top priority unless one is already leased.
+            leased_chain = conn.execute(
+                "SELECT COUNT(*) AS c FROM tasks WHERE status = 'leased' AND kind = 'chain'"
+            ).fetchone()["c"]
+            if int(leased_chain) == 0:
+                row = conn.execute(
+                    """
+                    SELECT * FROM tasks
+                    WHERE status = 'open' AND kind = 'chain' AND salience_score >= 95
+                    ORDER BY salience_score DESC, created_at ASC
+                    LIMIT 1
+                    """
+                ).fetchone()
+
+            # 2. Portfolio anti-starvation between greenfield `investigate` and missing-link `bridge`.
+            if row is None:
+                recent_explore = [
+                    str(r["kind"])
+                    for r in conn.execute(
+                        """
+                        SELECT kind FROM tasks
+                        WHERE kind IN ('investigate', 'bridge') AND status IN ('leased', 'done', 'dry')
+                        ORDER BY updated_at DESC LIMIT 3
+                        """
+                    ).fetchall()
+                ]
+                has_open_inv = (
+                    conn.execute("SELECT 1 FROM tasks WHERE status = 'open' AND kind IN ('map', 'investigate') LIMIT 1").fetchone()
+                    is not None
+                )
+                has_open_bridge = (
+                    conn.execute("SELECT 1 FROM tasks WHERE status = 'open' AND kind = 'bridge' LIMIT 1").fetchone()
+                    is not None
+                )
+                bridge_share_high = recent_explore.count("bridge") >= 1 and len(recent_explore) <= 3
+                if has_open_inv and has_open_bridge:
+                    if len(recent_explore) >= 2 and all(k == "investigate" for k in recent_explore[:2]):
+                        row = conn.execute(
+                            "SELECT * FROM tasks WHERE status = 'open' AND kind = 'bridge' ORDER BY salience_score DESC, created_at ASC LIMIT 1"
+                        ).fetchone()
+                    elif bridge_share_high:
+                        row = conn.execute(
+                            """
+                            SELECT * FROM tasks
+                            WHERE status = 'open' AND kind != 'bridge' AND (? = 0 OR kind != 'patch')
+                            ORDER BY salience_score DESC, created_at ASC
+                            LIMIT 1
+                            """,
+                            (1 if in_hunt_phase else 0,),
+                        ).fetchone()
+
+            if row is None:
+                row = conn.execute(
+                    """
+                    SELECT * FROM tasks
+                    WHERE status = 'open' AND (? = 0 OR kind != 'patch')
+                    ORDER BY salience_score DESC, created_at ASC
+                    LIMIT 1
+                    """,
+                    (1 if in_hunt_phase else 0,),
+                ).fetchone()
 
         if row is None:
             conn.commit()
@@ -1606,10 +2087,23 @@ def render_task_context(
     guarded_prims = conn.execute(
         """
         SELECT primitive_id, locus, kind, guarded_by_locus FROM primitives
-        WHERE chained = 0 AND guarded_by_locus != '' AND (subsystem = ? OR locus = ? OR guarded_by_locus = ?)
+        WHERE chained = 0 AND status != 'dry' AND guarded_by_locus != ''
+          AND (subsystem = ? OR locus = ? OR guarded_by_locus = ?)
         ORDER BY created_at DESC LIMIT 3
         """,
         (sub, task["locus"], task["locus"]),
+    ).fetchall()
+    task_door_id = str(task["door_id"] if "door_id" in task.keys() else "")
+    open_doors = conn.execute(
+        """
+        SELECT door_id, status, anchor_locus, blocker_locus, missing_link_summary, snapshot_id
+        FROM parked_doors
+        WHERE status IN ('ready', 'bridging', 'parked')
+          AND (door_id = ? OR status = 'ready' OR subsystem = ?)
+        ORDER BY CASE status WHEN 'ready' THEN 0 WHEN 'bridging' THEN 1 ELSE 2 END, updated_at DESC
+        LIMIT 2
+        """,
+        (task_door_id, sub),
     ).fetchall()
     dead_claims = conn.execute(
         """
@@ -1664,6 +2158,15 @@ def render_task_context(
     raw_ckpt = str(task["checkpoint_json"] if "checkpoint_json" in task.keys() else "{}") or "{}"
     if raw_ckpt != "{}":
         delta_lines.append(f"## Trajectory Checkpoint: {raw_ckpt[:180]}")
+
+    if open_doors:
+        delta_lines.append("## Open Doors (suspended chain subgoals)")
+        for od in open_doors:
+            snap_s = f" snap={od['snapshot_id']}" if od["snapshot_id"] else ""
+            blk_s = f" blocked_at={od['blocker_locus']}" if od["blocker_locus"] else ""
+            delta_lines.append(
+                f"- {od['door_id']} [{od['status']}] @ {od['anchor_locus']}{blk_s}{snap_s}: {str(od['missing_link_summary'])[:75]}"
+            )
 
     if bridges:
         delta_lines.append("## Cross-Subsystem Capability Bridges")
@@ -1738,6 +2241,7 @@ def render_task_context(
         "salience_score": task["salience_score"],
         "steers_count": len(all_active_steers),
         "bindings_count": len(bindings),
+        "open_doors_count": len(open_doors),
         "bridges_count": len(bridges),
         "active_hooks_count": len(active_hooks),
         "active_hooks": [str(h["hook_code"]) for h in active_hooks],
@@ -1749,8 +2253,132 @@ def render_task_context(
     }
 
 
+def calibrate_finding(
+    conn: sqlite3.Connection,
+    *,
+    finding_id: str,
+    reason: str,
+    severity: str | None = None,
+    title: str | None = None,
+    worker_id: str = "operator",
+) -> dict[str, Any]:
+    """Calibrate severity/title on a confirmed finding without ad-hoc SQL edits."""
+    frow = conn.execute("SELECT * FROM findings WHERE finding_id = ?", (finding_id,)).fetchone()
+    if frow is None:
+        raise AjarError(f"Unknown finding_id: {finding_id}", EXIT_USER_ERROR)
+    clean_reason = scrub_text((reason or "").strip())
+    if len(clean_reason) < 8:
+        raise AjarError("Finding calibration --reason must be at least 8 characters.", EXIT_USER_ERROR)
+
+    new_sev = (severity or str(frow["severity"])).strip().lower()
+    if new_sev not in ("critical", "high", "medium", "low"):
+        raise AjarError(f"Unsupported severity: {new_sev!r}", EXIT_USER_ERROR)
+    new_title = scrub_text(title.strip()) if title and title.strip() else str(frow["title"])
+    cur_tier = str(frow["realism_tier"] if "realism_tier" in frow.keys() else "stepping_stone")
+    new_tier = "stepping_stone" if new_sev in ("medium", "low") else cur_tier
+    now_iso = utc_now_iso()
+
+    conn.execute(
+        """
+        UPDATE findings
+        SET severity = ?, title = ?, realism_tier = ?, calibration_notes = ?
+        WHERE finding_id = ?
+        """,
+        (new_sev, new_title, new_tier, clean_reason, finding_id),
+    )
+    conn.execute(
+        "UPDATE claims SET severity = ?, title = ?, updated_at = ? WHERE claim_id = ?",
+        (new_sev, new_title, now_iso, str(frow["claim_id"])),
+    )
+    if worker_id == "operator":
+        conn.execute(
+            "INSERT INTO human_touches(touch_id, kind, actor, notes, created_at) VALUES (?, 'scope_authority', 'operator', ?, ?)",
+            (new_id("tch"), f"calibrate {finding_id} -> {new_sev}: {clean_reason[:140]}", now_iso),
+        )
+    log_event(
+        conn,
+        worker_id,
+        "finding_calibrated",
+        finding_id,
+        {
+            "old_severity": frow["severity"],
+            "new_severity": new_sev,
+            "new_title": new_title,
+            "realism_tier": new_tier,
+            "reason": clean_reason[:200],
+        },
+    )
+    return {
+        "finding_id": finding_id,
+        "claim_id": str(frow["claim_id"]),
+        "old_severity": str(frow["severity"]),
+        "severity": new_sev,
+        "title": new_title,
+        "realism_tier": new_tier,
+        "calibration_notes": clean_reason,
+    }
+
+
+def mark_primitive_dry(
+    conn: sqlite3.Connection,
+    *,
+    target_dir: pathlib.Path,
+    target_mode: str,
+    primitive_id: str,
+    worker_id: str,
+    locus: str,
+    reason: str,
+) -> dict[str, Any]:
+    """Close an unchained guarded primitive as `dry` with a verified upstream guard locus."""
+    prow = conn.execute("SELECT * FROM primitives WHERE primitive_id = ?", (primitive_id,)).fetchone()
+    if prow is None:
+        raise AjarError(f"Unknown primitive_id: {primitive_id}", EXIT_USER_ERROR)
+    if int(prow["chained"] or 0) == 1 or str(prow["status"] if "status" in prow.keys() else "active") == "chained":
+        raise AjarError(
+            f"Verified chained primitive {primitive_id} cannot be closed dry.",
+            EXIT_GATE_BLOCKED,
+        )
+    clean_locus = (locus or "").strip()
+    clean_reason = scrub_text((reason or "").strip())
+    if not clean_locus or len(clean_reason) < 8:
+        raise AjarError(
+            "`ajar primitive dry` requires --locus <file:line> and --reason (>= 8 chars).",
+            EXIT_USER_ERROR,
+        )
+    if target_mode == "source":
+        sha, _, _ = file_locus_sha256(target_dir, clean_locus)
+        if not sha:
+            raise AjarError(
+                f"Guard control locus not found in target repository: {clean_locus}",
+                EXIT_USER_ERROR,
+            )
+    conn.execute(
+        """
+        UPDATE primitives
+        SET status = 'dry', dry_locus = ?, dry_reason = ?
+        WHERE primitive_id = ?
+        """,
+        (clean_locus, clean_reason, primitive_id),
+    )
+    recompute_all_open_salience(conn)
+    log_event(
+        conn,
+        worker_id,
+        "primitive_marked_dry",
+        primitive_id,
+        {"dry_control_locus": clean_locus, "dry_reason": clean_reason[:200]},
+    )
+    return {
+        "primitive_id": primitive_id,
+        "status": "dry",
+        "dry_control_locus": clean_locus,
+        "dry_reason": clean_reason,
+    }
+
+
 def run_pulse(conn: sqlite3.Connection, *, target_dir: pathlib.Path | None = None) -> dict[str, Any]:
     """Deterministic maintenance sweep: expire leases/hooks, verify bindings, bridge tags, reopen unblocked tasks."""
+    from ajar.chain_planner import reconcile_door_bridge_tasks
     from ajar.epistemic_hooks import expire_stale_hooks, parse_tag_list
 
     now = time.time()
@@ -1759,8 +2387,8 @@ def run_pulse(conn: sqlite3.Connection, *, target_dir: pathlib.Path | None = Non
     cur_exp = conn.execute(
         """
         UPDATE tasks
-        SET status = CASE WHEN kind = 'escalate' THEN 'done' ELSE 'open' END,
-            worker_id = CASE WHEN kind = 'escalate' THEN worker_id ELSE NULL END,
+        SET status = 'open',
+            worker_id = NULL,
             lease_expires_at = NULL,
             attempt_count = attempt_count + 1,
             updated_at = ?
@@ -1770,6 +2398,7 @@ def run_pulse(conn: sqlite3.Connection, *, target_dir: pathlib.Path | None = Non
     )
     expired_leases = int(cur_exp.rowcount or 0)
     expired_hooks = expire_stale_hooks(conn)
+    exhausted_doors = reconcile_door_bridge_tasks(conn)
 
     invalidated_bindings = 0
     if target_dir is not None and target_dir.is_dir():
@@ -1790,7 +2419,7 @@ def run_pulse(conn: sqlite3.Connection, *, target_dir: pathlib.Path | None = Non
         signal_blobs: list[str] = []
         provided_tag_set: set[str] = set()
         for p in conn.execute(
-            "SELECT locus, kind, postconditions, guarded_by_locus, provides_tags_json FROM primitives"
+            "SELECT locus, kind, postconditions, guarded_by_locus, provides_tags_json FROM primitives WHERE status != 'dry'"
         ).fetchall():
             ptags = parse_tag_list(p["provides_tags_json"])
             provided_tag_set.update(ptags)
@@ -1831,6 +2460,7 @@ def run_pulse(conn: sqlite3.Connection, *, target_dir: pathlib.Path | None = Non
     result = {
         "expired_leases": expired_leases,
         "expired_hooks": expired_hooks,
+        "exhausted_doors": exhausted_doors,
         "invalidated_bindings": invalidated_bindings,
         "reopened_tasks": reopened_tasks,
         "rescored_open_tasks": rescored,

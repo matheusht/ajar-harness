@@ -1,7 +1,9 @@
 """9-Arm Production Remediation Verifier (`ajar patch verify` — `Fixes` gate).
 
 Separates fast finding reproduction (`ajar claim reproduce`, Arms 1–4) from
-maintainer-ready `Fixes` promotion (`remediation_state = 'maintainer_patched'`):
+production `Fixes` verification (`remediation_state = 'verified_local'`):
+- Enforces `campaign_phase != 'hunt'` so autonomous hunt campaigns never burn budget
+  running full test suites prematurely before advancing to `remediate`.
 - Arms 1–4: Counterfactual root-cause & locus-match proof (`clean+PoC`, `clean+control`,
   `patch+PoC`, `patch+control`)
 - Arm 5: Full project test suite passes on patched tree or introduces zero new test
@@ -30,10 +32,12 @@ from ajar.redact import scrub_text, scrubbed_subprocess_env
 from ajar.repro_source import (
     _acquire_slot,
     _bump_files_mtime,
+    _clean_slot_preserving_objects,
     _neutralize_python_pth_escapes,
     _prepare_slot_worktree,
     _run_trials,
     init_source_mirror,
+    resolve_local_build_cache_dir,
     run_source_reproduction,
 )
 
@@ -81,7 +85,7 @@ def _load_or_run_baseline_suite(
         trials=1,
     )
     subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
-    subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, check=False)
+    _clean_slot_preserving_objects(slot_dir, check=False)
 
     entry = {
         "suite_cmd": scrub_text(suite_cmd.strip()),
@@ -111,9 +115,21 @@ def run_8arm_patch_verification(
     shared_guard_locus: str = "",
     max_changed_lines: int = 120,
     timeout_sec: int = 90,
+    suite_timeout_sec: int = 1800,
     worker_id: str = "worker",
 ) -> dict[str, Any]:
-    """Execute all 9 hardened verification arms before promoting a fix to `maintainer_patched`."""
+    """Execute all 9 hardened verification arms before promoting a fix to `verified_local`."""
+    run_row = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
+    if run_row is not None and "campaign_phase" in run_row.keys():
+        cur_phase = str(run_row["campaign_phase"] or "hunt")
+        if cur_phase == "hunt":
+            raise AjarError(
+                "Phase gate blocked: 9-arm `ajar patch verify` is disabled while `campaign_phase='hunt'` "
+                "so workers focus on discovery and multi-step chains instead of full test-suite rebuilds. "
+                "Run `ajar phase advance --to remediate` (or initialize with `--phase full`) when ready to verify fixes.",
+                EXIT_GATE_BLOCKED,
+            )
+
     finding = conn.execute("SELECT * FROM findings WHERE finding_id = ?", (finding_id,)).fetchone()
     if finding is None:
         raise AjarError(f"Unknown finding_id: {finding_id}", EXIT_USER_ERROR)
@@ -203,10 +219,10 @@ def run_8arm_patch_verification(
     repro_dir = run_dir / "repro"
     slot_idx, lock_fh = _acquire_slot(repro_dir)
     slot_dir = repro_dir / f"slot-{slot_idx}"
-    cache_dir = repro_dir / f"cache-{slot_idx}"
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = resolve_local_build_cache_dir(run_dir, f"cache-{slot_idx}")
     watermark_file = cache_dir / "watermark_ns"
     touched_files = list(base_repro.get("touched_files") or [])
+    eff_suite_timeout = max(int(timeout_sec), int(suite_timeout_sec))
 
     try:
         _prepare_slot_worktree(mirror_dir, slot_dir)
@@ -218,7 +234,7 @@ def run_8arm_patch_verification(
             repro_dir=repro_dir,
             slot_dir=slot_dir,
             cache_dir=cache_dir,
-            timeout_sec=timeout_sec,
+            timeout_sec=eff_suite_timeout,
         )
 
         # (b) Verify >= 1 `--variant-cmd` triggers the defect on unpatched `HEAD` (blocks `--variant-cmd true` x3).
@@ -233,7 +249,7 @@ def run_8arm_patch_verification(
                 trials=1,
             )
             subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
-            subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, check=False)
+            _clean_slot_preserving_objects(slot_dir, check=False)
             if int(cv_res["defect_hits"]) >= 1:
                 clean_variant_hits += 1
 
@@ -282,7 +298,7 @@ def run_8arm_patch_verification(
             suite_cmd,
             slot_dir=slot_dir,
             cache_dir=cache_dir,
-            timeout_sec=timeout_sec,
+            timeout_sec=eff_suite_timeout,
             oracle=None,
             trials=1,
         )
@@ -515,13 +531,13 @@ def run_8arm_patch_verification(
             baseline_suite=baseline_suite,
             arms=arms,
             passed=True,
-            reason="All 9 production patch verification arms passed (including clean-HEAD variant & revert proof); promoted to maintainer_patched.",
+            reason="All 9 production patch verification arms passed (including clean-HEAD variant & revert proof); promoted to verified_local.",
             worker_id=worker_id,
         )
     finally:
         if (slot_dir / ".git").exists():
             subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
-            subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, check=False)
+            _clean_slot_preserving_objects(slot_dir, check=False)
             _bump_files_mtime(slot_dir, touched_files, watermark_file)
         fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
         lock_fh.close()
@@ -581,7 +597,7 @@ def _persist_patch_verification(
     )
     if passed:
         conn.execute(
-            "UPDATE claims SET remediation_state = 'maintainer_patched', updated_at = ? WHERE claim_id = ?",
+            "UPDATE claims SET remediation_state = 'verified_local', updated_at = ? WHERE claim_id = ?",
             (now_iso, claim_id),
         )
     log_event(
@@ -596,7 +612,7 @@ def _persist_patch_verification(
         "finding_id": finding_id,
         "claim_id": claim_id,
         "passed": passed,
-        "remediation_state": "maintainer_patched" if passed else "micropatched",
+        "remediation_state": "verified_local" if passed else "micropatched",
         "reason": reason,
         "arms": arms,
     }

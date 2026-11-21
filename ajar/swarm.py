@@ -35,7 +35,7 @@ from ajar.db import (
 from ajar.redact import scrub_text, scrubbed_subprocess_env
 
 WIRE_PROFILE_LADDER: tuple[str, ...] = ("direct", "swarm_patch_first", "regression_tdd")
-VALID_SWARM_STAGES: tuple[str, ...] = ("investigate", "falsify", "reproduce", "chain")
+VALID_SWARM_STAGES: tuple[str, ...] = ("investigate", "falsify", "reproduce", "chain", "bridge", "portfolio")
 VALID_FALLBACK_REASONS: tuple[str, ...] = ("idle_no_return", "filter_blocked", "refused")
 
 ENV_BLOCKER_KINDS: tuple[str, ...] = (
@@ -80,6 +80,17 @@ STAGE_ROLE_LABELS: dict[str, str] = {
     "falsify": "Swarm Falsifier",
     "reproduce": "Swarm Reproducer",
     "chain": "Swarm Chain Worker",
+    "bridge": "Swarm Bridge Hunter",
+    "portfolio": "Swarm Portfolio Coordinator",
+}
+
+STAGE_SKILL_PATHS: dict[str, str] = {
+    "investigate": "skills/ajar-investigate/SKILL.md",
+    "falsify": "skills/ajar-falsify/SKILL.md",
+    "reproduce": "skills/ajar-reproduce/SKILL.md",
+    "chain": "skills/ajar-chain/SKILL.md",
+    "bridge": "skills/ajar-chain/SKILL.md",
+    "portfolio": "skills/ajar-investigate/SKILL.md",
 }
 
 
@@ -189,6 +200,7 @@ def _select_stage_items(
 ) -> list[dict[str, str]]:
     clean_explicit = [i.strip() for i in explicit_ids if i and i.strip()]
     items: list[dict[str, str]] = []
+    cap = max(1, int(limit))
 
     if stage in ("falsify", "reproduce"):
         if clean_explicit:
@@ -205,7 +217,7 @@ def _select_stage_items(
                 ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at ASC
                 LIMIT ?
                 """,
-                (max(1, int(limit)),),
+                (cap,),
             ).fetchall()
         else:
             rows = conn.execute(
@@ -215,7 +227,7 @@ def _select_stage_items(
                 ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at ASC
                 LIMIT ?
                 """,
-                (max(1, int(limit)),),
+                (cap,),
             ).fetchall()
         for r in rows:
             items.append(
@@ -228,31 +240,97 @@ def _select_stage_items(
             )
         return items
 
-    if stage == "chain":
+    if stage == "portfolio":
+        # Multi-lane portfolio reservation: 1 woken chain + 1 verify + 1 bridge + greenfield investigate.
+        woken_ch = conn.execute(
+            "SELECT task_id, priority, locus, title, status FROM tasks WHERE kind = 'chain' AND status = 'open' ORDER BY salience_score DESC LIMIT 1"
+        ).fetchone()
+        if woken_ch is not None and len(items) < cap:
+            items.append({"id": str(woken_ch["task_id"]), "priority": f"chain:{woken_ch['priority']}", "locus": str(woken_ch["locus"] or woken_ch["title"]), "status": "open"})
+
+        ver_clm = conn.execute(
+            "SELECT claim_id, severity, locus, status FROM claims WHERE status IN ('proposed', 'survived_falsify') ORDER BY created_at ASC LIMIT 1"
+        ).fetchone()
+        if ver_clm is not None and len(items) < cap:
+            lane = "falsify" if str(ver_clm["status"]) == "proposed" else "reproduce"
+            items.append({"id": str(ver_clm["claim_id"]), "priority": f"{lane}:{ver_clm['severity']}", "locus": str(ver_clm["locus"]), "status": str(ver_clm["status"])})
+
+        br_task = conn.execute(
+            "SELECT task_id, priority, locus, title, status FROM tasks WHERE kind = 'bridge' AND status = 'open' ORDER BY salience_score DESC LIMIT 1"
+        ).fetchone()
+        if br_task is not None and len(items) < cap:
+            items.append({"id": str(br_task["task_id"]), "priority": f"bridge:{br_task['priority']}", "locus": str(br_task["locus"] or br_task["title"]), "status": "open"})
+
+        inv_rows = conn.execute(
+            "SELECT task_id, priority, locus, title, status FROM tasks WHERE kind IN ('investigate', 'map') AND status = 'open' ORDER BY salience_score DESC, created_at ASC LIMIT ?",
+            (cap,),
+        ).fetchall()
+        for ir in inv_rows:
+            if len(items) >= cap:
+                break
+            items.append({"id": str(ir["task_id"]), "priority": f"investigate:{ir['priority']}", "locus": str(ir["locus"] or ir["title"]), "status": "open"})
+        return items
+
+    if stage == "bridge":
         if clean_explicit:
             placeholders = ",".join("?" for _ in clean_explicit)
-            rows = conn.execute(
-                f"SELECT primitive_id, kind, locus FROM primitives WHERE primitive_id IN ({placeholders})",
+            brows = conn.execute(
+                f"SELECT task_id, priority, locus, title, status FROM tasks WHERE task_id IN ({placeholders})",
                 tuple(clean_explicit),
             ).fetchall()
         else:
-            rows = conn.execute(
-                "SELECT primitive_id, kind, locus FROM primitives WHERE chained = 0 ORDER BY created_at ASC LIMIT ?",
-                (max(1, int(limit)),),
+            brows = conn.execute(
+                "SELECT task_id, priority, locus, title, status FROM tasks WHERE kind = 'bridge' AND status IN ('open', 'leased') ORDER BY salience_score DESC, created_at ASC LIMIT ?",
+                (cap,),
             ).fetchall()
-        for r in rows:
-            items.append(
-                {
-                    "id": str(r["primitive_id"]),
-                    "priority": str(r["kind"]),
-                    "locus": str(r["locus"]),
-                    "status": "unchained",
-                }
-            )
+        for r in brows:
+            items.append({"id": str(r["task_id"]), "priority": str(r["priority"]), "locus": str(r["locus"] or r["title"]), "status": str(r["status"])})
+        if not items:
+            drows = conn.execute(
+                "SELECT door_id, status, anchor_locus FROM parked_doors WHERE status IN ('bridging', 'parked') ORDER BY updated_at DESC LIMIT ?",
+                (cap,),
+            ).fetchall()
+            for dr in drows:
+                items.append({"id": str(dr["door_id"]), "priority": "high", "locus": str(dr["anchor_locus"]), "status": str(dr["status"])})
+        return items
+
+    if stage == "chain":
+        if clean_explicit:
+            for eid in clean_explicit[:cap]:
+                prow = conn.execute("SELECT primitive_id, kind, locus FROM primitives WHERE primitive_id = ?", (eid,)).fetchone()
+                if prow:
+                    items.append({"id": str(prow["primitive_id"]), "priority": str(prow["kind"]), "locus": str(prow["locus"]), "status": "unchained"})
+                    continue
+                frow = conn.execute("SELECT finding_id, severity, locus FROM findings WHERE finding_id = ?", (eid,)).fetchone()
+                if frow:
+                    items.append({"id": str(frow["finding_id"]), "priority": str(frow["severity"]), "locus": str(frow["locus"]), "status": "reproduced"})
+                    continue
+                drow = conn.execute("SELECT door_id, status, anchor_locus FROM parked_doors WHERE door_id = ?", (eid,)).fetchone()
+                if drow:
+                    items.append({"id": str(drow["door_id"]), "priority": "door", "locus": str(drow["anchor_locus"]), "status": str(drow["status"])})
+                    continue
+                arow = conn.execute("SELECT anomaly_id, locus, status FROM anomalies WHERE anomaly_id = ?", (eid,)).fetchone()
+                if arow:
+                    items.append({"id": str(arow["anomaly_id"]), "priority": "anomaly", "locus": str(arow["locus"]), "status": str(arow["status"])})
+                    continue
+                trow = conn.execute("SELECT task_id, priority, locus, title, status FROM tasks WHERE task_id = ?", (eid,)).fetchone()
+                if trow:
+                    items.append({"id": str(trow["task_id"]), "priority": str(trow["priority"]), "locus": str(trow["locus"] or trow["title"]), "status": str(trow["status"])})
+            return items
+
+        for rd in conn.execute("SELECT door_id, anchor_locus FROM parked_doors WHERE status = 'ready' ORDER BY updated_at DESC LIMIT ?", (cap,)).fetchall():
+            if len(items) < cap:
+                items.append({"id": str(rd["door_id"]), "priority": "ready_door", "locus": str(rd["anchor_locus"]), "status": "ready"})
+        for r in conn.execute("SELECT primitive_id, kind, locus FROM primitives WHERE chained = 0 AND status != 'dry' ORDER BY created_at ASC LIMIT ?", (cap,)).fetchall():
+            if len(items) < cap:
+                items.append({"id": str(r["primitive_id"]), "priority": str(r["kind"]), "locus": str(r["locus"]), "status": "unchained"})
+        for f in conn.execute("SELECT finding_id, severity, locus FROM findings ORDER BY created_at ASC LIMIT ?", (cap,)).fetchall():
+            if len(items) < cap:
+                items.append({"id": str(f["finding_id"]), "priority": str(f["severity"]), "locus": str(f["locus"]), "status": "reproduced"})
         if items:
             return items
 
-    # `investigate` (or fallback `chain` tasks when no unchained primitives match)
+    # `investigate` (or fallback `chain` tasks when no primitives/findings match)
     if clean_explicit:
         placeholders = ",".join("?" for _ in clean_explicit)
         trows = conn.execute(
@@ -267,7 +345,7 @@ def _select_stage_items(
             ORDER BY salience_score DESC, created_at ASC
             LIMIT ?
             """,
-            (stage, max(1, int(limit))),
+            (stage, cap),
         ).fetchall()
     for r in trows:
         items.append(
@@ -296,7 +374,7 @@ def _render_packet_markdown(
         if wire_profile == "regression_tdd"
         else STAGE_ROLE_LABELS.get(stage, "Swarm Worker")
     )
-    skill_rel = f"skills/ajar-{stage}/SKILL.md"
+    skill_rel = STAGE_SKILL_PATHS.get(stage, f"skills/ajar-{stage}/SKILL.md")
     id_csv = ", ".join(f"'{it['id']}'" for it in items)
     bullets = "\n".join(f"- `{it['id']}` (`{it['priority']}`, `{it['locus']}`)" for it in items)
 
@@ -319,7 +397,11 @@ def _render_packet_markdown(
         )
     elif stage == "chain":
         lines.append(
-            f"Query `run.db` (`SELECT primitive_id, locus, kind, preconditions, postconditions, guarded_by_locus, provides_tags_json, requires_tags_json FROM primitives WHERE primitive_id IN ({id_csv})`) and inspect the exact source lines in `{target_path}`."
+            f"Run `ajar chain frontier` and inspect `{target_path}` for `{id_csv}` (`fnd-*`, `prim-*`, and `ready` Open Doors)."
+        )
+    elif stage == "bridge":
+        lines.append(
+            f"Load `ajar context --task <task_id>` and `ajar door list`; hunt the missing link in `{target_path}` without forcing speculative prose."
         )
     else:
         lines.append(
@@ -331,9 +413,8 @@ def _render_packet_markdown(
         lines.extend(
             [
                 "## Patch-First Execution Protocol",
-                "1. Author the minimal root-cause unified diff (`1-12` changed lines at the claimed locus) in `$HOME/.ajar/runs/"
-                + f"{run_id}/artifacts/` BEFORE writing the runtime verification harness.",
-                "2. Build and execute the real target binary/test entrypoint inside isolated `repro/slot-<k>` via `ajar claim reproduce` (or `ajar chain propose --step-micropatch`).",
+                "1. Author the minimal root-cause unified diff (`1-12` changed lines at the claimed locus) in `$AJAR_RUN_DIR/artifacts/` BEFORE writing the runtime verification harness.",
+                "2. Build and execute the real target binary/test entrypoint inside isolated `repro/slot-<k>` via `ajar claim reproduce` (or `ajar chain propose`).",
                 "3. Never use `<conceptual_placeholder>`, static source-file grepping, or standalone `.o` stub linking on non-library surfaces.",
             ]
         )
@@ -347,12 +428,20 @@ def _render_packet_markdown(
             ]
         )
     else:
-        if stage == "investigate":
+        if stage in ("investigate", "portfolio"):
             lines.extend(
                 [
                     "## Stage Rules",
-                    "- Derive formal conservation, state-machine, and boundary invariants directly from code; reject safe decoys.",
-                    "- Record capabilities (`ajar primitive add --provides-tags ... --requires-tags ... --guarded-by ...`) and hypotheses (`ajar claim propose`) using concise structural state transitions (zero shellcode or OS hook payload literals).",
+                    "- Derive conservation, state-machine, and boundary invariants directly from code; record both capability bugs and `trust_gadget` steps (`ajar primitive add --role trust_gadget`).",
+                    "- Park deep blocked sinks via `ajar door park` and record claims using concise structural state transitions (zero shellcode or OS hook payload literals).",
+                ]
+            )
+        elif stage == "bridge":
+            lines.extend(
+                [
+                    "## Stage Rules",
+                    "- Check whether the assigned cone breaks the Open Door's `blocker_locus` or emits its missing state (`ajar primitive add` / `ajar claim propose`).",
+                    "- Obey the hook Kill Rule: close `dry` cleanly if the cone sanitizes state inline.",
                 ]
             )
         elif stage == "falsify":
@@ -367,16 +456,16 @@ def _render_packet_markdown(
             lines.extend(
                 [
                     "## Stage Rules",
-                    "- Compose non-standalone primitives across modules where `provides_tags` satisfy downstream `requires_tags` or break `guarded_by_locus`.",
-                    "- Prove end-to-end runtime state divergence and per-step necessity via `ajar chain propose` (`--step-micropatch` or `StageContext` helpers); never use `<conceptual_placeholder>` or static source grepping.",
+                    "- Probe post-state snapshots (`ajar chain probe --from-snapshot <snp_id>`) and compose `fnd-*`/`prim-*` steps directly via `ajar chain propose` (micropatches auto-inherit).",
+                    "- Never inject self-override CLI/env flags in `--poc-cmd`, `<conceptual_placeholder>`, or static source grepping.",
                 ]
             )
         else:
             lines.extend(
                 [
                     "## Stage Rules",
-                    f"- Verify each claim end-to-end via `ajar claim reproduce --worker {worker_id}` across all 4 causal arms inside `repro/slot-<k>`.",
-                    "- Exercise the real target binary/CLI entrypoint (`make` / `cargo` / `go` / `forge`); never link synthetic `main()` C stubs against internal `.o`/`.a` on non-library surfaces, and never grep patched source files or emit `<conceptual_placeholder>`.",
+                    f"- Smoke-test builds strike-free via `ajar repro try`, then verify via `ajar claim reproduce --worker {worker_id}` (`--save-post-state <dir>` when producing reusable state).",
+                    "- Exercise the real target binary/CLI entrypoint (`make` / `cargo` / `go` / `forge`); never link synthetic `main()` C stubs against internal `.o`/`.a` on non-library surfaces.",
                     "- Never mark a source claim `blocked` for policy/refusal reasons.",
                 ]
             )

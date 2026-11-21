@@ -20,6 +20,12 @@ from typing import Any
 
 from ajar.redact import scrub_text
 from ajar.repomap import SKIP_DIRS, iter_source_files
+from ajar.store import immediate_tx
+
+_PRECEDENT_CACHE: dict[
+    tuple[str, tuple[tuple[str, int, int], ...]],
+    tuple[tuple[str, str, str, str, str, str], ...],
+] = {}
 
 INVARIANT_COMMENT_RE = re.compile(
     r"\b(invariant|security|must|never|auth|authorize|permission|owner|nonce|signature|overflow|bounds|verify|trust|lock|atomic)\b",
@@ -108,6 +114,31 @@ def _chunk_markdown_sections(md_path: pathlib.Path, rel_label: str) -> list[tupl
     return chunks
 
 
+def _load_precedent_rows(ref_root: pathlib.Path) -> tuple[tuple[str, str, str, str, str, str], ...]:
+    md_files = sorted(ref_root.glob("*.md"))
+    sig: list[tuple[str, int, int]] = []
+    for md_file in md_files:
+        try:
+            st = md_file.stat()
+            sig.append((md_file.name, st.st_mtime_ns, st.st_size))
+        except OSError:
+            continue
+    cache_key = (str(ref_root.resolve()), tuple(sig))
+    cached = _PRECEDENT_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    rows: list[tuple[str, str, str, str, str, str]] = []
+    for md_file in md_files:
+        rel = md_file.name
+        for c_idx, (title, locus, body) in enumerate(_chunk_markdown_sections(md_file, rel)):
+            rows.append((f"precedent:{rel}:{c_idx}", "precedent", scrub_text(title), locus, scrub_text(body), "trusted_builtin"))
+    frozen = tuple(rows)
+    if len(_PRECEDENT_CACHE) >= 16:
+        _PRECEDENT_CACHE.clear()
+    _PRECEDENT_CACHE[cache_key] = frozen
+    return frozen
+
+
 def index_target_oracles(
     conn: sqlite3.Connection,
     target_dir: pathlib.Path,
@@ -116,24 +147,18 @@ def index_target_oracles(
 ) -> dict[str, int]:
     """Index target `intent` and `reachability`, plus reference `precedent`, into SQLite FTS5."""
     _ensure_fts_tables(conn)
-    conn.execute("DELETE FROM oracle_docs")
-    conn.execute("DELETE FROM oracle_fts")
 
     counts = {"intent": 0, "reachability": 0, "precedent": 0}
     root = target_dir.resolve()
     base_root = root.parent if root.is_file() else root
+    doc_rows: list[tuple[str, str, str, str, str, str]] = []
+    fts_rows: list[tuple[str, str, str, str, str]] = []
 
-    def insert_doc(doc_id: str, kind: str, title: str, locus: str, body: str, provenance: str) -> None:
+    def queue_doc(doc_id: str, kind: str, title: str, locus: str, body: str, provenance: str) -> None:
         c_title = scrub_text(title)
         c_body = scrub_text(body)
-        conn.execute(
-            "INSERT OR REPLACE INTO oracle_docs(doc_id, kind, title, locus, body, provenance) VALUES (?, ?, ?, ?, ?, ?)",
-            (doc_id, kind, c_title, locus, c_body, provenance),
-        )
-        conn.execute(
-            "INSERT INTO oracle_fts(doc_id, kind, title, locus, body) VALUES (?, ?, ?, ?, ?)",
-            (doc_id, kind, c_title, locus, c_body),
-        )
+        doc_rows.append((doc_id, kind, c_title, locus, c_body, provenance))
+        fts_rows.append((doc_id, kind, c_title, locus, c_body))
         counts[kind] += 1
 
     # 1. Index target markdown docs into `intent` (`untrusted_target`).
@@ -154,7 +179,7 @@ def index_target_oracles(
                 if fpath.suffix.lower() in (".md", ".txt", ".rst"):
                     rel = str(fpath.relative_to(base_root))
                     for c_idx, (title, locus, body) in enumerate(_chunk_markdown_sections(fpath, rel)):
-                        insert_doc(f"intent:doc:{rel}:{c_idx}", "intent", title, locus, body, "untrusted_target")
+                        queue_doc(f"intent:doc:{rel}:{c_idx}", "intent", title, locus, body, "untrusted_target")
 
     # 2. Index inline invariant comments (`intent`) and entrypoints (`reachability`) across source files.
     for fpath in iter_source_files(root):
@@ -168,7 +193,7 @@ def index_target_oracles(
             stripped = line.strip()
             if (stripped.startswith(("#", "//", "/*", "*")) or '"""' in stripped) and INVARIANT_COMMENT_RE.search(stripped):
                 window = "\n".join(lines[max(0, idx - 1) : min(len(lines), idx + 4)])
-                insert_doc(
+                queue_doc(
                     f"intent:code:{rel}:{idx}",
                     "intent",
                     f"Code invariant note in {rel}",
@@ -179,7 +204,7 @@ def index_target_oracles(
             for label, pat in REACHABILITY_PATTERNS:
                 if pat.search(line):
                     snippet = "\n".join(lines[max(0, idx - 1) : min(len(lines), idx + 6)])
-                    insert_doc(
+                    queue_doc(
                         f"reach:{label}:{rel}:{idx}",
                         "reachability",
                         f"{label} @ {rel}:{idx}",
@@ -189,13 +214,26 @@ def index_target_oracles(
                     )
                     break
 
-    # 3. Index `precedent` reference corpora (`trusted_builtin`).
+    # 3. Index `precedent` reference corpora (`trusted_builtin`), cached by mtime signature.
     ref_root = references_dir if references_dir is not None else _default_references_dir()
     if ref_root is not None and ref_root.is_dir():
-        for md_file in sorted(ref_root.glob("*.md")):
-            rel = md_file.name
-            for c_idx, (title, locus, body) in enumerate(_chunk_markdown_sections(md_file, rel)):
-                insert_doc(f"precedent:{rel}:{c_idx}", "precedent", title, locus, body, "trusted_builtin")
+        for row in _load_precedent_rows(ref_root):
+            doc_rows.append(row)
+            fts_rows.append((row[0], row[1], row[2], row[3], row[4]))
+            counts["precedent"] += 1
+
+    with immediate_tx(conn):
+        conn.execute("DELETE FROM oracle_docs")
+        conn.execute("DELETE FROM oracle_fts")
+        if doc_rows:
+            conn.executemany(
+                "INSERT OR REPLACE INTO oracle_docs(doc_id, kind, title, locus, body, provenance) VALUES (?, ?, ?, ?, ?, ?)",
+                doc_rows,
+            )
+            conn.executemany(
+                "INSERT INTO oracle_fts(doc_id, kind, title, locus, body) VALUES (?, ?, ?, ?, ?)",
+                fts_rows,
+            )
 
     return counts
 

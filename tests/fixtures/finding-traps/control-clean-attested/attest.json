@@ -1,5 +1,0 @@
-{
-  "enumeration": "census.md:1-40 enumerates all 12 call sites",
-  "negative-control": "controls/nc-404.txt random path returns 404",
-  "refetch-external": "re-fetched GHSA-9v8p on 2026-08-08, state=published"
-}

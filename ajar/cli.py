@@ -7,6 +7,7 @@ Claude Code, OMP) and Standalone Product Mode (`ajar run`).
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import pathlib
 import shutil
@@ -2646,8 +2647,13 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+@functools.lru_cache(maxsize=1)
+def _get_cached_parser() -> argparse.ArgumentParser:
+    return build_parser()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = build_parser()
+    parser = _get_cached_parser()
     args = parser.parse_args(argv)
     try:
         return int(args.func(args))

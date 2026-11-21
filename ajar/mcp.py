@@ -12,34 +12,32 @@ import pathlib
 import sys
 from typing import Any, BinaryIO
 
-from ajar import EXIT_GATE_BLOCKED, __version__
+from ajar import EXIT_USER_ERROR, __version__
 from ajar.db import (
     AjarError,
-    check_dead_end_repetition,
-    infer_subsystem,
     lease_next_task,
     list_rows,
     list_steers,
-    log_event,
-    maybe_auto_pulse,
-    new_id,
     open_run_db,
     render_task_context,
-    rescope_claim,
     resolve_run_id,
-    utc_now_iso,
 )
-from ajar.domain import (
-    assert_valid_claim_transition,
-    assert_valid_task_transition,
-    derive_claim_axes,
-)
-from ajar.gates import check_all_gates, check_guarded_primitive_dry_block, validate_dry_locus
+from ajar.gates import check_all_gates
 from ajar.graph import export_attack_flow_graph
 from ajar.oracles import query_oracle
 from ajar.redact import scrub_text
 from ajar.repomap import build_repomap
-from ajar.store import assert_run_mutable, immediate_tx
+from ajar.services import (
+    add_anomaly,
+    add_surface,
+    close_task_done,
+    close_task_dry,
+    falsify_claim,
+    finish_run,
+    propose_claim,
+    rescope_claim_service,
+    survive_claim,
+)
 
 MCP_TOOLS: list[dict[str, Any]] = [
     {
@@ -92,6 +90,13 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "subsystem": {"type": "string"},
                 "locus": {"type": "string"},
                 "priority": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
+                "trust_boundary": {"type": "string"},
+                "requires_tags": {
+                    "oneOf": [
+                        {"type": "string"},
+                        {"type": "array", "items": {"type": "string"}},
+                    ]
+                },
             },
             "required": ["name", "kind", "subsystem", "locus"],
         },
@@ -133,6 +138,8 @@ MCP_TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "locus": {"type": "string"},
                 "observation": {"type": "string"},
+                "surface_id": {"type": "string"},
+                "source_claim_id": {"type": "string"},
                 "repro_cmd": {"type": "string"},
             },
             "required": ["locus", "observation"],
@@ -148,6 +155,7 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "title": {"type": "string"},
                 "locus": {"type": "string"},
                 "mechanism": {"type": "string"},
+                "surface_id": {"type": "string"},
                 "severity": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
                 "falsification_prediction": {"type": "string"},
                 "falsification_test": {"type": "string"},
@@ -165,7 +173,7 @@ MCP_TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "ajar_claim_falsify",
-        "description": "Mark a claim disproved after running its falsification test.",
+        "description": "Mark a claim disproved (or `config_gated`) after running its falsification test.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -173,6 +181,7 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "worker_id": {"type": "string"},
                 "notes": {"type": "string"},
                 "control_locus": {"type": "string"},
+                "config_gate": {"type": "string"},
             },
             "required": ["claim_id", "worker_id", "notes"],
         },
@@ -203,6 +212,8 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "locus": {"type": "string"},
                 "mechanism": {"type": "string"},
                 "severity": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
+                "falsification_prediction": {"type": "string"},
+                "falsification_test": {"type": "string"},
             },
             "required": ["claim_id", "worker_id", "reason"],
         },
@@ -265,25 +276,17 @@ def dispatch_mcp_tool(
                 )
             }
         if tool_name == "ajar_surface_add":
-            sid = new_id("surf")
-            now_iso = utc_now_iso()
-            conn.execute(
-                """
-                INSERT INTO surfaces(surface_id, name, kind, subsystem, locus, priority, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    sid,
-                    scrub_text(str(args["name"])),
-                    str(args["kind"]),
-                    str(args["subsystem"]),
-                    str(args["locus"]),
-                    str(args.get("priority", "high")),
-                    now_iso,
-                ),
+            return add_surface(
+                conn,
+                name=str(args["name"]),
+                kind=str(args["kind"]),
+                subsystem=str(args.get("subsystem") or ""),
+                locus=str(args["locus"]),
+                priority=str(args.get("priority", "high")),
+                trust_boundary=str(args.get("trust_boundary") or ""),
+                requires_tags=args.get("requires_tags"),
+                actor="mcp",
             )
-            log_event(conn, "mcp", "surface_added", sid, {"locus": args["locus"]})
-            return {"surface_id": sid}
         if tool_name == "ajar_task_lease":
             leased = lease_next_task(
                 conn,
@@ -293,226 +296,93 @@ def dispatch_mcp_tool(
             )
             return {"leased": leased}
         if tool_name == "ajar_task_close":
-            from ajar import EXIT_USER_ERROR
-
-            assert_run_mutable(conn, operation="task_close")
             tid = str(args["task_id"])
             wid = str(args["worker_id"])
-            outcome = str(args["outcome"])
-            cur_task = conn.execute("SELECT * FROM tasks WHERE task_id = ?", (tid,)).fetchone()
-            if cur_task is None:
-                raise AjarError(f"Unknown task_id: {tid}", EXIT_USER_ERROR)
-            target_status = "dry" if outcome == "dry" else "done"
-            assert_valid_task_transition(str(cur_task["status"]), target_status, task_id=tid)
-            now_iso = utc_now_iso()
-            import time as _t
-
+            outcome = str(args["outcome"]).strip()
             if outcome == "dry":
-                cloc = str(args.get("control_locus") or "")
-                creason = str(args.get("control_reason") or "")
-                ok, msg = validate_dry_locus(tpath, str(run["target_mode"] if run else "source"), cloc, creason)
-                if not ok:
-                    raise AjarError(msg, EXIT_GATE_BLOCKED)
-                ok_gp, msg_gp = check_guarded_primitive_dry_block(conn, task_row=cur_task, dry_locus=cloc)
-                if not ok_gp:
-                    raise AjarError(msg_gp, EXIT_GATE_BLOCKED)
-                with immediate_tx(conn):
-                    conn.execute(
-                        """
-                        UPDATE tasks
-                        SET status = 'dry', worker_id = ?, dry_control_locus = ?, dry_control_reason = ?,
-                            closed_epoch = ?, updated_at = ?
-                        WHERE task_id = ?
-                        """,
-                        (wid, cloc, scrub_text(creason), _t.time(), now_iso, tid),
-                    )
-                    log_event(conn, wid, f"task_{outcome}", tid, {})
-            else:
-                with immediate_tx(conn):
-                    conn.execute(
-                        "UPDATE tasks SET status = 'done', worker_id = ?, summary = ?, closed_epoch = ?, updated_at = ? WHERE task_id = ?",
-                        (wid, scrub_text(str(args.get("summary") or "")), _t.time(), now_iso, tid),
-                    )
-                    log_event(conn, wid, f"task_{outcome}", tid, {})
-            pulse = maybe_auto_pulse(conn, tpath)
-            return {"task_id": tid, "status": outcome, "pulse": pulse}
+                return close_task_dry(
+                    conn,
+                    task_id=tid,
+                    worker_id=wid,
+                    locus=str(args.get("control_locus") or ""),
+                    control_reason=str(args.get("control_reason") or ""),
+                    target_dir=tpath,
+                    target_mode=str(run["target_mode"] if run else "source"),
+                )
+            if outcome != "done":
+                raise AjarError(f"Unsupported task close outcome {outcome!r}; choose 'done' or 'dry'.", EXIT_USER_ERROR)
+            return close_task_done(
+                conn,
+                task_id=tid,
+                worker_id=wid,
+                summary=str(args.get("summary") or ""),
+                target_dir=tpath,
+            )
         if tool_name == "ajar_anomaly_add":
-            assert_run_mutable(conn, operation="anomaly_add")
-            aid = new_id("anom")
-            loc = str(args["locus"])
-            now_iso = utc_now_iso()
-            conn.execute(
-                """
-                INSERT INTO anomalies(anomaly_id, subsystem, locus, observation, repro_cmd, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, 'unexplained', ?, ?)
-                """,
-                (
-                    aid,
-                    infer_subsystem(loc),
-                    loc,
-                    scrub_text(str(args["observation"])),
-                    scrub_text(str(args.get("repro_cmd") or "")),
-                    now_iso,
-                    now_iso,
-                ),
+            return add_anomaly(
+                conn,
+                locus=str(args["locus"]),
+                observation=str(args["observation"]),
+                surface_id=args.get("surface_id"),
+                source_claim_id=args.get("source_claim_id"),
+                repro_cmd=str(args.get("repro_cmd") or ""),
+                target_dir=tpath,
+                actor="mcp",
             )
-            log_event(conn, "mcp", "anomaly_added", aid, {"locus": loc})
-            return {"anomaly_id": aid, "status": "unexplained"}
         if tool_name == "ajar_claim_propose":
-            from ajar.db import normalize_mechanism_key
-
-            assert_run_mutable(conn, operation="claim_propose")
-            fpred = str(args.get("falsification_prediction") or "").strip()
-            ftest = str(args.get("falsification_test") or "").strip()
-            if len(fpred) < 10 or len(ftest) < 5:
-                raise AjarError(
-                    "DEC-0128 gate: falsification_prediction and falsification_test are required before proposing a claim.",
-                    EXIT_GATE_BLOCKED,
-                )
-            loc = str(args["locus"])
-            mech = str(args["mechanism"])
-            anom_id = args.get("consume_anomaly_id")
-            check_dead_end_repetition(conn, locus=loc, mechanism=mech, consume_anomaly_id=anom_id)
-            cid = new_id("clm")
-            now_iso = utc_now_iso()
-            wid = str(args["worker_id"])
-            conn.execute(
-                """
-                INSERT INTO claims(
-                    claim_id, proposer_worker_id, title, subsystem, locus, mechanism, mechanism_key,
-                    severity, falsification_prediction, falsification_test, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'proposed', ?, ?)
-                """,
-                (
-                    cid,
-                    wid,
-                    scrub_text(str(args["title"])),
-                    infer_subsystem(loc),
-                    loc,
-                    scrub_text(mech),
-                    normalize_mechanism_key(mech),
-                    str(args.get("severity", "high")),
-                    scrub_text(fpred),
-                    scrub_text(ftest),
-                    now_iso,
-                    now_iso,
-                ),
+            wid = str(args.get("worker_id") or args.get("worker") or "")
+            return propose_claim(
+                conn,
+                worker_id=wid,
+                title=str(args["title"]),
+                locus=str(args["locus"]),
+                mechanism=str(args["mechanism"]),
+                falsification_prediction=str(args.get("falsification_prediction") or ""),
+                falsification_test=str(args.get("falsification_test") or ""),
+                surface_id=args.get("surface_id"),
+                severity=str(args.get("severity", "high")),
+                consume_anomaly_id=args.get("consume_anomaly_id"),
+                target_dir=tpath,
+                target_mode=str(run["target_mode"] if run else "source"),
             )
-            if anom_id:
-                conn.execute(
-                    "UPDATE anomalies SET status = 'consumed_by_claim', consumed_by_id = ?, updated_at = ? WHERE anomaly_id = ?",
-                    (cid, now_iso, str(anom_id)),
-                )
-            log_event(conn, wid, "claim_proposed", cid, {"locus": loc})
-            return {"claim_id": cid, "status": "proposed"}
         if tool_name == "ajar_claim_falsify":
-            assert_run_mutable(conn, operation="claim_falsify")
-            cid = str(args["claim_id"])
-            wid = str(args.get("worker_id") or args.get("worker") or "").strip()
-            if not wid:
-                raise AjarError("ajar_claim_falsify requires worker_id.", EXIT_GATE_BLOCKED)
-            clm = conn.execute("SELECT proposer_worker_id, status FROM claims WHERE claim_id = ?", (cid,)).fetchone()
-            if clm is None:
-                raise AjarError(f"Unknown claim_id {cid}")
-            if clm["proposer_worker_id"] == wid:
-                raise AjarError(
-                    "Fresh-falsifier rule: proposer_worker_id cannot falsify its own claim.",
-                    EXIT_GATE_BLOCKED,
-                )
-            assert_valid_claim_transition(str(clm["status"]), "falsified", claim_id=cid)
-            axes = derive_claim_axes("falsified")
-            now_iso = utc_now_iso()
-            with immediate_tx(conn):
-                conn.execute(
-                    """
-                    UPDATE claims
-                    SET status = 'falsified', falsifier_worker_id = ?, falsify_notes = ?,
-                        falsify_control_locus = ?, research_state = ?,
-                        evidence_state = ?, updated_at = ?
-                    WHERE claim_id = ?
-                    """,
-                    (
-                        wid,
-                        scrub_text(str(args["notes"])),
-                        args.get("control_locus"),
-                        axes.research_state.value,
-                        axes.evidence_state.value,
-                        now_iso,
-                        cid,
-                    ),
-                )
-                conn.execute(
-                    """
-                    UPDATE anomalies
-                    SET status = 'unexplained', consumed_by_id = NULL, updated_at = ?
-                    WHERE consumed_by_id = ? AND status = 'consumed_by_claim'
-                    """,
-                    (now_iso, cid),
-                )
-                log_event(conn, wid, "claim_falsified", cid, {})
-            return {"claim_id": cid, "status": "falsified"}
-        if tool_name == "ajar_claim_survive":
-            assert_run_mutable(conn, operation="claim_survive")
-            cid = str(args["claim_id"])
-            wid = str(args.get("worker_id") or args.get("worker") or "").strip()
-            if not wid:
-                raise AjarError("ajar_claim_survive requires worker_id.", EXIT_GATE_BLOCKED)
-            clm = conn.execute("SELECT proposer_worker_id, status FROM claims WHERE claim_id = ?", (cid,)).fetchone()
-            if clm is None:
-                raise AjarError(f"Unknown claim_id {cid}")
-            if clm["proposer_worker_id"] == wid:
-                raise AjarError(
-                    "Fresh-falsifier rule: proposer_worker_id cannot mark its own claim survived.",
-                    EXIT_GATE_BLOCKED,
-                )
-            assert_valid_claim_transition(str(clm["status"]), "survived_falsify", claim_id=cid)
-            axes = derive_claim_axes("survived_falsify")
-            now_iso = utc_now_iso()
-            with immediate_tx(conn):
-                conn.execute(
-                    """
-                    UPDATE claims
-                    SET status = 'survived_falsify', falsifier_worker_id = ?, falsify_notes = ?,
-                        research_state = ?, evidence_state = ?, env_blocker = '', blocker_reason = '',
-                        updated_at = ?
-                    WHERE claim_id = ?
-                    """,
-                    (
-                        wid,
-                        scrub_text(str(args["notes"])),
-                        axes.research_state.value,
-                        axes.evidence_state.value,
-                        now_iso,
-                        cid,
-                    ),
-                )
-                log_event(conn, wid, "claim_survived_falsify", cid, {})
-            return {"claim_id": cid, "status": "survived_falsify"}
-        if tool_name == "ajar_claim_rescope":
-            return rescope_claim(
+            wid = str(args.get("worker_id") or args.get("worker") or "")
+            return falsify_claim(
                 conn,
                 claim_id=str(args["claim_id"]),
-                worker_id=str(args["worker_id"]),
+                worker_id=wid,
+                notes=str(args["notes"]),
+                control_locus=args.get("control_locus"),
+                config_gate=str(args.get("config_gate") or ""),
+            )
+        if tool_name == "ajar_claim_survive":
+            wid = str(args.get("worker_id") or args.get("worker") or "")
+            return survive_claim(
+                conn,
+                claim_id=str(args["claim_id"]),
+                worker_id=wid,
+                notes=str(args["notes"]),
+            )
+        if tool_name == "ajar_claim_rescope":
+            wid = str(args.get("worker_id") or args.get("worker") or "")
+            return rescope_claim_service(
+                conn,
+                claim_id=str(args["claim_id"]),
+                worker_id=wid,
                 reason=str(args["reason"]),
                 title=args.get("title"),
                 locus=args.get("locus"),
                 mechanism=args.get("mechanism"),
                 severity=args.get("severity"),
+                falsification_prediction=args.get("falsification_prediction"),
+                falsification_test=args.get("falsification_test"),
             )
         if tool_name == "ajar_steer_list":
             return {"steers": list_steers(conn, active_only=bool(args.get("active_only", True)))}
         if tool_name == "ajar_export_graph":
             return export_attack_flow_graph(conn)
         if tool_name == "ajar_finish":
-            gates = check_all_gates(conn, target_dir=tpath, auto_enqueue_chain=True)
-            if gates["passed"]:
-                now_iso = utc_now_iso()
-                conn.execute(
-                    "UPDATE runs SET status = 'finished', stop_reason = 'all_gates_passed', finished_at = ?",
-                    (now_iso,),
-                )
-                log_event(conn, "mcp", "run_finished", run_id, {})
-            return gates
+            return finish_run(conn, run_id=run_id, target_dir=tpath, actor="mcp")
         raise AjarError(f"Unknown MCP tool: {tool_name}")
     finally:
         conn.close()

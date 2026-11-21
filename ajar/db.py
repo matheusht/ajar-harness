@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from typing import Any, Sequence
 
 from ajar import EXIT_GATE_BLOCKED, EXIT_USER_ERROR
-from ajar.domain.models import AjarError
+from ajar.domain.models import AjarError as AjarError
 from ajar.domain.transitions import assert_valid_primitive_transition
 from ajar.redact import scrub_text
 from ajar.store.tx import CURRENT_SCHEMA_VERSION, immediate_tx
@@ -603,7 +603,7 @@ def _assert_no_symlink_components(base_dir: pathlib.Path, target_path: pathlib.P
         rel_parts = target_path.relative_to(base_dir).parts
     except ValueError:
         if target_path.is_symlink():
-            raise AjarError(f"Refusing symlinked database path: {target_path}", EXIT_USER_ERROR)
+            raise AjarError(f"Refusing symlinked database path: {target_path}", EXIT_USER_ERROR) from None
         return
     for part in rel_parts:
         cur = cur / part

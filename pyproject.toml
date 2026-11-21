@@ -7,12 +7,13 @@ name = "ajar"
 version = "3.3.0"
 description = "Ajar finds, disproves, reproduces, and patches software vulnerabilities."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11.4"
 dependencies = []
 
 [project.optional-dependencies]
 dev = [
     "jsonschema==4.26.0",
+    "mypy>=1.10",
     "pytest>=8.0",
     "ruff>=0.5",
 ]
@@ -33,5 +34,5 @@ target-version = "py311"
 extend-exclude = ["tools/legacy", "engagements", "benchmarks"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W"]
+select = ["E", "F", "I", "W", "B"]
 ignore = ["E501"]

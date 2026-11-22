@@ -13,6 +13,7 @@ Proves causal root-cause attribution on source targets while keeping `workspace/
 
 from __future__ import annotations
 
+import dataclasses
 import fcntl
 import hashlib
 import json
@@ -388,6 +389,7 @@ def _run_shell_in_slot(
     tmp_dir.mkdir(parents=True, exist_ok=True)
     has_netns = unshare_netns_available()
 
+    shared_cc_env = resolve_shared_compiler_cache_env(slot_dir.parent.parent)
     overrides: dict[str, str] = {
         "AJAR_ARM_TOKEN": arm_token,
         "AJAR_PORT_0": str(ports[0]),
@@ -397,11 +399,11 @@ def _run_shell_in_slot(
         "AJAR_HELPERS_DIR": str(eff_helpers),
         "CARGO_TARGET_DIR": str(cache_dir / "cargo-target"),
         "GOCACHE": str(cache_dir / "go-cache"),
-        "CCACHE_DIR": str(cache_dir / "ccache"),
         "PYTHONPYCACHEPREFIX": str(cache_dir / "pycache"),
         "PYTHONNOUSERSITE": "1",
         "PYTHONPATH": f"{slot_dir}{os.pathsep}{eff_helpers}",
         "GOFLAGS": "-count=1",
+        **shared_cc_env,
     }
     if not has_netns:
         overrides.update(
@@ -576,12 +578,222 @@ def resolve_local_build_cache_dir(run_dir: pathlib.Path | str, slot_name: str = 
     return cdir
 
 
+def resolve_shared_compiler_cache_env(
+    run_dir: pathlib.Path | str,
+    *,
+    base_env: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Return cross-slot `ccache`/`sccache` env vars shared across `slot-0..7` without breaking dirty-tree isolation.
+
+    `CCACHE_BASEDIR` + `CCACHE_NOHASHDIR=true` allow `slot-1..7` to hit objects compiled
+    in `slot-0` even under `-g` debug flags while keeping each slot's working tree and
+    per-slot `CARGO_TARGET_DIR`/`GOCACHE`/`TMPDIR` fully isolated.
+    """
+    src = os.environ if base_env is None else base_env
+    rdir = pathlib.Path(run_dir)
+    shared_root = resolve_local_build_cache_dir(rdir, "shared")
+    ccache_dir = (src.get("CCACHE_DIR") or "").strip() or str(shared_root / "ccache")
+    sccache_dir = (src.get("SCCACHE_DIR") or "").strip() or str(shared_root / "sccache")
+    for dpath in (ccache_dir, sccache_dir):
+        try:
+            pathlib.Path(dpath).mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+
+    repro_dir = (rdir / "repro").resolve()
+    env_map: dict[str, str] = {
+        "CCACHE_DIR": ccache_dir,
+        "CCACHE_BASEDIR": str(repro_dir),
+        "CCACHE_NOHASHDIR": "true",
+        "SCCACHE_DIR": sccache_dir,
+    }
+    ccache_bin = shutil.which("ccache")
+    if ccache_bin:
+        env_map["AJAR_CCACHE_BIN"] = ccache_bin
+        if not (src.get("CMAKE_C_COMPILER_LAUNCHER") or "").strip():
+            env_map["CMAKE_C_COMPILER_LAUNCHER"] = ccache_bin
+        if not (src.get("CMAKE_CXX_COMPILER_LAUNCHER") or "").strip():
+            env_map["CMAKE_CXX_COMPILER_LAUNCHER"] = ccache_bin
+    sccache_bin = shutil.which("sccache")
+    if sccache_bin:
+        env_map["AJAR_SCCACHE_BIN"] = sccache_bin
+    return env_map
+
+
 def _clean_slot_preserving_objects(slot_dir: pathlib.Path, *, check: bool = True) -> None:
     """Clean untracked PoC/scratch artifacts while preserving compiled C/C++ `.o`/`.a` objects."""
     cmd = ["git", "-C", str(slot_dir), "clean", "-fdx"]
     for pat in PRESERVED_BUILD_GLOBS:
         cmd.extend(["-e", pat])
     subprocess.run(cmd, capture_output=True, env=scrubbed_subprocess_env(), check=check)
+
+
+@dataclasses.dataclass(frozen=True)
+class _CleanBuildSnapshot:
+    files: dict[str, tuple[int, int, int, int, str]]
+    dirs: frozenset[str]
+
+
+def _fingerprint_slot_file(
+    path: pathlib.Path,
+    *,
+    hash_budget: list[int],
+    force_hash: bool = False,
+) -> tuple[int, int, int, int, str] | None:
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return None
+    if path.is_symlink():
+        try:
+            return (st.st_mode, st.st_size, st.st_mtime_ns, st.st_ino, f"symlink:{os.readlink(path)}")
+        except OSError:
+            return None
+    if not path.is_file():
+        return None
+    digest = ""
+    if force_hash or (st.st_size <= 8 * 1024 * 1024 and hash_budget[0] >= st.st_size):
+        try:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if not force_hash:
+                hash_budget[0] -= st.st_size
+        except OSError:
+            return None
+    return (st.st_mode, st.st_size, st.st_mtime_ns, st.st_ino, digest)
+
+
+def _snapshot_clean_build_outputs(
+    slot_dir: pathlib.Path,
+    *,
+    max_files: int = 5000,
+) -> _CleanBuildSnapshot | None:
+    """Capture clean-HEAD build outputs so Arm 2 can safely reuse the build when Arm 1 leaves HEAD and artifacts intact."""
+    env = scrubbed_subprocess_env()
+    status_proc = subprocess.run(
+        ["git", "-C", str(slot_dir), "status", "--porcelain", "--untracked-files=no"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    if status_proc.returncode != 0 or status_proc.stdout.strip():
+        return None
+
+    ls_proc = subprocess.run(
+        ["git", "-C", str(slot_dir), "ls-files", "--others", "-z"],
+        capture_output=True,
+        env=env,
+        check=False,
+    )
+    if ls_proc.returncode != 0:
+        return None
+
+    raw_entries = [item.decode("utf-8", errors="surrogateescape") for item in ls_proc.stdout.split(b"\x00") if item]
+    if len(raw_entries) > max_files:
+        return None
+
+    files_fp: dict[str, tuple[int, int, int, int, str]] = {}
+    hash_budget = [64 * 1024 * 1024]
+    for rel in raw_entries:
+        if rel.endswith("/"):
+            return None
+        p = slot_dir / rel
+        fp = _fingerprint_slot_file(p, hash_budget=hash_budget)
+        if fp is None:
+            return None
+        files_fp[rel] = fp
+
+    dirs: set[str] = set()
+    for root, dirnames, _ in os.walk(slot_dir, followlinks=False):
+        rel_root = pathlib.Path(root).relative_to(slot_dir)
+        dirnames[:] = [d for d in dirnames if not (rel_root == pathlib.Path(".") and d == ".git")]
+        for d in dirnames:
+            d_rel = (rel_root / d).as_posix()
+            dirs.add(d_rel)
+    return _CleanBuildSnapshot(files=files_fp, dirs=frozenset(dirs))
+
+
+def _try_clean_arm_preserving_build(
+    slot_dir: pathlib.Path,
+    snapshot: _CleanBuildSnapshot | None,
+) -> bool:
+    """Remove Arm-1 scratch files/dirs while preserving verified clean-HEAD build outputs; return False to force full rebuild."""
+    if snapshot is None:
+        return False
+
+    env = scrubbed_subprocess_env()
+    status_proc = subprocess.run(
+        ["git", "-C", str(slot_dir), "status", "--porcelain", "--untracked-files=no"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    if status_proc.returncode != 0 or status_proc.stdout.strip():
+        return False
+
+    ls_proc = subprocess.run(
+        ["git", "-C", str(slot_dir), "ls-files", "--others", "-z"],
+        capture_output=True,
+        env=env,
+        check=False,
+    )
+    if ls_proc.returncode != 0:
+        return False
+
+    cur_untracked = [item.decode("utf-8", errors="surrogateescape") for item in ls_proc.stdout.split(b"\x00") if item]
+    for rel in cur_untracked:
+        clean_rel = rel.rstrip("/")
+        if clean_rel in snapshot.files:
+            continue
+        p = slot_dir / clean_rel
+        try:
+            if p.is_symlink() or p.is_file():
+                p.unlink(missing_ok=True)
+            elif p.is_dir():
+                shutil.rmtree(p)
+        except OSError:
+            return False
+
+    # Remove any new directories created during Arm 1 that were absent after the clean build.
+    for root, dirnames, _ in os.walk(slot_dir, topdown=False, followlinks=False):
+        rel_root = pathlib.Path(root).relative_to(slot_dir)
+        if rel_root.parts and rel_root.parts[0] == ".git":
+            continue
+        for d in dirnames:
+            if rel_root == pathlib.Path(".") and d == ".git":
+                continue
+            d_rel = (rel_root / d).as_posix()
+            if d_rel not in snapshot.dirs:
+                dp = slot_dir / d_rel
+                try:
+                    if dp.is_symlink():
+                        dp.unlink(missing_ok=True)
+                    elif dp.is_dir() and not any(dp.iterdir()):
+                        dp.rmdir()
+                except OSError:
+                    return False
+
+    # Verify every recorded clean-HEAD build artifact still exists and matches its exact fingerprint.
+    dummy_budget = [0]
+    for rel, expected_fp in snapshot.files.items():
+        p = slot_dir / rel
+        need_hash = bool(expected_fp[4]) and not expected_fp[4].startswith("symlink:")
+        cur_fp = _fingerprint_slot_file(p, hash_budget=dummy_budget, force_hash=need_hash)
+        if cur_fp != expected_fp:
+            return False
+
+    if _neutralize_python_pth_escapes(slot_dir) > 0:
+        return False
+
+    recheck = subprocess.run(
+        ["git", "-C", str(slot_dir), "status", "--porcelain", "--untracked-files=no"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    return recheck.returncode == 0 and not recheck.stdout.strip()
 
 
 def validate_entrypoint_fidelity(poc_cmd: str, *, surface_kind: str = "") -> tuple[bool, str]:
@@ -1140,6 +1352,7 @@ def _run_source_reproduction_impl(
     min_race_hits = max(3, n_trials // 2) if determinism == "probabilistic_race" else 1
     captured_snapshot: dict[str, Any] | None = None
     verified_success = False
+    clean_build_snapshot: _CleanBuildSnapshot | None = None
 
     try:
         _prepare_slot_worktree(mirror_dir, slot_dir)
@@ -1169,6 +1382,7 @@ def _run_source_reproduction_impl(
                     "ub_divergence_class": "",
                     "cross_killed_claim_ids": [],
                 }
+            clean_build_snapshot = _snapshot_clean_build_outputs(slot_dir)
 
         # Arm 1: Clean baseline + PoC -> MUST fire defect.
         arm1 = _run_trials(
@@ -1217,33 +1431,37 @@ def _run_source_reproduction_impl(
             if snap_res.get("ok"):
                 captured_snapshot = snap_res
 
-        # Reset working tree between Arm 1 and Arm 2 in case PoC wrote scratch files.
-        subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
-        _clean_slot_preserving_objects(slot_dir, check=True)
-        if build_cmd.strip():
-            bld_arm2 = _run_shell_in_slot(
-                build_cmd.strip(),
-                slot_dir=slot_dir,
-                cache_dir=cache_dir,
-                timeout_sec=max(int(timeout_sec), 180),
-                helpers_dir=helpers_dir,
-            )
-            if bld_arm2["exit_code"] != 0 or bld_arm2["timed_out"]:
-                return {
-                    "passed": False,
-                    "error_class": "build_or_env_error",
-                    "reason": f"Arm-2 --build-cmd failed after reset (exit={bld_arm2['exit_code']}): {bld_arm2['stderr'][:240]}",
-                    "observation_hash": hashlib.sha256(f"bld2:{bld_arm2['exit_code']}".encode("utf-8")).hexdigest()[:16],
-                    "micropatch_diff": scrub_text(diff_text[:4000]),
-                    "arm1_clean_poc": arm1,
-                    "arm2_clean_control": {"arm_passed": False},
-                    "arm3_patch_poc": {"arm_passed": False},
-                    "arm4_patch_control": {"arm_passed": False},
-                    "arm5a_release_poc": {},
-                    "arm5b_release_control": {},
-                    "ub_divergence_class": "",
-                    "cross_killed_claim_ids": [],
-                }
+        # Clean Arm-1 scratch state between Arm 1 and Arm 2; reuse verified clean-HEAD build outputs when untouched.
+        arm2_build_reused = False
+        if build_cmd.strip() and _try_clean_arm_preserving_build(slot_dir, clean_build_snapshot):
+            arm2_build_reused = True
+        else:
+            subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
+            _clean_slot_preserving_objects(slot_dir, check=True)
+            if build_cmd.strip():
+                bld_arm2 = _run_shell_in_slot(
+                    build_cmd.strip(),
+                    slot_dir=slot_dir,
+                    cache_dir=cache_dir,
+                    timeout_sec=max(int(timeout_sec), 180),
+                    helpers_dir=helpers_dir,
+                )
+                if bld_arm2["exit_code"] != 0 or bld_arm2["timed_out"]:
+                    return {
+                        "passed": False,
+                        "error_class": "build_or_env_error",
+                        "reason": f"Arm-2 --build-cmd failed after reset (exit={bld_arm2['exit_code']}): {bld_arm2['stderr'][:240]}",
+                        "observation_hash": hashlib.sha256(f"bld2:{bld_arm2['exit_code']}".encode("utf-8")).hexdigest()[:16],
+                        "micropatch_diff": scrub_text(diff_text[:4000]),
+                        "arm1_clean_poc": arm1,
+                        "arm2_clean_control": {"arm_passed": False},
+                        "arm3_patch_poc": {"arm_passed": False},
+                        "arm4_patch_control": {"arm_passed": False},
+                        "arm5a_release_poc": {},
+                        "arm5b_release_control": {},
+                        "ub_divergence_class": "",
+                        "cross_killed_claim_ids": [],
+                    }
 
         # Arm 2: Clean baseline + benign control -> MUST pass cleanly with 0 defect hits.
         arm2 = _run_trials(
@@ -1255,6 +1473,7 @@ def _run_source_reproduction_impl(
             trials=n_trials,
             helpers_dir=helpers_dir,
         )
+        arm2["arm2_build_reused"] = arm2_build_reused
         arm2["arm_passed"] = arm2["defect_hits"] == 0 and arm2["clean_passes"] == n_trials
         if not arm2["arm_passed"]:
             is_build_err = _detect_build_or_env_failure(

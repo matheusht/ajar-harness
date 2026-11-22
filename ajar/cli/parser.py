@@ -487,11 +487,11 @@ def build_parser() -> argparse.ArgumentParser:
     pc_sur.add_argument("--notes", required=True)
     pc_sur.add_argument("--run")
 
-    pc_ins = cl_sub.add_parser("instrument", help="Run an isolated diagnostic probe inside scratch `slot-inst` to unblock `needs_instrumentation`.")
+    pc_ins = cl_sub.add_parser("instrument", help="Run an isolated diagnostic probe inside the shared `slot-<k>` pool to unblock `needs_instrumentation`.")
     pc_ins.add_argument("claim_id")
     pc_ins.add_argument("--worker", required=True)
     pc_ins.add_argument("--probe-cmd", required=True)
-    pc_ins.add_argument("--probe-patch", default="", help="Optional temporary diagnostic diff applied only inside `slot-inst`.")
+    pc_ins.add_argument("--probe-patch", default="", help="Optional temporary diagnostic diff applied only inside `slot-<k>`.")
     pc_ins.add_argument("--timeout", type=int, default=60)
     pc_ins.add_argument("--run")
 
@@ -587,10 +587,10 @@ def build_parser() -> argparse.ArgumentParser:
     pch_p.add_argument("--worker", default="worker")
     pch_p.add_argument("--run")
 
-    pch_pr = ch_sub.add_parser("probe", help="Hydrate a Stage-1 post-state snapshot (`snp-*`) into `slot-inst` (`< 50 ms`) and probe Stage 2.")
+    pch_pr = ch_sub.add_parser("probe", help="Hydrate a Stage-1 post-state snapshot (`snp-*`) into the shared `slot-<k>` pool and probe Stage 2.")
     pch_pr.add_argument("--from-snapshot", required=True, help="Snapshot ID (`snp-*`) from `ajar claim reproduce --save-post-state`.")
-    pch_pr.add_argument("--cmd", required=True, help="Stage-2 probe command executed inside hydrated `slot-inst`.")
-    pch_pr.add_argument("--patch", default="", help="Optional temporary diff applied inside `slot-inst`.")
+    pch_pr.add_argument("--cmd", required=True, help="Stage-2 probe command executed inside hydrated `slot-<k>`.")
+    pch_pr.add_argument("--patch", default="", help="Optional temporary diff applied inside `slot-<k>`.")
     pch_pr.add_argument("--oracle-json", help="Optional JSON oracle rules.")
     pch_pr.add_argument("--timeout", type=int, default=60)
     pch_pr.add_argument("--worker", default="worker")

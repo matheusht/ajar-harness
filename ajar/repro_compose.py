@@ -7,7 +7,7 @@ Turns verified `primitives` into read-only (`0444`) importable capability module
   `StageContext` instead of re-deriving complex framing inside monolithic shell strings.
 - `ajar chain propose` executes inside an isolated `slot-<k>` worktree with `--oracle-json`
   and proves $N$-step marginal causal contribution by ablating each primitive step.
-- `ajar claim instrument` executes scratch trace probes in `slot-inst` to unblock
+- `ajar claim instrument` executes scratch trace probes in the shared `slot-<k>` pool to unblock
   `needs_instrumentation` claims cleanly.
 """
 
@@ -722,7 +722,7 @@ def run_snapshot_chain_probe(
     timeout_sec: int = 60,
     worker_id: str = "worker",
 ) -> dict[str, Any]:
-    """Hydrate a verified Stage-1 post-state `.tar.gz` snapshot into `slot-inst` in `< 50 ms` and execute Stage 2."""
+    """Hydrate a verified Stage-1 post-state `.tar.gz` snapshot into the shared `slot-<k>` pool and execute Stage 2."""
     import tarfile
 
     srow = conn.execute("SELECT * FROM repro_snapshots WHERE snapshot_id = ?", (snapshot_id,)).fetchone()
@@ -746,18 +746,17 @@ def run_snapshot_chain_probe(
     helpers_dir = ensure_helpers_runtime(run_dir)
     mirror_dir = init_source_mirror(run_dir, target_dir)
     repro_dir = run_dir / "repro"
-    repro_dir.mkdir(parents=True, exist_ok=True)
-    lock_fh = open(repro_dir / "slot-inst.lock", "a+", encoding="utf-8")
-    fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
-    slot_dir = repro_dir / "slot-inst"
-    cache_dir = resolve_local_build_cache_dir(run_dir, "cache-inst")
+    slot_idx, lock_fh = _acquire_slot(repro_dir)
+    slot_dir = repro_dir / f"slot-{slot_idx}"
+    cache_dir = resolve_local_build_cache_dir(run_dir, f"cache-{slot_idx}")
     watermark_file = cache_dir / "watermark_ns"
     touched: list[str] = []
+    extracted_paths: list[str] = []
 
     try:
         _prepare_slot_worktree(mirror_dir, slot_dir)
 
-        # Safe tar extraction into `slot-inst` preserving validated intra-slot relative symlinks.
+        # Safe tar extraction into `slot-<k>` preserving validated intra-slot relative symlinks.
         with tarfile.open(arch_path, "r:gz") as tar:
             safe_members: list[tarfile.TarInfo] = []
             for member in tar.getmembers():
@@ -788,6 +787,8 @@ def run_snapshot_chain_probe(
                         dest.unlink(missing_ok=True)
                 try:
                     tar.extract(member, path=str(slot_dir), set_attrs=False, filter="tar")
+                    if member.isfile():
+                        extracted_paths.append(member.name)
                 except tarfile.FilterError as exc:
                     raise AjarError(f"Unsafe tar member in snapshot {snapshot_id}: {exc}", EXIT_GATE_BLOCKED) from exc
 
@@ -806,6 +807,7 @@ def run_snapshot_chain_probe(
             for ln in patch_path.read_text(encoding="utf-8", errors="ignore").splitlines():
                 if ln.startswith("+++ ") and ln[4:].strip() != "/dev/null":
                     touched.append(re.sub(r"^b/", "", ln[4:].split("\t", 1)[0].strip()))
+            _neutralize_python_pth_escapes(slot_dir)
             _bump_files_mtime(slot_dir, touched, watermark_file)
 
         res = _run_shell_in_slot(
@@ -818,23 +820,27 @@ def run_snapshot_chain_probe(
         )
         fired = _evaluate_defect_fired(res["exit_code"], res["stdout"], res["stderr"], res["timed_out"], oracle)
     finally:
-        if (slot_dir / ".git").exists():
-            subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
-            _clean_slot_preserving_objects(slot_dir, check=False)
-            if touched:
-                _bump_files_mtime(slot_dir, touched, watermark_file)
-        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
-        lock_fh.close()
+        try:
+            if (slot_dir / ".git").exists():
+                subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
+                _clean_slot_preserving_objects(slot_dir, check=False)
+                bump_paths = list(dict.fromkeys([*touched, *extracted_paths]))
+                if bump_paths:
+                    _bump_files_mtime(slot_dir, bump_paths, watermark_file)
+        finally:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+            lock_fh.close()
 
     log_event(
         conn,
         worker_id,
         "chain_snapshot_probed",
         snapshot_id,
-        {"exit_code": res["exit_code"], "defect_fired": fired},
+        {"slot_index": slot_idx, "exit_code": res["exit_code"], "defect_fired": fired},
     )
     return {
         "snapshot_id": snapshot_id,
+        "slot_index": slot_idx,
         "rel_dir": str(srow["rel_dir"]),
         "defect_fired": fired,
         "probe": res,
@@ -853,7 +859,7 @@ def run_claim_instrumentation(
     timeout_sec: int = 60,
     worker_id: str = "worker",
 ) -> dict[str, Any]:
-    """Run an ephemeral diagnostic trace inside scratch `slot-inst` to unblock `needs_instrumentation`."""
+    """Run an ephemeral diagnostic trace inside the shared `slot-<k>` pool to unblock `needs_instrumentation`."""
     clm = conn.execute("SELECT * FROM claims WHERE claim_id = ?", (claim_id,)).fetchone()
     if clm is None:
         raise AjarError(f"Unknown claim_id: {claim_id}", EXIT_USER_ERROR)
@@ -863,11 +869,9 @@ def run_claim_instrumentation(
     helpers_dir = ensure_helpers_runtime(run_dir)
     mirror_dir = init_source_mirror(run_dir, target_dir)
     repro_dir = run_dir / "repro"
-    repro_dir.mkdir(parents=True, exist_ok=True)
-    lock_fh = open(repro_dir / "slot-inst.lock", "a+", encoding="utf-8")
-    fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
-    slot_dir = repro_dir / "slot-inst"
-    cache_dir = resolve_local_build_cache_dir(run_dir, "cache-inst")
+    slot_idx, lock_fh = _acquire_slot(repro_dir)
+    slot_dir = repro_dir / f"slot-{slot_idx}"
+    cache_dir = resolve_local_build_cache_dir(run_dir, f"cache-{slot_idx}")
     watermark_file = cache_dir / "watermark_ns"
     touched: list[str] = []
 
@@ -899,13 +903,15 @@ def run_claim_instrumentation(
             helpers_dir=helpers_dir,
         )
     finally:
-        if (slot_dir / ".git").exists():
-            subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
-            _clean_slot_preserving_objects(slot_dir, check=False)
-            if touched:
-                _bump_files_mtime(slot_dir, touched, watermark_file)
-        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
-        lock_fh.close()
+        try:
+            if (slot_dir / ".git").exists():
+                subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
+                _clean_slot_preserving_objects(slot_dir, check=False)
+                if touched:
+                    _bump_files_mtime(slot_dir, touched, watermark_file)
+        finally:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+            lock_fh.close()
 
     now_iso = utc_now_iso()
     trace_excerpt = scrub_text((res["stdout"] + "\n" + res["stderr"]).strip()[:600])
@@ -951,20 +957,21 @@ def run_claim_instrumentation(
             WHERE kind = 'instrument' AND status IN ('open', 'leased')
               AND (parent_claim_id = ? OR locus = ?)
             """,
-            (worker_id, f"Completed slot-inst probe for {claim_id}", now_iso, claim_id, clm["locus"]),
+            (worker_id, f"Completed slot-{slot_idx} instrumentation probe for {claim_id}", now_iso, claim_id, clm["locus"]),
         )
         log_event(
             conn,
             worker_id,
             "claim_instrumented",
             claim_id,
-            {"exit_code": res["exit_code"], "anomaly_id": anomaly_id},
+            {"slot_index": slot_idx, "exit_code": res["exit_code"], "anomaly_id": anomaly_id},
         )
         updated_status = str(
             conn.execute("SELECT status FROM claims WHERE claim_id = ?", (claim_id,)).fetchone()["status"]
         )
     return {
         "claim_id": claim_id,
+        "slot_index": slot_idx,
         "status": updated_status,
         "instrumented_since_fail": 1,
         "anomaly_id": anomaly_id,

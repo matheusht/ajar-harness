@@ -14,9 +14,14 @@ import unittest
 from unittest import mock
 
 from ajar.db import open_run_db
+from ajar.diff_sync import sync_pr_differential_state
 from ajar.redact import scrubbed_subprocess_env
 from ajar.repomap import REPOMAP_EDGE_CAP, _extract_regex_symbols, build_repomap
-from ajar.repro_compose import run_claim_instrumentation, run_snapshot_chain_probe
+from ajar.repro_compose import (
+    run_chain_reproduction,
+    run_claim_instrumentation,
+    run_snapshot_chain_probe,
+)
 from ajar.repro_source import (
     _run_shell_in_slot,
     capture_slot_post_state_snapshot,
@@ -25,7 +30,7 @@ from ajar.repro_source import (
     resolve_shared_compiler_cache_env,
     run_source_reproduction,
 )
-from ajar.services import add_surface, propose_claim
+from ajar.services import add_surface, propose_claim, record_reproduction_outcome, survive_claim
 from ajar.workspace import init_run_workspace
 
 
@@ -437,6 +442,285 @@ class TestSlotPoolAndBuildReuseB3(unittest.TestCase):
             self.assertEqual(env["SCCACHE_DIR"], str(base / "custom-sccache"))
             self.assertEqual(env["CCACHE_DIR"], str(base / "custom-ccache"))
             self.assertNotIn("OPENAI_API_KEY", env)
+
+
+class TestChainAndDiffSyncBuildCmdB2(unittest.TestCase):
+    def test_chain_propose_ablation_inherits_and_rebuilds_compiled_target(self) -> None:
+        if not shutil.which("cc"):
+            self.skipTest("C compiler `cc` not available")
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            ajar_home = base / "ajar_home"
+            target = base / "c_chain"
+            _git_init_repo(
+                target,
+                {
+                    "src/stage1.c": (
+                        "int stage1_bypass(const char *arg) {\n"
+                        "    return arg && arg[0] == 'X';\n"
+                        "}\n"
+                    ),
+                    "src/stage2.c": (
+                        "#include <stdio.h>\n"
+                        "int stage1_bypass(const char *arg);\n"
+                        "int stage2_sink(int ok) {\n"
+                        "    return ok ? 1 : 0;\n"
+                        "}\n"
+                        "int main(int argc, char **argv) {\n"
+                        "    const char *a = argc > 1 ? argv[1] : \"\";\n"
+                        "    if (stage1_bypass(a) && stage2_sink(1)) {\n"
+                        "        puts(\"CHAIN_HIT\");\n"
+                        "        return 3;\n"
+                        "    }\n"
+                        "    puts(\"SAFE\");\n"
+                        "    return 0;\n"
+                        "}\n"
+                    ),
+                },
+            )
+            p1_diff = (
+                "--- a/src/stage1.c\n"
+                "+++ b/src/stage1.c\n"
+                "@@ -1,3 +1,3 @@\n"
+                " int stage1_bypass(const char *arg) {\n"
+                "-    return arg && arg[0] == 'X';\n"
+                "+    return 0;\n"
+                " }\n"
+            )
+            p2_diff = (
+                "--- a/src/stage2.c\n"
+                "+++ b/src/stage2.c\n"
+                "@@ -2,4 +2,4 @@\n"
+                " int stage1_bypass(const char *arg);\n"
+                " int stage2_sink(int ok) {\n"
+                "-    return ok ? 1 : 0;\n"
+                "+    return 0;\n"
+                " }\n"
+            )
+            build_cmd = "cc -O0 src/stage1.c src/stage2.c -o chain_app"
+            with mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}):
+                init_run_workspace(
+                    target=str(target),
+                    target_mode="source",
+                    workspace_mode="in_place",
+                    run_id="run-b2-chain",
+                    ajar_home=ajar_home,
+                )
+                rdir = ajar_home / "runs" / "run-b2-chain"
+                conn = open_run_db("run-b2-chain", ajar_home=ajar_home)
+                try:
+                    surf = add_surface(
+                        conn,
+                        name="ChainCLI",
+                        kind="cli",
+                        subsystem="src",
+                        locus="src/stage2.c:6",
+                        priority="critical",
+                        trust_boundary="ext->cli",
+                    )
+                    fids: list[str] = []
+                    for idx, (loc, diff_txt) in enumerate(
+                        [("src/stage1.c:2", p1_diff), ("src/stage2.c:4", p2_diff)], start=1
+                    ):
+                        clm = propose_claim(
+                            conn,
+                            worker_id="w-prop",
+                            title=f"Stage {idx} compiled defect",
+                            locus=loc,
+                            severity="high",
+                            mechanism=f"Stage {idx} allows bypass into sink",
+                            surface_id=str(surf["surface_id"]),
+                            falsification_prediction="Guard rejects input",
+                            falsification_test="Run chain_app",
+                        )
+                        cid = str(clm["claim_id"])
+                        survive_claim(conn, claim_id=cid, worker_id="w-fals", notes="Confirmed in C source")
+                        out = record_reproduction_outcome(
+                            conn,
+                            claim_id=cid,
+                            worker_id="w-repro",
+                            poc_cmd="./chain_app X",
+                            control_cmd="./chain_app ok",
+                            build_cmd=build_cmd,
+                            repro_result={
+                                "passed": True,
+                                "observation_hash": f"obs-b2-{idx}",
+                                "micropatch_diff": diff_txt,
+                                "arm1_clean_poc": {"arm_passed": True},
+                                "arm2_clean_control": {"arm_passed": True},
+                                "arm3_patch_poc": {"arm_passed": True},
+                                "arm4_patch_control": {"arm_passed": True},
+                            },
+                        )
+                        fids.append(str(out["finding_id"]))
+
+                    # Omit explicit `build_cmd` -> MUST auto-inherit `build_cmd` from step findings and recompile per step!
+                    chain_res = run_chain_reproduction(
+                        conn,
+                        run_dir=rdir,
+                        target_dir=target,
+                        title="Two-stage compiled C chain",
+                        steps=fids,
+                        poc_cmd="./chain_app X",
+                        control_cmd="./chain_app ok",
+                        oracle={"expect_regex": "CHAIN_HIT", "expect_exit_code": 3},
+                        worker_id="w-chain",
+                    )
+                    self.assertTrue(chain_res["verified"], chain_res)
+                    self.assertEqual(chain_res["build_cmd"], build_cmd)
+                    self.assertEqual(len(chain_res["ablation_matrix"]), 2)
+                    for row in chain_res["ablation_matrix"]:
+                        self.assertEqual(row["ablated_via"], "step_micropatch")
+                        self.assertTrue(row["causally_required"])
+                finally:
+                    conn.close()
+
+    def test_diff_sync_executes_build_cmd_and_preserves_objects(self) -> None:
+        if not shutil.which("cc"):
+            self.skipTest("C compiler `cc` not available")
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            ajar_home = base / "ajar_home"
+            target = base / "c_diff"
+            git_env = {
+                **os.environ,
+                "GIT_AUTHOR_NAME": "Ajar Test",
+                "GIT_AUTHOR_EMAIL": "test@example.invalid",
+                "GIT_COMMITTER_NAME": "Ajar Test",
+                "GIT_COMMITTER_EMAIL": "test@example.invalid",
+            }
+            _git_init_repo(
+                target,
+                {
+                    "src/app.c": (
+                        "#include <string.h>\n"
+                        "int main(int argc, char **argv) {\n"
+                        "    return (argc > 1 && strcmp(argv[1], \"bad\") == 0) ? 2 : 0;\n"
+                        "}\n"
+                    ),
+                    "README.md": "v1\n",
+                },
+            )
+            base_sha = subprocess.check_output(
+                ["git", "-C", str(target), "rev-parse", "HEAD"], text=True, env=git_env
+            ).strip()
+            # PR commit 1: unrelated README edit -> compiled bug still fires when build_cmd executes.
+            (target / "README.md").write_text("v2\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(target), "add", "-A"], check=True, env=git_env)
+            subprocess.run(["git", "-C", str(target), "commit", "-q", "-m", "docs"], check=True, env=git_env)
+            pr1_sha = subprocess.check_output(
+                ["git", "-C", str(target), "rev-parse", "HEAD"], text=True, env=git_env
+            ).strip()
+
+            bcmd = "cc -O0 -c src/app.c -o app.o && cc -O0 app.o -o app"
+            with mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}):
+                init_run_workspace(
+                    target=str(target),
+                    target_mode="source",
+                    workspace_mode="in_place",
+                    run_id="run-b2-parent",
+                    ajar_home=ajar_home,
+                )
+                pconn = open_run_db("run-b2-parent", ajar_home=ajar_home)
+                try:
+                    surf = add_surface(
+                        pconn,
+                        name="App",
+                        kind="cli",
+                        subsystem="src",
+                        locus="src/app.c:2",
+                        priority="high",
+                        trust_boundary="ext->cli",
+                    )
+                    clm = propose_claim(
+                        pconn,
+                        worker_id="w-p",
+                        title="Bad arg crashes",
+                        locus="src/app.c:3",
+                        severity="high",
+                        mechanism="Returns error on bad arg",
+                        surface_id=str(surf["surface_id"]),
+                        falsification_prediction="Returns exit status 0 on bad input",
+                        falsification_test="Run compiled app with bad arg",
+                    )
+                    cid = str(clm["claim_id"])
+                    survive_claim(pconn, claim_id=cid, worker_id="w-f", notes="Confirmed")
+                    record_reproduction_outcome(
+                        pconn,
+                        claim_id=cid,
+                        worker_id="w-r",
+                        poc_cmd="./app bad",
+                        control_cmd="./app good",
+                        build_cmd=bcmd,
+                        repro_result={
+                            "passed": True,
+                            "observation_hash": "obs-b2-diff",
+                            "micropatch_diff": "--- a/src/app.c\n+++ b/src/app.c\n",
+                            "arm1_clean_poc": {"arm_passed": True},
+                            "arm2_clean_control": {"arm_passed": True},
+                            "arm3_patch_poc": {"arm_passed": True},
+                            "arm4_patch_control": {"arm_passed": True},
+                        },
+                    )
+                finally:
+                    pconn.close()
+
+                # Sync PR 1 -> finding MUST be kept (proves build_cmd ran!) and app.o preserved in slot-0!
+                init_run_workspace(
+                    target=str(target),
+                    target_mode="source",
+                    workspace_mode="in_place",
+                    run_id="run-b2-child1",
+                    ajar_home=ajar_home,
+                )
+                c1_dir = ajar_home / "runs" / "run-b2-child1"
+                c1 = open_run_db("run-b2-child1", ajar_home=ajar_home)
+                try:
+                    sync1 = sync_pr_differential_state(
+                        c1,
+                        run_dir=c1_dir,
+                        target_dir=target,
+                        diff_range=f"{base_sha}..{pr1_sha}",
+                        parent_run_id="run-b2-parent",
+                        ajar_home=ajar_home,
+                    )
+                    self.assertEqual(len(sync1["kept_findings"]), 1)
+                    self.assertEqual(len(sync1["closed_findings"]), 0)
+                    self.assertTrue((c1_dir / "repro" / "slot-0" / "app.o").is_file())
+                    self.assertFalse((c1_dir / "repro" / "cache-0").exists())
+                finally:
+                    c1.close()
+
+                # PR commit 2: fix the bug -> diff_sync recompiles with build_cmd and closes finding!
+                (target / "src" / "app.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
+                subprocess.run(["git", "-C", str(target), "add", "-A"], check=True, env=git_env)
+                subprocess.run(["git", "-C", str(target), "commit", "-q", "-m", "fix"], check=True, env=git_env)
+                pr2_sha = subprocess.check_output(
+                    ["git", "-C", str(target), "rev-parse", "HEAD"], text=True, env=git_env
+                ).strip()
+
+                init_run_workspace(
+                    target=str(target),
+                    target_mode="source",
+                    workspace_mode="in_place",
+                    run_id="run-b2-child2",
+                    ajar_home=ajar_home,
+                )
+                c2_dir = ajar_home / "runs" / "run-b2-child2"
+                c2 = open_run_db("run-b2-child2", ajar_home=ajar_home)
+                try:
+                    sync2 = sync_pr_differential_state(
+                        c2,
+                        run_dir=c2_dir,
+                        target_dir=target,
+                        diff_range=f"{pr1_sha}..{pr2_sha}",
+                        parent_run_id="run-b2-parent",
+                        ajar_home=ajar_home,
+                    )
+                    self.assertEqual(len(sync2["kept_findings"]), 0)
+                    self.assertEqual(len(sync2["closed_findings"]), 1)
+                finally:
+                    c2.close()
 
 
 if __name__ == "__main__":

@@ -576,6 +576,11 @@ def build_parser() -> argparse.ArgumentParser:
     pch_p.add_argument("--steps", required=True, help="Comma-separated `fnd-*`, `clm-*`, `prim-*`, or `anom-*` IDs.")
     pch_p.add_argument("--poc-cmd", required=True)
     pch_p.add_argument("--control-cmd", required=True)
+    pch_p.add_argument(
+        "--build-cmd",
+        default="",
+        help="Optional compile command run before full/control arms and after step micropatch apply/reset (auto-inherited from step findings if omitted).",
+    )
     pch_p.add_argument("--severity", choices=("critical", "high", "medium", "low"), default="critical")
     pch_p.add_argument("--oracle-json", help="Optional JSON oracle rules (`expect_regex`, `expect_exit_code`).")
     pch_p.add_argument("--step-micropatch", action="append", help="Per-step counterfactual patch `<step_id>:<path/to/step.diff>` (auto-inherited for `fnd-*` and `prim-*` with `--micropatch`).")

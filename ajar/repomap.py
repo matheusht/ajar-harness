@@ -62,6 +62,7 @@ CODE_EXTENSIONS: frozenset[str] = frozenset(
         ".h",
         ".cc",
         ".cpp",
+        ".cxx",
         ".hpp",
         ".sol",
         ".move",
@@ -79,6 +80,21 @@ CODE_EXTENSIONS: frozenset[str] = frozenset(
     }
 )
 SOURCE_EXTENSIONS = CODE_EXTENSIONS
+
+REPOMAP_EDGE_CAP = 25_000
+
+_C_EXTENSIONS: frozenset[str] = frozenset({".c", ".h", ".cc", ".cpp", ".cxx", ".hpp"})
+_C_SOURCE_EXTENSIONS: frozenset[str] = frozenset({".c", ".cc", ".cpp", ".cxx"})
+_IGNORED_SYMBOL_NAMES: frozenset[str] = frozenset(
+    {"if", "for", "while", "switch", "return", "sizeof", "else", "catch", "case", "goto", "delete", "new"}
+)
+_C_MULTILINE_FN_NAME_RE = re.compile(
+    r"^\*?(?:[A-Za-z_][A-Za-z0-9_]*::)?([A-Za-z_][A-Za-z0-9_]*)\s*\([^;]*$"
+)
+_C_RETURN_TYPE_LINE_RE = re.compile(
+    r"^(?:(?:static|inline|extern|virtual|constexpr|const|volatile|unsigned|signed|struct|enum|union|"
+    r"__attribute__\s*\(\([^)]*\)\))\s+)*[A-Za-z_][A-Za-z0-9_:<>]*[\s\*&]*$"
+)
 
 SYMBOL_PATTERNS: dict[str, tuple[tuple[str, re.Pattern[str]], ...]] = {
     ".rs": (
@@ -102,11 +118,82 @@ SYMBOL_PATTERNS: dict[str, tuple[tuple[str, re.Pattern[str]], ...]] = {
         ("interface", re.compile(r"^\s*(?:export\s+)?interface\s+([A-Za-z_$][A-Za-z0-9_$]*)")),
     ),
     ".c": (
-        ("func", re.compile(r"^(?:static\s+|inline\s+|extern\s+)*[A-Za-z_][A-Za-z0-9_\s\*]+\s+\*?([A-Za-z_][A-Za-z0-9_]*)\s*\([^;]*$")),
+        (
+            "func",
+            re.compile(
+                r"^(?:(?:static|inline|extern|virtual|constexpr|const|volatile|unsigned|signed|struct|enum|union)\s+)*"
+                r"[A-Za-z_][A-Za-z0-9_:*&<>]*[\s\*&]+(?:[A-Za-z_][A-Za-z0-9_]*::)?([A-Za-z_][A-Za-z0-9_]*)\s*\([^;]*$"
+            ),
+        ),
         ("struct", re.compile(r"^\s*typedef\s+struct\s+([A-Za-z_][A-Za-z0-9_]*)")),
+        ("struct", re.compile(r"^\s*(?:struct|class|enum|union)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::[^{;]+)?\{")),
+    ),
+    ".java": (
+        (
+            "class",
+            re.compile(
+                r"^\s*(?:(?:public|protected|private|abstract|final|static|sealed|non-sealed)\s+)*"
+                r"(?:class|interface|enum|record)\s+([A-Za-z_][A-Za-z0-9_]*)"
+            ),
+        ),
+        (
+            "method",
+            re.compile(
+                r"^\s*(?:(?:public|protected|private|static|final|synchronized|abstract|native|default)\s+)+"
+                r"(?:<[^>{;]+>\s+)?[A-Za-z_][A-Za-z0-9_<>\[\].,?\s]*\s+([A-Za-z_][A-Za-z0-9_]*)\s*\("
+            ),
+        ),
+    ),
+    ".php": (
+        (
+            "class",
+            re.compile(
+                r"^\s*(?:(?:abstract|final|readonly)\s+)*(?:class|interface|trait|enum)\s+([A-Za-z_][A-Za-z0-9_]*)"
+            ),
+        ),
+        (
+            "function",
+            re.compile(
+                r"^\s*(?:(?:public|protected|private|static|final|abstract)\s+)*function\s+&?([A-Za-z_][A-Za-z0-9_]*)\s*\("
+            ),
+        ),
+    ),
+    ".move": (
+        ("module", re.compile(r"^\s*module\s+(?:[A-Za-z0-9_]+::)?([A-Za-z_][A-Za-z0-9_]*)")),
+        (
+            "fun",
+            re.compile(
+                r"^\s*(?:public(?:\([^)]*\))?\s+)?(?:entry\s+)?(?:native\s+)?(?:inline\s+)?fun\s+([A-Za-z_][A-Za-z0-9_]*)"
+            ),
+        ),
+        ("struct", re.compile(r"^\s*(?:public\s+)?struct\s+([A-Za-z_][A-Za-z0-9_]*)")),
+    ),
+    ".zig": (
+        (
+            "fn",
+            re.compile(
+                r'^\s*(?:pub\s+)?(?:export\s+)?(?:extern(?:\s+"[^"]*")?\s+)?(?:inline\s+|noinline\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\('
+            ),
+        ),
+        (
+            "type",
+            re.compile(
+                r"^\s*(?:pub\s+)?const\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:packed\s+|extern\s+)?(?:struct|enum|union)\b"
+            ),
+        ),
     ),
 }
-for _alias, _src in ((".tsx", ".ts"), (".js", ".ts"), (".jsx", ".ts"), (".mjs", ".ts"), (".h", ".c"), (".cc", ".c"), (".cpp", ".c"), (".hpp", ".c")):
+for _alias, _src in (
+    (".tsx", ".ts"),
+    (".js", ".ts"),
+    (".jsx", ".ts"),
+    (".mjs", ".ts"),
+    (".h", ".c"),
+    (".cc", ".c"),
+    (".cpp", ".c"),
+    (".cxx", ".c"),
+    (".hpp", ".c"),
+):
     SYMBOL_PATTERNS[_alias] = SYMBOL_PATTERNS[_src]
 
 IDENT_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]{2,}\b")
@@ -310,18 +397,58 @@ def _extract_python_symbols(rel_path: str, text: str) -> list[dict[str, Any]]:
     return sorted(symbols, key=lambda x: int(x["line_no"]))
 
 
+def _c_looks_like_definition(lines: list[str], start_idx: int) -> bool:
+    """Return True if a C/C++ function signature starting at `start_idx` opens a `{` body rather than ending with `;`."""
+    depth = 0
+    seen_open = False
+    limit = min(len(lines), start_idx + 14)
+    for j in range(start_idx, limit):
+        raw = lines[j]
+        code = raw.split("//", 1)[0]
+        for ch in code:
+            if ch == "(":
+                depth += 1
+                seen_open = True
+            elif ch == ")":
+                if depth > 0:
+                    depth -= 1
+            elif seen_open and depth == 0:
+                if ch == "{":
+                    return True
+                if ch == ";":
+                    return False
+    return False
+
+
+def _is_c_return_type_header(line: str) -> bool:
+    if not line or line[0].isspace():
+        return False
+    stripped = line.split("//", 1)[0].strip()
+    if not stripped or stripped.startswith(("#", "/*", "*", "{", "}", ";")):
+        return False
+    if stripped.endswith((";", "{", "}", ":", ",")) or "=" in stripped:
+        return False
+    if stripped in _IGNORED_SYMBOL_NAMES or stripped in {"do", "try"}:
+        return False
+    return _C_RETURN_TYPE_LINE_RE.match(stripped) is not None
+
+
 def _extract_regex_symbols(rel_path: str, ext: str, text: str) -> list[dict[str, Any]]:
     patterns = SYMBOL_PATTERNS.get(ext, ())
     if not patterns:
         return []
-    is_c_source = ext in {".c", ".cc", ".cpp", ".cxx"}
+    is_c_like = ext in _C_EXTENSIONS
+    is_c_source = ext in _C_SOURCE_EXTENSIONS
+    lines = text.splitlines()
     symbols: list[dict[str, Any]] = []
-    for idx, line in enumerate(text.splitlines(), start=1):
+    for idx, line in enumerate(lines, start=1):
+        matched = False
         for kind, pat in patterns:
             m = pat.search(line)
             if m:
+                matched = True
                 name = m.group(1)
-                if name not in {"if", "for", "while", "switch", "return", "sizeof"}:
+                if name not in _IGNORED_SYMBOL_NAMES:
                     file_local = bool(is_c_source and re.match(r"^\s*static\b", line))
                     symbols.append(
                         {
@@ -334,6 +461,31 @@ def _extract_regex_symbols(rel_path: str, ext: str, text: str) -> list[dict[str,
                         }
                     )
                 break
+        if not matched and is_c_like and idx >= 2 and line and not line[0].isspace():
+            mm = _C_MULTILINE_FN_NAME_RE.match(line)
+            if mm:
+                name = mm.group(1)
+                prev_idx = idx - 2
+                if (
+                    name not in _IGNORED_SYMBOL_NAMES
+                    and _is_c_return_type_header(lines[prev_idx])
+                    and _c_looks_like_definition(lines, idx - 1)
+                ):
+                    header_parts = [lines[prev_idx].strip()]
+                    if prev_idx >= 1 and _is_c_return_type_header(lines[prev_idx - 1]):
+                        header_parts.insert(0, lines[prev_idx - 1].strip())
+                    header_prefix = " ".join(header_parts)
+                    file_local = bool(is_c_source and re.search(r"\bstatic\b", header_prefix))
+                    symbols.append(
+                        {
+                            "rel_path": rel_path,
+                            "name": name,
+                            "kind": "func",
+                            "line_no": idx,
+                            "signature": f"{header_prefix} {line.strip()}"[:120],
+                            "file_local": file_local,
+                        }
+                    )
     return symbols
 
 
@@ -453,6 +605,7 @@ def build_repomap(
     focus_symbols: Sequence[str] = (),
     budget_tokens: int = 1500,
     slice_cap: int = 15000,
+    max_edges: int = REPOMAP_EDGE_CAP,
 ) -> dict[str, Any]:
     """Extract symbols, compute Personalized PageRank + cohesive subsystem call cones (`<= slice_cap` LoC), and render under `budget_tokens`."""
     conn.executescript(
@@ -509,9 +662,11 @@ def build_repomap(
 
     nodes = sorted(file_texts.keys())
     out_edges: dict[str, dict[str, float]] = {u: {} for u in nodes}
-    edge_rows: list[tuple[str, str, str, float]] = []
+    # Aggregate per `(src_file, dst_file)`: summed IDF weight + highest-weight symbol.
+    agg_edges: dict[tuple[str, str], tuple[float, float, str]] = {}
 
-    for src_rel, text in file_texts.items():
+    for src_rel in nodes:
+        text = file_texts[src_rel]
         mentioned = set(IDENT_RE.findall(text))
         for ident in mentioned:
             definers = defs_by_name.get(ident)
@@ -522,7 +677,23 @@ def build_repomap(
                 if dst_rel == src_rel:
                     continue
                 out_edges[src_rel][dst_rel] = out_edges[src_rel].get(dst_rel, 0.0) + idf_weight
-                edge_rows.append((src_rel, dst_rel, ident, round(idf_weight, 4)))
+                key = (src_rel, dst_rel)
+                prev = agg_edges.get(key)
+                if prev is None:
+                    agg_edges[key] = (idf_weight, idf_weight, ident)
+                else:
+                    total_w, top_w, top_sym = prev
+                    if (idf_weight > top_w) or (idf_weight == top_w and ident < top_sym):
+                        top_w, top_sym = idf_weight, ident
+                    agg_edges[key] = (total_w + idf_weight, top_w, top_sym)
+
+    edge_rows: list[tuple[str, str, str, float]] = [
+        (src_rel, dst_rel, top_sym, round(total_w, 4))
+        for (src_rel, dst_rel), (total_w, _top_w, top_sym) in agg_edges.items()
+    ]
+    edge_rows.sort(key=lambda row: (-row[3], row[0], row[1]))
+    edge_cap = max(1, int(max_edges))
+    persisted_edges = edge_rows[:edge_cap]
 
     focus_file_set = {f.strip().lstrip("./") for f in focus_files if f.strip()}
     focus_sym_set = {s.strip() for s in focus_symbols if s.strip()}
@@ -561,10 +732,10 @@ def build_repomap(
                 """,
                 symbol_params,
             )
-        if edge_rows:
+        if persisted_edges:
             conn.executemany(
                 "INSERT INTO repomap_edges(src_file, dst_file, symbol, weight) VALUES (?, ?, ?, ?)",
-                edge_rows[:5000],
+                persisted_edges,
             )
 
     ranked_files = sorted(nodes, key=lambda u: (-file_ranks.get(u, 0.0), u))
@@ -610,7 +781,8 @@ def build_repomap(
     return {
         "files_indexed": len(nodes),
         "symbols_indexed": len(all_symbols),
-        "edges_indexed": len(edge_rows),
+        "edges_indexed": len(persisted_edges),
+        "edges_total": len(edge_rows),
         "slice_cap": int(slice_cap),
         "slice_count": len(call_slices),
         "call_slices": call_slices,

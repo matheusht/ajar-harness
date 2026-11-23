@@ -33,7 +33,6 @@ from ajar.epistemic_hooks import (
     claim_requires_release_ub_diff,
     parse_tag_list,
 )
-from ajar.patch_verify import run_8arm_patch_verification
 from ajar.redact import (
     scrub_text,
     scrubbed_subprocess_env,
@@ -63,6 +62,7 @@ from ajar.services import (
     record_reproduction_outcome,
     rescope_claim_service,
     survive_claim,
+    verify_patch_fix,
 )
 from ajar.store import assert_run_mutable
 from ajar.swarm import sync_run_to_shared_mirror
@@ -497,9 +497,11 @@ def cmd_patch(args: argparse.Namespace) -> int:
     try:
         if args.patch_cmd == "verify":
             run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
-            tpath = pathlib.Path(run["target_path"])
+            if run is None:
+                raise AjarError("Run metadata missing in run.db.", EXIT_USER_ERROR)
+            tpath = pathlib.Path(str(run["target_path"]))
             oracle_dict = json.loads(args.oracle_json) if args.oracle_json else None
-            res = run_8arm_patch_verification(
+            res = verify_patch_fix(
                 conn,
                 run_dir=rdir,
                 target_dir=tpath,

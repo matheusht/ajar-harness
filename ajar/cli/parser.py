@@ -126,6 +126,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument("--phase", choices=phase_choices, default="hunt", help="Campaign phase (`hunt` defers 9-arm `patch verify` until `remediate`).")
     p_init.add_argument("--budget", type=float, default=None, help="Explicit COGS cap override in USD (defaults to 0.35 * Code quote).")
     p_init.add_argument("--cogs-cap", dest="budget", type=float, help="Alias for --budget explicit COGS cap override in USD.")
+    p_init.add_argument("--max-spend", type=float, default=None, help="Optional USD ceiling clamping `cogs_cap_usd = min(cogs_cap_usd, max_spend)`.")
+    p_init.add_argument("--warn-above-usd", type=float, default=25.0, help="Inline quote threshold in USD for non-blocking budget notice (default: 25.0).")
+    p_init.add_argument("-y", "--yes", action="store_true", help="Silence non-blocking inline quote warning notices.")
     p_init.add_argument("--uncapped", action="store_true", help="Disable finite COGS budget caps and 25%%/80%% budget throttles (`uncapped_research`).")
     p_init.add_argument("--diff", help="Optional git diff range (`base..head`) for PR differential Code runs.")
     p_init.add_argument("--parent-run", help="Optional baseline/parent run ID to carry forward kept findings and guards.")
@@ -922,7 +925,7 @@ def build_parser() -> argparse.ArgumentParser:
         "reopen",
         help="Hydrate a run from shared storage and reopen zero-attempt policy-blocked claims.",
     )
-    p_reo.add_argument("run_id", help="Run ID to hydrate and reopen (for example `git-wave1a`).")
+    p_reo.add_argument("run_id", help="Run ID to hydrate and reopen (for example `run-20261120-a1`).")
     p_reo.add_argument("--keep-blocked", action="store_true", help="Keep zero-attempt blocked claims untouched.")
     p_reo.add_argument("--from-shared", default=None, help="Explicit shared mirror directory override.")
     p_reo.add_argument("--json", action="store_true", default=True)

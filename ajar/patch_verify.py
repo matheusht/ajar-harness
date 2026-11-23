@@ -41,7 +41,12 @@ from ajar.repro_source import (
     resolve_local_build_cache_dir,
     run_source_reproduction,
 )
-from ajar.store import immediate_tx
+from ajar.store import assert_run_mutable, immediate_tx
+
+HUNT_PHASE_PATCH_FIREWALL_MSG = (
+    "Phase lock: ajar patch verify is blocked while campaign_phase='hunt'. "
+    "Complete hunting/chaining first, then advance via `ajar phase advance --to remediate`."
+)
 
 FAILURE_MARKER_RE = re.compile(
     r"^(?:FAIL(?:ED)?\b.*|ERROR\b.*|---\s*FAIL:\s*\S+.*|.*::\S+\s+FAILED\b.*|test\s+\S+\s+\.\.\.\s+FAILED.*)$",
@@ -122,16 +127,22 @@ def run_8arm_patch_verification(
     worker_id: str = "worker",
 ) -> dict[str, Any]:
     """Execute all 9 hardened verification arms before promoting a fix to `verified_local`."""
+    assert_run_mutable(conn, operation="patch_verify")
     run_row = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
-    if run_row is not None and "campaign_phase" in run_row.keys():
-        cur_phase = str(run_row["campaign_phase"] or "hunt")
-        if cur_phase == "hunt":
-            raise AjarError(
-                "Phase gate blocked: 9-arm `ajar patch verify` is disabled while `campaign_phase='hunt'` "
-                "so workers focus on discovery and multi-step chains instead of full test-suite rebuilds. "
-                "Run `ajar phase advance --to remediate` (or initialize with `--phase full`) when ready to verify fixes.",
-                EXIT_GATE_BLOCKED,
-            )
+    cur_phase = (
+        str(run_row["campaign_phase"] or "hunt")
+        if (run_row is not None and "campaign_phase" in run_row.keys())
+        else "hunt"
+    )
+    if cur_phase == "hunt":
+        raise AjarError(
+            HUNT_PHASE_PATCH_FIREWALL_MSG,
+            EXIT_GATE_BLOCKED,
+            {
+                "campaign_phase": cur_phase,
+                "fix_hint": "Complete hunting/chaining first, then advance via `ajar phase advance --to remediate`.",
+            },
+        )
 
     finding = conn.execute("SELECT * FROM findings WHERE finding_id = ?", (finding_id,)).fetchone()
     if finding is None:

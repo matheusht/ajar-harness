@@ -277,6 +277,9 @@ def cmd_init(args: argparse.Namespace) -> int:
         stopping_criterion=args.until,
         campaign_phase=getattr(args, "phase", "hunt") or "hunt",
         budget_usd=args.budget,
+        max_spend=getattr(args, "max_spend", None),
+        warn_above_usd=float(getattr(args, "warn_above_usd", 25.0)),
+        yes=bool(getattr(args, "yes", False)),
         uncapped=bool(args.uncapped),
         brief_file=args.brief_file,
         allowed_hosts=args.allow_host or [],
@@ -300,6 +303,8 @@ def cmd_init(args: argparse.Namespace) -> int:
         print(f"  Target ({info['target_mode']}):    {info['target_path']}")
         print(f"  Phase / Stopping:       {info['campaign_phase']} / {info['stopping_criterion']}")
         print(f"  In-scope LoC:           {info['in_scope_loc']} (Code quote: ${info['code_quote_usd']:.2f}, COGS cap: {cap_str})")
+        if info.get("ux_budget_warning"):
+            print(f"  Budget Notice:          {info['ux_budget_notice']}")
         if info.get("brief_path"):
             print(f"  Campaign Brief:         {info['brief_path']}")
         if info.get("diff_range"):

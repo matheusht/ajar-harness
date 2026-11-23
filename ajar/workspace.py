@@ -172,6 +172,9 @@ def init_run_workspace(
     stopping_criterion: str = "exhaustive-high",
     campaign_phase: str = "hunt",
     budget_usd: float | None = None,
+    max_spend: float | None = None,
+    warn_above_usd: float = 25.0,
+    yes: bool = False,
     uncapped: bool = False,
     brief_file: str | None = None,
     brief_text: str | None = None,
@@ -196,8 +199,15 @@ def init_run_workspace(
         raise AjarError(f"Unsupported --until/--stopping {stopping_criterion!r}.", EXIT_USER_ERROR)
     if campaign_phase not in ("hunt", "remediate", "full"):
         raise AjarError(f"Unsupported --phase {campaign_phase!r}.", EXIT_USER_ERROR)
-    if uncapped and budget_usd is not None:
-        raise AjarError("Cannot combine --uncapped with an explicit --budget / --cogs-cap.", EXIT_USER_ERROR)
+    if uncapped and (budget_usd is not None or max_spend is not None):
+        raise AjarError(
+            "Cannot combine --uncapped with an explicit --budget / --cogs-cap / --max-spend.",
+            EXIT_USER_ERROR,
+        )
+    if max_spend is not None and float(max_spend) <= 0.0:
+        raise AjarError("--max-spend must be positive (> 0.0 USD); pass --uncapped to disable caps.", EXIT_USER_ERROR)
+    if float(warn_above_usd) < 0.0:
+        raise AjarError("--warn-above-usd must be >= 0.0 USD.", EXIT_USER_ERROR)
 
     resolved_brief = ""
     if brief_file:
@@ -294,6 +304,23 @@ def init_run_workspace(
     else:
         eff_cogs_cap = round(float(budget_usd), 4)
         pricing_mode = "custom_or_bounty"
+
+    eff_max_spend = round(float(max_spend), 4) if max_spend is not None else None
+    if eff_max_spend is not None and pricing_mode != "uncapped_research":
+        eff_cogs_cap = round(min(eff_cogs_cap, eff_max_spend), 4)
+
+    eff_warn_above = round(float(warn_above_usd), 4)
+    if quote_usd > eff_warn_above and not yes and not uncapped and pricing_mode != "uncapped_research":
+        ux_budget_warning = True
+        ux_budget_notice = (
+            f"Estimated quote ${quote_usd:.2f} (COGS cap ${eff_cogs_cap:.2f}) exceeds warning threshold "
+            f"${eff_warn_above:.2f}; run started with automatic cap protection "
+            "(pass --max-spend <usd> to lower ceiling or --yes to silence)."
+        )
+    else:
+        ux_budget_warning = False
+        cap_summary = "uncapped" if pricing_mode == "uncapped_research" else f"COGS cap ${eff_cogs_cap:.2f}"
+        ux_budget_notice = f"Inline estimate: quote ${quote_usd:.2f} ({cap_summary}); run started directly."
 
     (rdir / "artifacts").mkdir(parents=True, exist_ok=True)
     brief_saved_path = ""
@@ -404,6 +431,9 @@ def init_run_workspace(
                 "in_scope_loc": loc_info["total_loc"],
                 "code_quote_usd": quote_usd,
                 "cogs_cap_usd": eff_cogs_cap,
+                "max_spend_usd": eff_max_spend,
+                "warn_above_usd": eff_warn_above,
+                "ux_budget_warning": ux_budget_warning,
                 "pricing_mode": pricing_mode,
                 "brief_path": brief_saved_path,
                 "diff_range": (diff_range or "").strip(),
@@ -430,6 +460,10 @@ def init_run_workspace(
         "in_scope_loc": int(loc_info["total_loc"]),
         "code_quote_usd": quote_usd,
         "cogs_cap_usd": eff_cogs_cap,
+        "max_spend_usd": eff_max_spend,
+        "warn_above_usd": eff_warn_above,
+        "ux_budget_warning": ux_budget_warning,
+        "ux_budget_notice": ux_budget_notice,
         "pricing_mode": pricing_mode,
         "budget_usd": eff_cogs_cap,
         "brief_path": brief_saved_path,

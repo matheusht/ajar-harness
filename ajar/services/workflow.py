@@ -14,6 +14,7 @@ import pathlib
 import re
 import sqlite3
 import time
+from collections.abc import Sequence
 from typing import Any
 
 from ajar import EXIT_GATE_BLOCKED, EXIT_USER_ERROR
@@ -2702,6 +2703,18 @@ def build_worker_dispatch_brief(
     sub = str(task["subsystem"] or infer_subsystem(str(task["locus"] or "")))
     attempt_count = int(task["attempt_count"] or 0) if "attempt_count" in task.keys() else 0
 
+    if campaign_phase == "hunt" and kind == "patch":
+        raise AjarError(
+            "Phase lock: ajar swarm brief is blocked for kind='patch' while campaign_phase='hunt'. "
+            "Complete hunting/chaining first, then advance via `ajar phase advance --to remediate`.",
+            EXIT_GATE_BLOCKED,
+            {
+                "task_id": tid,
+                "kind": kind,
+                "campaign_phase": campaign_phase,
+                "fix_hint": "Complete hunting/chaining first, then advance via `ajar phase advance --to remediate`.",
+            },
+        )
     if kind == "falsify" and not raw_wid:
         raise AjarError("Fresh-falsifier separation gate requires a non-empty worker_id.", EXIT_GATE_BLOCKED)
     wid = raw_wid or "w-1"
@@ -2969,6 +2982,71 @@ def build_worker_dispatch_brief(
         "line_count": len(rendered_brief.splitlines()),
         "rendered_brief": rendered_brief,
     }
+
+
+def verify_patch_fix(
+    conn: sqlite3.Connection,
+    *,
+    run_dir: pathlib.Path,
+    target_dir: pathlib.Path,
+    finding_id: str,
+    patch_path: pathlib.Path,
+    suite_cmd: str,
+    variant_cmds: Sequence[str],
+    caller_audit: str,
+    sibling_audit: str,
+    caller_cmd: str = "",
+    sibling_cmd: str = "",
+    oracle: dict[str, Any] | None = None,
+    shared_guard_locus: str = "",
+    max_changed_lines: int = 120,
+    timeout_sec: int = 90,
+    suite_timeout_sec: int = 1800,
+    build_cmd: str = "",
+    worker_id: str = "worker",
+) -> dict[str, Any]:
+    """Unified 9-arm remediation gate wrapper enforcing the hard `hunt`-phase firewall."""
+    from ajar.patch_verify import HUNT_PHASE_PATCH_FIREWALL_MSG, run_8arm_patch_verification
+
+    assert_run_mutable(conn, operation="patch_verify")
+    run_row = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
+    if run_row is None:
+        raise AjarError("Run metadata missing in run.db.", EXIT_USER_ERROR)
+    cur_phase = (
+        str(run_row["campaign_phase"] or "hunt")
+        if "campaign_phase" in run_row.keys()
+        else "hunt"
+    )
+    if cur_phase == "hunt":
+        raise AjarError(
+            HUNT_PHASE_PATCH_FIREWALL_MSG,
+            EXIT_GATE_BLOCKED,
+            {
+                "campaign_phase": cur_phase,
+                "fix_hint": "Complete hunting/chaining first, then advance via `ajar phase advance --to remediate`.",
+            },
+        )
+    return run_8arm_patch_verification(
+        conn,
+        run_dir=run_dir,
+        target_dir=target_dir,
+        finding_id=finding_id,
+        patch_path=patch_path,
+        suite_cmd=suite_cmd,
+        variant_cmds=variant_cmds,
+        caller_audit=caller_audit,
+        sibling_audit=sibling_audit,
+        caller_cmd=caller_cmd,
+        sibling_cmd=sibling_cmd,
+        oracle=oracle,
+        shared_guard_locus=shared_guard_locus,
+        max_changed_lines=max_changed_lines,
+        timeout_sec=timeout_sec,
+        suite_timeout_sec=suite_timeout_sec,
+        build_cmd=build_cmd,
+        worker_id=worker_id,
+    )
+
 
 
 

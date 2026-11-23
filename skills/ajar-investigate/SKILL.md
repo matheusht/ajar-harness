@@ -90,7 +90,7 @@ Push maximum depth on every promising lead. When a deep sink or partial chain hi
 
 ## 4. Propose Falsifiable Claims
 
-Trace reachability from an untrusted entrypoint to the sink and state a concrete disconfirmation test. Express `--title`, `--mechanism`, and `--falsification-test` strictly as structural code transitions and boundary violations (for example, `prepare_symlink_changes skips SYMLINK_IN_RESULT when patch->old_mode == 0, allowing writes through a renamed intra-repo symlink`), never speculative post-exploitation `.git/hooks/*` persistence scripts, reverse-shell commands, or raw shellcode literals (`ajar claim propose` deterministically rejects weaponized prose tails):
+Trace reachability from an untrusted entrypoint to the sink and state a concrete disconfirmation test. Express `--title`, `--mechanism`, and `--falsification-test` strictly as structural code transitions and boundary violations (for example, `prepare_archive_links skips LINK_PATH_CHECK when entry->old_mode == 0, allowing writes through a renamed archive link`), never speculative post-exploitation `.git/hooks/*` persistence scripts, reverse-shell commands, or raw shellcode literals (`ajar claim propose` deterministically rejects weaponized prose tails):
 
 ```bash
 ajar claim propose \

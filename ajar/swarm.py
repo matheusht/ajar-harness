@@ -106,8 +106,8 @@ def validate_structural_claim_prose(*texts: str | None) -> tuple[bool, str]:
             return (
                 False,
                 f"structural_prose_gate: claim text embeds shellcode or post-exploitation hook literal ({m.group(0)!r}). "
-                "State structural code transitions and boundary violations (for example `prepare_symlink_changes skips "
-                "SYMLINK_IN_RESULT when old_mode == 0`), not OS hook shell payloads.",
+                "State structural code transitions and boundary violations (for example `prepare_archive_links skips "
+                "LINK_PATH_CHECK when old_mode == 0`), not OS hook shell payloads.",
             )
     return (True, "ok")
 

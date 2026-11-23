@@ -9,11 +9,10 @@ Use this skill to build the initial component and attack-surface map, record ope
 
 ## 1. Inputs, Quote, and Orientation
 
-1. Verify canonical target liveness (`archived == false`, active production branch, fresh `HEAD`, and sibling `--peer` checkouts if coupled), preview `Code` LOC scope, and initialize the run:
+1. Verify canonical target liveness (`archived == false`, active production branch, fresh `HEAD`, and sibling `--peer` checkouts if coupled) and initialize the run (`ajar init` computes `Code` quote and `35%` COGS cap inline without requiring `ajar quote` first; pass `--max-spend <usd>` to clamp ceiling or `--yes` to silence quote notices):
    ```bash
    ajar doctor --target <target_dir> [--subdir <rel_path>] [--peer <sibling_repo>]
-   ajar quote <target_dir> [--diff <base..head>]
-   ajar init <target_dir> [--stopping exhaustive-high|first-verified-high|crown-jewel] [--phase hunt|remediate] [--diff <base..head>] [--brief-file <brief.md>] [--uncapped] [--parent-run <baseline_run_id>]
+   ajar init <target_dir> [--stopping exhaustive-high|first-verified-high|crown-jewel] [--phase hunt|remediate] [--max-spend <usd>] [--warn-above-usd <usd>] [--yes] [--diff <base..head>] [--brief-file <brief.md>] [--uncapped] [--parent-run <baseline_run_id>]
    ajar brief
    ```
    When pursuing end-to-end multi-stage chains (`--stopping crown-jewel --phase hunt`), register concrete terminal sinks (`crown_jewels`) so backward sink cones and Open Doors anchor on real execution/state boundaries without closing out on early multi-step stepping stones:

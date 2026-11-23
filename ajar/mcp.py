@@ -43,6 +43,7 @@ from ajar.services import (
     rank_leads,
     rescope_claim_service,
     survive_claim,
+    verify_patch_fix,
 )
 from ajar.slice_probe import VALID_SLICE_TRACERS, run_slice_probe
 
@@ -364,6 +365,29 @@ MCP_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "ajar_patch_verify",
+        "description": "Verify a production fix with the 9-arm remediation gate (`campaign_phase` must be `remediate` or `full`).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "finding_id": {"type": "string"},
+                "patch_path": {"type": "string"},
+                "suite_cmd": {"type": "string"},
+                "variant_cmds": {"type": "array", "items": {"type": "string"}},
+                "caller_audit": {"type": "string"},
+                "sibling_audit": {"type": "string"},
+                "caller_cmd": {"type": "string", "default": ""},
+                "sibling_cmd": {"type": "string", "default": ""},
+                "build_cmd": {"type": "string", "default": ""},
+                "worker_id": {"type": "string", "default": "worker"},
+                "max_changed_lines": {"type": "integer", "default": 120},
+                "timeout_sec": {"type": "integer", "default": 90},
+                "suite_timeout_sec": {"type": "integer", "default": 1800},
+            },
+            "required": ["finding_id", "patch_path", "suite_cmd", "variant_cmds", "caller_audit", "sibling_audit"],
+        },
+    },
+    {
         "name": "ajar_finish",
         "description": "Check all 5 SQL closeout gates (`G1`–`G5`) and mark the run finished if green.",
         "inputSchema": {"type": "object", "properties": {}},
@@ -601,6 +625,29 @@ def dispatch_mcp_tool(
                 claim_id=str(args.get("claim_id") or args.get("claim") or ""),
                 timeout_sec=int(args.get("timeout_sec", args.get("timeout", 60))),
                 worker_id=wid,
+            )
+        if tool_name == "ajar_patch_verify":
+            p_rid = pathlib.Path(run_id)
+            rdir = p_rid.parent if (p_rid.suffix == ".db" or "/" in str(run_id)) else run_dir_for(run_id, ajar_home)
+            raw_variants = args.get("variant_cmds") or []
+            variants = [str(v) for v in raw_variants] if isinstance(raw_variants, list) else [str(raw_variants)]
+            return verify_patch_fix(
+                conn,
+                run_dir=rdir,
+                target_dir=tpath,
+                finding_id=str(args["finding_id"]),
+                patch_path=pathlib.Path(str(args["patch_path"])),
+                suite_cmd=str(args["suite_cmd"]),
+                variant_cmds=variants,
+                caller_audit=str(args["caller_audit"]),
+                sibling_audit=str(args["sibling_audit"]),
+                caller_cmd=str(args.get("caller_cmd") or ""),
+                sibling_cmd=str(args.get("sibling_cmd") or ""),
+                build_cmd=str(args.get("build_cmd") or ""),
+                max_changed_lines=int(args.get("max_changed_lines", 120)),
+                timeout_sec=int(args.get("timeout_sec", 90)),
+                suite_timeout_sec=int(args.get("suite_timeout_sec", 1800)),
+                worker_id=str(args.get("worker_id") or args.get("worker") or "mcp"),
             )
         if tool_name == "ajar_finish":
             return finish_run(conn, run_id=run_id, target_dir=tpath, actor="mcp")

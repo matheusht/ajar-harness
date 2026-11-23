@@ -38,6 +38,7 @@ from ajar.services.workflow import (
     record_spend_entry,
     rescope_claim_service,
     survive_claim,
+    verify_patch_fix,
 )
 
 __all__ = [
@@ -75,5 +76,6 @@ __all__ = [
     "survive_claim",
     "verify_bundle",
     "verify_commit_preimage",
+    "verify_patch_fix",
     "write_restricted_json",
 ]

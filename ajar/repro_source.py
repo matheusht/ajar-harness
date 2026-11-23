@@ -24,6 +24,7 @@ import secrets
 import shutil
 import signal
 import socket
+import sqlite3
 import subprocess
 import tarfile
 import tempfile
@@ -1826,3 +1827,132 @@ def run_repro_try(
         finally:
             fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
             lock_fh.close()
+
+
+_FALLBACK_DISPATCH_STATUSES: frozenset[str] = frozenset({"idle_no_return", "filter_blocked", "refused"})
+
+
+def _normalize_failure_reason(reason: str) -> str:
+    """Group per-attempt failure reasons into stable, scrubbed rejection categories."""
+    clean = scrub_text((reason or "").strip())
+    if not clean:
+        return "unspecified"
+    head = clean.splitlines()[0].split(": ", 1)[0].strip()
+    head = re.sub(r"\s*\([^)]*(?:exit=|hits|timed_out|line|lines)[^)]*\)\s*\.?$", "", head).strip()
+    return (head or clean)[:120]
+
+
+def aggregate_failure_telemetry(
+    run_dir: pathlib.Path,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any]:
+    """Aggregate `repro/failures/*.json` receipts by error class, reason, timeouts, and swarm fallback breakdown."""
+    failures_dir = run_dir / "repro" / "failures"
+    total_receipts = 0
+    malformed_receipts = 0
+    timeout_count = 0
+    timeouts_by_arm: dict[str, int] = {}
+    by_error_class: dict[str, int] = {}
+    by_rejection_reason: dict[str, int] = {}
+    by_claim_id: dict[str, int] = {}
+
+    if failures_dir.is_dir() and not failures_dir.is_symlink():
+        for fpath in sorted(p for p in failures_dir.glob("*.json") if p.is_file() and not p.is_symlink()):
+            try:
+                raw = json.loads(fpath.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+                malformed_receipts += 1
+                continue
+            if not isinstance(raw, dict):
+                malformed_receipts += 1
+                continue
+
+            total_receipts += 1
+            err_cls = str(raw.get("error_class") or "").strip() or "unknown"
+            by_error_class[err_cls] = by_error_class.get(err_cls, 0) + 1
+
+            raw_reason = str(raw.get("reason") or "")
+            norm_reason = _normalize_failure_reason(raw_reason)
+            by_rejection_reason[norm_reason] = by_rejection_reason.get(norm_reason, 0) + 1
+
+            cid = str(raw.get("claim_id") or "").strip() or "unknown"
+            by_claim_id[cid] = by_claim_id.get(cid, 0) + 1
+
+            receipt_timed_out = bool(raw.get("timed_out", False))
+            arms_obj = raw.get("arms")
+            if isinstance(arms_obj, dict):
+                for arm_name, arm_val in arms_obj.items():
+                    if isinstance(arm_val, dict) and bool(arm_val.get("timed_out", False)):
+                        receipt_timed_out = True
+                        ak = str(arm_name)
+                        timeouts_by_arm[ak] = timeouts_by_arm.get(ak, 0) + 1
+            for build_key in ("build_clean", "build_patch", "build"):
+                b_obj = raw.get(build_key)
+                if isinstance(b_obj, dict) and bool(b_obj.get("timed_out", False)):
+                    receipt_timed_out = True
+                    timeouts_by_arm[build_key] = timeouts_by_arm.get(build_key, 0) + 1
+            if not receipt_timed_out and re.search(r"\btimed?\s*out\b", raw_reason, re.IGNORECASE):
+                receipt_timed_out = True
+            if receipt_timed_out:
+                timeout_count += 1
+
+    swarm_summary: dict[str, Any] = {
+        "total_dispatches": 0,
+        "by_status": {},
+        "by_wire_profile": {},
+        "by_stage": {},
+        "fallback_total": 0,
+        "fallback_by_reason": {},
+        "fallback_by_stage": {},
+        "fallback_by_profile": {},
+    }
+    if conn is not None:
+        has_swarm = (
+            conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='swarm_dispatches'").fetchone()
+            is not None
+        )
+        if has_swarm:
+            by_status: dict[str, int] = {}
+            by_profile: dict[str, int] = {}
+            by_stage: dict[str, int] = {}
+            fb_reason: dict[str, int] = {}
+            fb_stage: dict[str, int] = {}
+            fb_profile: dict[str, int] = {}
+            rows = conn.execute("SELECT stage, wire_profile, status FROM swarm_dispatches").fetchall()
+            for r in rows:
+                st = str(r["status"] or "unknown")
+                prof = str(r["wire_profile"] or "direct")
+                stg = str(r["stage"] or "unknown")
+                by_status[st] = by_status.get(st, 0) + 1
+                by_profile[prof] = by_profile.get(prof, 0) + 1
+                by_stage[stg] = by_stage.get(stg, 0) + 1
+                if st in _FALLBACK_DISPATCH_STATUSES:
+                    fb_reason[st] = fb_reason.get(st, 0) + 1
+                    fb_stage[stg] = fb_stage.get(stg, 0) + 1
+                    fb_profile[prof] = fb_profile.get(prof, 0) + 1
+            swarm_summary = {
+                "total_dispatches": len(rows),
+                "by_status": dict(sorted(by_status.items())),
+                "by_wire_profile": dict(sorted(by_profile.items())),
+                "by_stage": dict(sorted(by_stage.items())),
+                "fallback_total": sum(fb_reason.values()),
+                "fallback_by_reason": dict(sorted(fb_reason.items())),
+                "fallback_by_stage": dict(sorted(fb_stage.items())),
+                "fallback_by_profile": dict(sorted(fb_profile.items())),
+            }
+
+    payload: dict[str, Any] = {
+        "schema": "ajar-failure-telemetry/1",
+        "total_receipts": total_receipts,
+        "malformed_receipts": malformed_receipts,
+        "timeout_count": timeout_count,
+        "timeouts_by_arm": dict(sorted(timeouts_by_arm.items())),
+        "by_error_class": dict(sorted(by_error_class.items())),
+        "by_rejection_reason": dict(sorted(by_rejection_reason.items(), key=lambda kv: (-kv[1], kv[0]))),
+        "by_claim_id": dict(sorted(by_claim_id.items(), key=lambda kv: (-kv[1], kv[0]))),
+        "swarm_dispatches": swarm_summary,
+    }
+    scrubbed = scrub_json_value(payload)
+    assert isinstance(scrubbed, dict)
+    return scrubbed
+

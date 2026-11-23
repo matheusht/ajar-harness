@@ -85,6 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_doc.add_argument("--no-remote", action="store_true", help="Skip live remote `gh api` / `git ls-remote` upstream checks.")
     p_doc.add_argument("--run", help="Optional run ID to diagnose SQLite integrity, stale leases, and repro slot health.")
     p_doc.add_argument("--prune-slots", action="store_true", help="With `--run`, safely remove unlocked `repro/slot-*` worktree directories.")
+    p_doc.add_argument(
+        "--failures",
+        action="store_true",
+        help="With `--run` (or `$AJAR_RUN_ID`), aggregate `repro/failures/*.json` receipts and `swarm_dispatches` fallback telemetry.",
+    )
     p_doc.add_argument("--json", action="store_true", default=True)
     p_doc.set_defaults(func=cmd_doctor)
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fcntl
+import io
 import json
 import os
 import pathlib
@@ -11,6 +12,7 @@ import sqlite3
 import subprocess
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
 from ajar import EXIT_GATE_BLOCKED
@@ -20,6 +22,7 @@ from ajar.chain_planner import (
     evaluate_precondition_realism,
     park_open_door,
 )
+from ajar.cli import main as cli_main
 from ajar.db import open_run_db
 from ajar.diff_sync import sync_pr_differential_state
 from ajar.domain.models import AjarError
@@ -32,6 +35,7 @@ from ajar.repro_compose import (
 )
 from ajar.repro_source import (
     _run_shell_in_slot,
+    aggregate_failure_telemetry,
     capture_slot_post_state_snapshot,
     init_source_mirror,
     resolve_local_build_cache_dir,
@@ -45,7 +49,7 @@ from ajar.services import (
     record_reproduction_outcome,
     survive_claim,
 )
-from ajar.swarm import build_swarm_packet, complete_swarm_dispatch
+from ajar.swarm import build_swarm_packet, complete_swarm_dispatch, escalate_swarm_fallback
 from ajar.workspace import init_run_workspace
 
 
@@ -976,6 +980,153 @@ class TestPlannerAndSwarmB4(unittest.TestCase):
                     self.assertEqual(ctx.exception.exit_code, EXIT_GATE_BLOCKED)
                 finally:
                     conn.close()
+
+
+class TestFailureTelemetryB5(unittest.TestCase):
+    def _run_cli(self, argv: list[str]) -> tuple[int, dict[str, object]]:
+        out_buf = io.StringIO()
+        err_buf = io.StringIO()
+        with redirect_stdout(out_buf), redirect_stderr(err_buf):
+            rc = cli_main(argv)
+        raw = out_buf.getvalue().strip() or err_buf.getvalue().strip()
+        return rc, json.loads(raw)
+
+    def test_doctor_failures_empty_and_populated_receipts_with_swarm_fallbacks(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            ajar_home = base / "ajar_home"
+            target = base / "repo"
+            _git_init_repo(target, {"src/app.py": "def check(x):\n    return x == 'ok'\n"})
+
+            with mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}):
+                init_run_workspace(
+                    target=str(target),
+                    target_mode="source",
+                    workspace_mode="in_place",
+                    run_id="run-b5-doc",
+                    ajar_home=ajar_home,
+                )
+                rdir = ajar_home / "runs" / "run-b5-doc"
+
+                # 1. Empty run: 0 receipts, 0 timeouts, 0 swarm fallbacks.
+                rc_empty, doc_empty = self._run_cli(["doctor", "--run", "run-b5-doc", "--failures", "--json"])
+                self.assertEqual(rc_empty, 0)
+                ft_empty = doc_empty["failure_telemetry"]
+                assert isinstance(ft_empty, dict)
+                self.assertEqual(ft_empty["schema"], "ajar-failure-telemetry/1")
+                self.assertEqual(ft_empty["run_id"], "run-b5-doc")
+                self.assertEqual(ft_empty["total_receipts"], 0)
+                self.assertEqual(ft_empty["malformed_receipts"], 0)
+                self.assertEqual(ft_empty["timeout_count"], 0)
+                self.assertEqual(ft_empty["by_error_class"], {})
+                self.assertEqual(ft_empty["by_rejection_reason"], {})
+                self.assertEqual(ft_empty["swarm_dispatches"]["fallback_total"], 0)
+
+                # 2. Populate failure receipts (1 real preflight + 3 synthetic + 1 malformed JSON) + swarm fallbacks.
+                run_source_reproduction(
+                    run_dir=rdir,
+                    target_dir=target,
+                    claim_id="clm-preflight",
+                    poc_cmd="python3 -c 'pass'",
+                    control_cmd="python3 -c 'pass'",
+                    micropatch_path=rdir / "missing.diff",
+                )
+                fdir = rdir / "repro" / "failures"
+                fdir.mkdir(parents=True, exist_ok=True)
+                (fdir / "clm-neg-1.json").write_text(
+                    json.dumps(
+                        {
+                            "schema": "ajar-repro-failure/1",
+                            "claim_id": "clm-neg",
+                            "error_class": "target_negative",
+                            "reason": "Arm 1 (clean + PoC) did not trigger defect (0/1 hits, exit=0).",
+                            "arms": {"arm1_clean_poc": {"arm_passed": False, "timed_out": True}},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                (fdir / "clm-neg-2.json").write_text(
+                    json.dumps(
+                        {
+                            "schema": "ajar-repro-failure/1",
+                            "claim_id": "clm-neg",
+                            "error_class": "target_negative",
+                            "reason": "Arm 1 (clean + PoC) did not trigger defect (0/1 hits, exit=1).",
+                            "arms": {"arm1_clean_poc": {"arm_passed": False, "timed_out": False}},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                (fdir / "clm-bld-1.json").write_text(
+                    json.dumps(
+                        {
+                            "schema": "ajar-repro-failure/1",
+                            "claim_id": "clm-bld",
+                            "error_class": "build_or_env_error",
+                            "reason": "Clean-HEAD --build-cmd failed (exit=124): command timed out",
+                            "arms": {},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                (fdir / "corrupt.json").write_text("{not valid json", encoding="utf-8")
+
+                conn = open_run_db("run-b5-doc", ajar_home=ajar_home)
+                try:
+                    surf = add_surface(conn, name="api", kind="http", locus="src/app.py:1")
+                    for idx in range(2):
+                        c = propose_claim(
+                            conn,
+                            worker_id="w-inv",
+                            title=f"Bug {idx}",
+                            locus="src/app.py:1",
+                            mechanism=f"Missing guard #{idx}",
+                            falsification_prediction="Guard rejects bad input",
+                            falsification_test="Call check()",
+                            surface_id=str(surf["surface_id"]),
+                        )
+                        survive_claim(conn, claim_id=str(c["claim_id"]), worker_id="w-fal", notes="ok")
+                    pkt = build_swarm_packet(conn, stage="reproduce", limit=2, worker_id="w-rep-1")
+                    fb1 = escalate_swarm_fallback(conn, target=str(pkt["dispatch_id"]), reason="filter_blocked")
+                    fb_child = fb1["recovery_packets"][0]["dispatch_id"]
+                    fb2 = escalate_swarm_fallback(conn, target=str(fb_child), reason="idle_no_return")
+                    complete_swarm_dispatch(conn, target=str(fb2["recovery_packets"][0]["dispatch_id"]), notes="ok")
+
+                    direct = aggregate_failure_telemetry(rdir, conn=conn)
+                    self.assertEqual(direct["total_receipts"], 4)
+                    self.assertEqual(direct["malformed_receipts"], 1)
+                    self.assertEqual(direct["timeout_count"], 2)
+                    self.assertEqual(direct["timeouts_by_arm"], {"arm1_clean_poc": 1})
+                    self.assertEqual(
+                        direct["by_error_class"],
+                        {
+                            "build_or_env_error": 1,
+                            "preflight_error": 1,
+                            "target_negative": 2,
+                        },
+                    )
+                    self.assertEqual(
+                        direct["by_rejection_reason"]["Arm 1 (clean + PoC) did not trigger defect"],
+                        2,
+                    )
+                    self.assertEqual(direct["by_claim_id"]["clm-neg"], 2)
+                    self.assertEqual(direct["swarm_dispatches"]["fallback_total"], 2)
+                    self.assertEqual(
+                        direct["swarm_dispatches"]["fallback_by_reason"],
+                        {"filter_blocked": 1, "idle_no_return": 1},
+                    )
+                finally:
+                    conn.close()
+
+                # 3. CLI works with explicit `--run` AND via `$AJAR_RUN_ID` when `--run` is omitted.
+                with mock.patch.dict(os.environ, {"AJAR_RUN_ID": "run-b5-doc"}):
+                    rc_pop, doc_pop = self._run_cli(["doctor", "--failures", "--json"])
+                self.assertEqual(rc_pop, 0)
+                ft_pop = doc_pop["failure_telemetry"]
+                assert isinstance(ft_pop, dict)
+                self.assertEqual(ft_pop["total_receipts"], 4)
+                self.assertEqual(ft_pop["timeout_count"], 2)
+                self.assertEqual(ft_pop["swarm_dispatches"]["fallback_total"], 2)
 
 
 if __name__ == "__main__":

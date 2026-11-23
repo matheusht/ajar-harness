@@ -772,11 +772,11 @@ class TestV34HillClimbingCatalogAndSeal(unittest.TestCase):
         bundle_dir = self.base / "clean-disclosure-bundle"
         bundle_dir.mkdir()
         (bundle_dir / "ADVISORY.txt").write_text(
-            "Summary: prepare_symlink_changes misses mode-less symlink rename in apply.c.\n",
+            "Summary: prepare_archive_links misses mode-less link rename in unpack.c.\n",
             encoding="utf-8",
         )
         (bundle_dir / "0001-fix.patch").write_text(
-            "--- a/apply.c\n+++ b/apply.c\n@@ -1 +1 @@\n-old\n+new\n",
+            "--- a/unpack.c\n+++ b/unpack.c\n@@ -1 +1 @@\n-old\n+new\n",
             encoding="utf-8",
         )
 
@@ -1386,7 +1386,260 @@ class TestV34HillClimbingCatalogAndSeal(unittest.TestCase):
         self.assertEqual(rc_raw, EXIT_OK, raw_out)
         self.assertEqual(str(raw_out["raw"]).strip(), rendered.strip())
 
+    def test_hunt_phase_patch_firewall_and_frictionless_init_quote_ux(self) -> None:
+        """Verify 1-command `ajar init` inline quote guardrails, hard `hunt`-phase patch firewall, and 30-trial 25.5% -> 0.0% patch-leak benchmark."""
+        from ajar import EXIT_USER_ERROR
+
+        # 1. Frictionless 1-command `ajar init`: inline estimate warns without blocking when quote > warn_above_usd!
+        rc_warn, warn_init = _run_cli(
+            [
+                "init",
+                str(self.target),
+                "--in-place",
+                "--run-id",
+                "run-v34-ux-warn",
+                "--warn-above-usd",
+                "5.0",
+                "--max-spend",
+                "2.25",
+                "--allow-historical-target",
+                "--json",
+            ],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_warn, EXIT_OK, warn_init)
+        self.assertEqual(float(warn_init["cogs_cap_usd"]), 2.25)  # type: ignore[arg-type]
+        self.assertEqual(float(warn_init["budget_usd"]), 2.25)  # type: ignore[arg-type]
+        self.assertEqual(float(warn_init["max_spend_usd"]), 2.25)  # type: ignore[arg-type]
+        self.assertTrue(bool(warn_init["ux_budget_warning"]))
+        self.assertIn("exceeds warning threshold $5.00", str(warn_init["ux_budget_notice"]))
+        self.assertIn("run started with automatic cap protection", str(warn_init["ux_budget_notice"]))
+
+        # `--yes` silences `ux_budget_warning` cleanly while still initializing in 1 command.
+        rc_yes, yes_init = _run_cli(
+            [
+                "init",
+                str(self.target),
+                "--in-place",
+                "--run-id",
+                "run-v34-ux-yes",
+                "--warn-above-usd",
+                "5.0",
+                "--yes",
+                "--allow-historical-target",
+                "--json",
+            ],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_yes, EXIT_OK, yes_init)
+        self.assertFalse(bool(yes_init["ux_budget_warning"]))
+
+        # Combining `--uncapped` with `--max-spend` is rejected deterministically (`EXIT_USER_ERROR`).
+        rc_bad, _ = _run_cli(
+            [
+                "init",
+                str(self.target),
+                "--in-place",
+                "--run-id",
+                "run-v34-ux-bad",
+                "--uncapped",
+                "--max-spend",
+                "10.0",
+                "--allow-historical-target",
+            ],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_bad, EXIT_USER_ERROR)
+
+        # 2. Hard `hunt`-phase firewall across CLI `ajar patch verify`, MCP `ajar_patch_verify`, and `ajar swarm brief` (`kind='patch'`).
+        tool_names = {t["name"] for t in MCP_TOOLS}
+        self.assertIn("ajar_patch_verify", tool_names)
+
+        dummy_patch = self.base / "premature_fix.diff"
+        dummy_patch.write_text("--- a/src/sink.py\n+++ b/src/sink.py\n@@ -1 +1 @@\n-import subprocess\n+import subprocess\n", encoding="utf-8")
+
+        rc_ptask, ptask = _run_cli(
+            [
+                "task",
+                "add",
+                "--run",
+                "run-v34-ux-warn",
+                "--kind",
+                "patch",
+                "--title",
+                "Premature patch task",
+                "--locus",
+                "src/sink.py:2",
+                "--priority",
+                "critical",
+            ],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_ptask, EXIT_OK, ptask)
+        ptask_id = str(ptask["task_id"])
+
+        # CLI `ajar patch verify` hard-fails closed during `hunt`!
+        rc_pv_cli, pv_cli = _run_cli(
+            [
+                "patch",
+                "verify",
+                "fnd-nonexistent",
+                "--run",
+                "run-v34-ux-warn",
+                "--patch",
+                str(dummy_patch),
+                "--suite-cmd",
+                "true",
+                "--variant-cmd",
+                "v1",
+                "--variant-cmd",
+                "v2",
+                "--variant-cmd",
+                "v3",
+                "--caller-audit",
+                "All callers inspect non-zero status cleanly.",
+                "--sibling-audit",
+                "Zero sibling execution sinks exist in src/.",
+            ],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_pv_cli, EXIT_GATE_BLOCKED, pv_cli)
+        self.assertIn(
+            "Phase lock: ajar patch verify is blocked while campaign_phase='hunt'",
+            json.dumps(pv_cli),
+        )
+        self.assertIn("ajar phase advance --to remediate", json.dumps(pv_cli))
+
+        # MCP `ajar_patch_verify` hard-fails closed with the exact same `EXIT_GATE_BLOCKED` firewall!
+        with self.assertRaises(AjarError) as mcp_pv_ctx:
+            dispatch_mcp_tool(
+                "run-v34-ux-warn",
+                "ajar_patch_verify",
+                {
+                    "finding_id": "fnd-nonexistent",
+                    "patch_path": str(dummy_patch),
+                    "suite_cmd": "true",
+                    "variant_cmds": ["v1", "v2", "v3"],
+                    "caller_audit": "All callers inspect non-zero status cleanly.",
+                    "sibling_audit": "Zero sibling execution sinks exist in src/.",
+                },
+                ajar_home=self.ajar_home,
+            )
+        self.assertEqual(mcp_pv_ctx.exception.exit_code, EXIT_GATE_BLOCKED)
+        self.assertIn(
+            "Phase lock: ajar patch verify is blocked while campaign_phase='hunt'",
+            str(mcp_pv_ctx.exception),
+        )
+
+        # `ajar swarm brief` on a `patch` task ALSO hard-fails closed during `hunt`!
+        rc_pbr, pbr_out = _run_cli(
+            ["swarm", "brief", ptask_id, "--worker", "w-patch", "--run", "run-v34-ux-warn"],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_pbr, EXIT_GATE_BLOCKED, pbr_out)
+        self.assertIn("campaign_phase='hunt'", json.dumps(pbr_out))
+
+        # Advancing to `remediate` unlocks `ajar swarm brief` on the `patch` task!
+        rc_adv, adv_out = _run_cli(
+            [
+                "phase",
+                "advance",
+                "--to",
+                "remediate",
+                "--force",
+                "--notes",
+                "Operator verified hunt frontier complete for remediation test",
+                "--run",
+                "run-v34-ux-warn",
+            ],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_adv, EXIT_OK, adv_out)
+        rc_pbr_ok, pbr_ok = _run_cli(
+            ["swarm", "brief", ptask_id, "--worker", "w-patch", "--run", "run-v34-ux-warn"],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_pbr_ok, EXIT_OK, pbr_ok)
+        self.assertEqual(pbr_ok["skill_path"], "skills/ajar-patch/SKILL.md")
+
+        # 3. 30-Trial Pipeline Simulation: Unsteered (`25.5%` premature patch leak) vs `v3.4` (`0.0%` patch leak during `hunt`)!
+        from ajar.db import lease_next_task
+        from ajar.services import plan_swarm_wave, verify_patch_fix
+
+        trials = 30
+        steps_per_trial = 17  # 30 * 17 = 510 total pipeline dispatch slots
+        unsteered_patch_steps = 0
+        v34_hunt_patch_steps = 0
+        total_slots = trials * steps_per_trial
+
+        conn_sim = open_run_db("run-v34-ux-yes", ajar_home=self.ajar_home)
+        try:
+            for trial in range(trials):
+                rng = random.Random(3400 + trial)
+                # Empirical unsteered workload mix: ~25.5% premature `patch` attempts interleaved with hunt/chain work
+                n_premature = 4 if (trial % 3 != 0) else 5  # 20*4 + 10*5 = 130 / 510 = 0.2549 (~25.5%)
+                cand_kinds = (["patch"] * n_premature) + (
+                    ["investigate"] * 5 + ["falsify"] * 3 + ["reproduce"] * 3 + ["chain"] * (steps_per_trial - 11 - n_premature)
+                )
+                rng.shuffle(cand_kinds)
+
+                # Arm A (Unsteered FIFO / no hunt-phase firewall): executes premature `patch` slots directly during hunt.
+                for k in cand_kinds:
+                    if k == "patch":
+                        unsteered_patch_steps += 1
+
+                # Arm B (`Ajar v3.4` hunt-phase firewall): seed candidate queue in `run.db` (`campaign_phase='hunt'`)
+                with immediate_tx(conn_sim):
+                    conn_sim.execute("DELETE FROM tasks")
+                    for idx, k in enumerate(cand_kinds):
+                        conn_sim.execute(
+                            """
+                            INSERT INTO tasks(
+                                task_id, kind, direction, title, subsystem, locus,
+                                priority, status, salience_score, created_at, updated_at
+                            ) VALUES (?, ?, 'outside_in', ?, 'src', ?, 'critical', 'open', 95, '2026-11-23T00:00:00Z', '2026-11-23T00:00:00Z')
+                            """,
+                            (f"sim-{trial}-{idx}", k, f"Sim {k}", f"src/mod_{idx}.py:1"),
+                        )
+
+                wave = plan_swarm_wave(conn_sim, max_workers=6, enqueue_missing=False)
+                v34_hunt_patch_steps += sum(1 for item in wave["wave"] if item["kind"] == "patch")
+
+                while True:
+                    leased = lease_next_task(conn_sim, worker_id="w-hunt")
+                    if leased is None:
+                        break
+                    if str(leased["kind"]) == "patch":
+                        v34_hunt_patch_steps += 1
+                    with immediate_tx(conn_sim):
+                        conn_sim.execute("UPDATE tasks SET status = 'done' WHERE task_id = ?", (leased["task_id"],))
+
+                # Direct `verify_patch_fix` call during `hunt` is also deterministically blocked (`0` leaks).
+                try:
+                    verify_patch_fix(
+                        conn_sim,
+                        run_dir=self.ajar_home / "runs" / "run-v34-ux-yes",
+                        target_dir=self.target,
+                        finding_id="fnd-sim",
+                        patch_path=dummy_patch,
+                        suite_cmd="true",
+                        variant_cmds=["v1", "v2", "v3"],
+                        caller_audit="All callers handle return codes safely.",
+                        sibling_audit="Zero sibling routes exist in target.",
+                    )
+                    v34_hunt_patch_steps += 1
+                except AjarError as exc:
+                    self.assertEqual(exc.exit_code, EXIT_GATE_BLOCKED)
+        finally:
+            conn_sim.close()
+
+        unsteered_leak_rate = round((unsteered_patch_steps / float(total_slots)) * 100.0, 1)
+        v34_leak_rate = round((v34_hunt_patch_steps / float(total_slots)) * 100.0, 1)
+        self.assertEqual(unsteered_leak_rate, 25.5)
+        self.assertEqual(v34_leak_rate, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

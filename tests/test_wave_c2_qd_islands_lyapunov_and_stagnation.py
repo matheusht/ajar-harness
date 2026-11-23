@@ -93,13 +93,13 @@ class TestWaveC2QdIslandsLyapunovAndStagnation(unittest.TestCase):
         _init_git_repo(
             self.target,
             {
-                "apply.c": "int apply_patch(int x) { return x + 1; }\n",
-                "apply-check.c": "int check_patch(int x) { return x > 0; }\n",
-                "apply-symlink.c": "int check_sym(int x) { return x > 1; }\n",
+                "unpack.c": "int unpack_entry_patch(int x) { return x + 1; }\n",
+                "unpack-check.c": "int check_patch(int x) { return x > 0; }\n",
+                "unpack-links.c": "int check_sym(int x) { return x > 1; }\n",
                 "merge.c": "int merge_trees(int x) { return x * 2; }\n",
                 "pack.c": "int unpack_entry(int x) { return x - 1; }\n",
-                "transport.c": "int fetch_pack(int x) { return x + 3; }\n",
-                "refs.c": "int resolve_ref(int x) { return x + 4; }\n",
+                "channel.c": "int recv_frame(int x) { return x + 3; }\n",
+                "indexdb.c": "int resolve_idx(int x) { return x + 4; }\n",
                 "chain_app.py": (
                     "import os, sys\n"
                     "ablate = set(filter(None, os.environ.get('AJAR_ABLATE_STEPS', '').split(',')))\n"
@@ -117,8 +117,8 @@ class TestWaveC2QdIslandsLyapunovAndStagnation(unittest.TestCase):
 
     def test_qd_islands_uncapped_deme_firewall_ready_door_exemption_and_wave_cap(self) -> None:
         # Inconsistent `--subsystem` labels on sibling files must resolve to the same canonical island.
-        self.assertEqual(canonical_island_key("apply.c:10", "apply.c"), "isl:apply")
-        self.assertEqual(canonical_island_key("apply-check.c:5", "apply-hooks"), "isl:apply")
+        self.assertEqual(canonical_island_key("unpack.c:10", "unpack.c"), "isl:unpack")
+        self.assertEqual(canonical_island_key("unpack-check.c:5", "unpack-hooks"), "isl:unpack")
         self.assertEqual(canonical_island_key("src/auth/login.py:4", "auth"), "isl:src/auth")
 
         rc, init_out = _run_cli(
@@ -146,7 +146,7 @@ class TestWaveC2QdIslandsLyapunovAndStagnation(unittest.TestCase):
             now = utc_now_iso()
             with immediate_tx(conn):
                 for idx, rel in enumerate(
-                    ("apply.c", "apply-check.c", "apply-symlink.c", "merge.c", "pack.c", "transport.c", "refs.c")
+                    ("unpack.c", "unpack-check.c", "unpack-links.c", "merge.c", "pack.c", "channel.c", "indexdb.c")
                 ):
                     conn.execute(
                         "INSERT INTO repomap_symbols(symbol_id, rel_path, name, kind, line_no, pagerank) VALUES (?, ?, ?, 'fn', 1, 0.1)",
@@ -155,15 +155,15 @@ class TestWaveC2QdIslandsLyapunovAndStagnation(unittest.TestCase):
 
                 # Enqueue initial explore tasks across 5 islands (`L_explore == 0`).
                 for tid, loc, sub in (
-                    ("t-apply-1", "apply.c:1", "apply.c"),
-                    ("t-apply-2", "apply-check.c:1", "apply-hooks"),
-                    ("t-apply-3", "apply-symlink.c:1", "apply-sym"),
-                    ("t-apply-4", "apply-check.c:2", "apply-hooks"),
-                    ("t-apply-5", "apply-symlink.c:2", "apply-sym"),
+                    ("t-unpack-1", "unpack.c:1", "unpack.c"),
+                    ("t-unpack-2", "unpack-check.c:1", "unpack-hooks"),
+                    ("t-unpack-3", "unpack-links.c:1", "unpack-sym"),
+                    ("t-unpack-4", "unpack-check.c:2", "unpack-hooks"),
+                    ("t-unpack-5", "unpack-links.c:2", "unpack-sym"),
                     ("t-merge-1", "merge.c:1", "merge"),
                     ("t-pack-1", "pack.c:1", "pack"),
-                    ("t-trans-1", "transport.c:1", "transport"),
-                    ("t-refs-1", "refs.c:1", "refs"),
+                    ("t-trans-1", "channel.c:1", "transport"),
+                    ("t-refs-1", "indexdb.c:1", "refs"),
                 ):
                     sal0 = compute_task_salience(
                         conn,
@@ -181,8 +181,8 @@ class TestWaveC2QdIslandsLyapunovAndStagnation(unittest.TestCase):
                         (tid, f"Audit {loc}", sub, loc, sal0, now, now),
                     )
 
-                # Consume 3 explore leases inside `isl:apply` and record a `stepping_stone` finding (`consecutive_dry == 0`).
-                for done_tid in ("t-apply-1", "t-apply-2", "t-apply-3"):
+                # Consume 3 explore leases inside `isl:unpack` and record a `stepping_stone` finding (`consecutive_dry == 0`).
+                for done_tid in ("t-unpack-1", "t-unpack-2", "t-unpack-3"):
                     conn.execute(
                         "UPDATE tasks SET status = 'done', worker_id = 'w-1', closed_epoch = ?, updated_at = ? WHERE task_id = ?",
                         (time.time(), now, done_tid),
@@ -194,7 +194,7 @@ class TestWaveC2QdIslandsLyapunovAndStagnation(unittest.TestCase):
                         mechanism, mechanism_key, severity, falsification_prediction, falsification_test,
                         status, research_state, evidence_state, created_at, updated_at
                     ) VALUES (
-                        'clm-app1', 'w1', 'w2', 'Stepping stone in apply', 'apply.c', 'apply.c:1',
+                        'clm-app1', 'w1', 'w2', 'Stepping stone in unpack', 'unpack.c', 'unpack.c:1',
                         'm', 'm', 'medium', 'pred', 'test', 'reproduced', 'confirmed', 'reproduced', ?, ?
                     )
                     """,
@@ -207,7 +207,7 @@ class TestWaveC2QdIslandsLyapunovAndStagnation(unittest.TestCase):
                         arm1_clean_poc_json, arm2_clean_ctrl_json, arm3_patch_poc_json, arm4_patch_ctrl_json,
                         realism_tier, attribution, created_at
                     ) VALUES (
-                        'fnd-app1', 'clm-app1', 'Stepping stone in apply', 'medium', 'apply.c:1', 'm', 'true', 'true',
+                        'fnd-app1', 'clm-app1', 'Stepping stone in unpack', 'medium', 'unpack.c:1', 'm', 'true', 'true',
                         '{}', '{}', '{}', '{}', 'stepping_stone', 'found_autonomously_by_ajar', ?
                     )
                     """,
@@ -218,37 +218,37 @@ class TestWaveC2QdIslandsLyapunovAndStagnation(unittest.TestCase):
             self.assertEqual(illum["island_count"], 5)
             self.assertEqual(illum["illuminated_count"], 1)
             self.assertAlmostEqual(float(illum["global_illumination"]), 0.20, places=3)
-            self.assertTrue(illum["islands"]["isl:apply"]["over_mined"])
-            self.assertEqual(illum["islands"]["isl:apply"]["salience_adjustment"], -25)
-            for untouched in ("isl:merge", "isl:pack", "isl:transport", "isl:refs"):
+            self.assertTrue(illum["islands"]["isl:unpack"]["over_mined"])
+            self.assertEqual(illum["islands"]["isl:unpack"]["salience_adjustment"], -25)
+            for untouched in ("isl:merge", "isl:pack", "isl:channel", "isl:indexdb"):
                 self.assertTrue(illum["islands"][untouched]["under_explored"])
                 self.assertEqual(illum["islands"][untouched]["salience_adjustment"], 12)
 
-            # Wave planner with max_workers=4 fills all 4 slots with untouched `+12` islands (`0` slots wasted on `isl:apply`).
+            # Wave planner with max_workers=4 fills all 4 slots with untouched `+12` islands (`0` slots wasted on `isl:unpack`).
             plan = plan_swarm_wave(conn, max_workers=4, enqueue_missing=False)
             self.assertEqual(plan["island_illumination"]["island_count"], 5)
             wave_islands = [w["island"] for w in plan["wave"]]
             self.assertEqual(
                 set(wave_islands),
-                {"isl:merge", "isl:pack", "isl:transport", "isl:refs"},
+                {"isl:merge", "isl:pack", "isl:channel", "isl:indexdb"},
             )
 
             # With max_workers=5 (`ceil(0.25 * 4) == 1` vs `ceil(0.25 * 5) == 2`): add a 3rd distinct-file apply task
-            # so `isl:apply` hits `over_mined_wave_cap` even when spare worker slots remain!
+            # so `isl:unpack` hits `over_mined_wave_cap` even when spare worker slots remain!
             with immediate_tx(conn):
                 conn.execute(
                     """
                     INSERT INTO tasks(
                         task_id, kind, direction, title, subsystem, locus,
                         priority, status, salience_score, created_at, updated_at
-                    ) VALUES ('t-apply-6', 'investigate', 'outside_in', 'Audit apply.c extra', 'apply', 'apply.c:2', 'high', 'open', 60, ?, ?)
+                    ) VALUES ('t-unpack-6', 'investigate', 'outside_in', 'Audit unpack.c extra', 'unpack', 'unpack.c:2', 'high', 'open', 60, ?, ?)
                     """,
                     (now, now),
                 )
             plan_cap = plan_swarm_wave(conn, max_workers=8, enqueue_missing=False)
-            # For max_workers=8, over_mined_wave_cap = ceil(0.25 * 8) = 2, while 3 distinct-file apply tasks are open (`apply.c`, `apply-check.c`, `apply-symlink.c`)!
-            apply_in_wave = [w for w in plan_cap["wave"] if w["island"] == "isl:apply"]
-            self.assertEqual(len(apply_in_wave), 2)
+            # For max_workers=8, over_mined_wave_cap = ceil(0.25 * 8) = 2, while 3 distinct-file unpack tasks are open (`unpack.c`, `unpack-check.c`, `unpack-links.c`)!
+            unpack_in_wave = [w for w in plan_cap["wave"] if w["island"] == "isl:unpack"]
+            self.assertEqual(len(unpack_in_wave), 2)
             self.assertEqual(len(plan_cap["deferred_island_cap_tasks"]), 1)
 
             # `lease_next_task` dispatches an untouched `+12` island next (`72 > 55`)!
@@ -257,7 +257,7 @@ class TestWaveC2QdIslandsLyapunovAndStagnation(unittest.TestCase):
             assert leased is not None
             self.assertIn(leased["task_id"], {"t-merge-1", "t-pack-1", "t-trans-1", "t-refs-1"})
 
-            # Ready Open Door in `isl:apply` exempts `isl:apply` from over-mined throttling!
+            # Ready Open Door in `isl:unpack` exempts `isl:unpack` from over-mined throttling!
             with immediate_tx(conn):
                 conn.execute(
                     """
@@ -265,16 +265,16 @@ class TestWaveC2QdIslandsLyapunovAndStagnation(unittest.TestCase):
                         door_id, direction, anchor_locus, blocker_locus, subsystem,
                         missing_link_summary, wishlist_query, status, created_at, updated_at
                     ) VALUES (
-                        'door-ready-1', 'sink_to_source', 'apply-check.c:2', 'apply.c:1', 'apply',
-                        'Ready bridge into apply sink', 'apply_patch', 'ready', ?, ?
+                        'door-ready-1', 'sink_to_source', 'unpack-check.c:2', 'unpack.c:1', 'unpack',
+                        'Ready bridge into unpack sink', 'unpack_entry_patch', 'ready', ?, ?
                     )
                     """,
                     (now, now),
                 )
             illum_exempt = compute_island_illumination(conn)
-            self.assertTrue(illum_exempt["islands"]["isl:apply"]["has_ready_door"])
-            self.assertFalse(illum_exempt["islands"]["isl:apply"]["over_mined"])
-            self.assertEqual(illum_exempt["islands"]["isl:apply"]["salience_adjustment"], 0)
+            self.assertTrue(illum_exempt["islands"]["isl:unpack"]["has_ready_door"])
+            self.assertFalse(illum_exempt["islands"]["isl:unpack"]["over_mined"])
+            self.assertEqual(illum_exempt["islands"]["isl:unpack"]["salience_adjustment"], 0)
         finally:
             conn.close()
 
@@ -311,14 +311,14 @@ class TestWaveC2QdIslandsLyapunovAndStagnation(unittest.TestCase):
                 conn.execute(
                     """
                     INSERT INTO surfaces(surface_id, name, kind, subsystem, locus, priority, created_at)
-                    VALUES ('surf-phi', 'Apply', 'cli', 'apply', 'apply.c:1', 'high', ?)
+                    VALUES ('surf-phi', 'Unpack', 'cli', 'unpack', 'unpack.c:1', 'high', ?)
                     """,
                     (now,),
                 )
                 conn.execute(
                     """
                     INSERT INTO tasks(task_id, surface_id, kind, title, subsystem, locus, priority, status, salience_score, created_at, updated_at)
-                    VALUES ('tsk-phi', 'surf-phi', 'investigate', 'Explore apply', 'apply', 'apply.c:1', 'high', 'open', 60, ?, ?)
+                    VALUES ('tsk-phi', 'surf-phi', 'investigate', 'Explore unpack', 'unpack', 'unpack.c:1', 'high', 'open', 60, ?, ?)
                     """,
                     (now, now),
                 )
@@ -339,7 +339,7 @@ class TestWaveC2QdIslandsLyapunovAndStagnation(unittest.TestCase):
                 ("w-1", "lead_vote_cast", "vot-1", {"ev_score": 88.0}),
                 ("w-1", "task_leased", "tsk-phi", {"kind": "investigate"}),
                 ("w-1", "task_checkpointed", "tsk-phi", {"step": 1}),
-                ("w-1", "claim_proposed", "clm-tmp", {"locus": "apply.c:1"}),
+                ("w-1", "claim_proposed", "clm-tmp", {"locus": "unpack.c:1"}),
                 ("w-2", "claim_survived_falsify", "clm-tmp", {}),
                 ("w-2", "claim_repro_failed", "clm-tmp", {"failed_repro_count": 1}),
                 ("w-2", "chain_proposed", "chn-unv", {"verified": False, "steps": ["prim-x"]}),
@@ -351,7 +351,7 @@ class TestWaveC2QdIslandsLyapunovAndStagnation(unittest.TestCase):
                     INSERT INTO claims(
                         claim_id, proposer_worker_id, title, subsystem, locus, mechanism, mechanism_key,
                         severity, falsification_prediction, falsification_test, status, created_at, updated_at
-                    ) VALUES ('clm-tmp', 'w-1', 'Candidate', 'apply', 'apply.c:1', 'm', 'm', 'high', 'pred', 'true', 'survived_falsify', ?, ?)
+                    ) VALUES ('clm-tmp', 'w-1', 'Candidate', 'unpack', 'unpack.c:1', 'm', 'm', 'high', 'pred', 'true', 'survived_falsify', ?, ?)
                     """,
                     (now, now),
                 )
@@ -390,7 +390,7 @@ class TestWaveC2QdIslandsLyapunovAndStagnation(unittest.TestCase):
                 target_dir=self.target,
                 name="MAX_PATCH_DEPTH",
                 value="64",
-                locus="apply.c:1",
+                locus="unpack.c:1",
                 task_id="tsk-phi",
                 actor="w-1",
             )
@@ -406,7 +406,7 @@ class TestWaveC2QdIslandsLyapunovAndStagnation(unittest.TestCase):
                 target_dir=self.target,
                 task_id="tsk-phi",
                 worker_id="w-1",
-                rel_path="apply.c",
+                rel_path="unpack.c",
                 start_line=1,
                 end_line=1,
             )
@@ -416,7 +416,7 @@ class TestWaveC2QdIslandsLyapunovAndStagnation(unittest.TestCase):
                 target_dir=self.target,
                 task_id="tsk-phi",
                 worker_id="w-1",
-                rel_path="apply.c",
+                rel_path="unpack.c",
                 start_line=1,
                 end_line=1,
             )
@@ -457,7 +457,7 @@ class TestWaveC2QdIslandsLyapunovAndStagnation(unittest.TestCase):
                 "--run",
                 "run-c2-chain",
                 "--locus",
-                "apply.c:1",
+                "unpack.c:1",
                 "--kind",
                 "stage_write",
                 "--role",

@@ -80,8 +80,8 @@ class TestWaveC1ChainPuctAndH9(unittest.TestCase):
                 "src/entry.c": "int entry(int x) { return x; }\n",
                 "src/guard.c": "int check_bounds(int x) { return x >= 0; }\n",
                 "src/cap.c": "int run_cap(int x) { return x + 1; }\n",
-                "src/submodule.c": "int sub_parse(void) { return 0; }\n",
-                "src/transport.c": "int xport_handoff(void) { return 0; }\n",
+                "src/manifest.c": "int manifest_parse(void) { return 0; }\n",
+                "src/channel.c": "int chan_handoff(void) { return 0; }\n",
                 "src/run_cmd.c": "int exec_sink(void) { return 0; }\n",
             },
         )
@@ -158,7 +158,7 @@ class TestWaveC1ChainPuctAndH9(unittest.TestCase):
                 "--run",
                 "run-h9",
                 "--locus",
-                "src/transport.c:1",
+                "src/channel.c:1",
                 "--kind",
                 "handoff_gadget",
                 "--role",
@@ -298,7 +298,7 @@ class TestWaveC1ChainPuctAndH9(unittest.TestCase):
             p2 = add_primitive(
                 conn,
                 kind="case_fold_desync",
-                locus="src/submodule.c:1",
+                locus="src/manifest.c:1",
                 preconditions="case-folded path",
                 postconditions="bypasses check",
                 evidence_cmd="true",
@@ -355,7 +355,7 @@ class TestWaveC1ChainPuctAndH9(unittest.TestCase):
             p_decoy = add_primitive(
                 conn,
                 kind="partial_norm",
-                locus="src/submodule.c:1",
+                locus="src/manifest.c:1",
                 preconditions="cap:seed",
                 postconditions="emits cap:path_norm only",
                 evidence_cmd="true",
@@ -380,7 +380,7 @@ class TestWaveC1ChainPuctAndH9(unittest.TestCase):
             p2 = add_primitive(
                 conn,
                 kind="symlink_writer",
-                locus="src/transport.c:1",
+                locus="src/channel.c:1",
                 preconditions="cap:path_norm",
                 postconditions="emits cap:symlink_stage",
                 evidence_cmd="true",
@@ -449,7 +449,7 @@ class TestWaveC1ChainPuctAndH9(unittest.TestCase):
             r2 = add_primitive(
                 conn_par,
                 kind="root_symlink",
-                locus="src/submodule.c:1",
+                locus="src/manifest.c:1",
                 preconditions="untrusted input",
                 postconditions="provides cap:symlink_stage",
                 evidence_cmd="true",
@@ -463,7 +463,7 @@ class TestWaveC1ChainPuctAndH9(unittest.TestCase):
             r3a = add_primitive(
                 conn_par,
                 kind="root_mode_seed",
-                locus="src/transport.c:1",
+                locus="src/channel.c:1",
                 preconditions="untrusted input",
                 postconditions="provides cap:mode_seed",
                 evidence_cmd="true",
@@ -513,12 +513,12 @@ class TestWaveC1ChainPuctAndH9(unittest.TestCase):
             )
             jid = str(jwl["jewel_id"])
 
-            # Seed 2-hop structural call path: `src/submodule.c -> src/transport.c -> src/run_cmd.c`
+            # Seed 2-hop structural call path: `src/manifest.c -> src/channel.c -> src/run_cmd.c`
             conn.executemany(
                 "INSERT INTO repomap_edges(src_file, dst_file, symbol, weight) VALUES (?, ?, ?, ?)",
                 [
-                    ("src/submodule.c", "src/transport.c", "xport_handoff", 4.0),
-                    ("src/transport.c", "src/run_cmd.c", "exec_sink", 4.5),
+                    ("src/manifest.c", "src/channel.c", "chan_handoff", 4.0),
+                    ("src/channel.c", "src/run_cmd.c", "exec_sink", 4.5),
                 ],
             )
 
@@ -545,9 +545,9 @@ class TestWaveC1ChainPuctAndH9(unittest.TestCase):
             )
             stage1 = add_primitive(
                 conn,
-                kind="submodule_alias_write",
-                locus="src/submodule.c:1",
-                preconditions="untrusted .gitmodules",
+                kind="manifest_alias_write",
+                locus="src/manifest.c:1",
+                preconditions="untrusted manifest descriptor",
                 postconditions="writes staged config alias",
                 evidence_cmd="true",
                 provides_tags=["cap:config_alias"],
@@ -571,10 +571,10 @@ class TestWaveC1ChainPuctAndH9(unittest.TestCase):
                 conn,
                 kind="run_cmd_dispatch",
                 locus="src/run_cmd.c:1",
-                preconditions="cap:transport_handoff",
+                preconditions="cap:channel_handoff",
                 postconditions="reaches sink:exec_rce",
                 evidence_cmd="true",
-                requires_tags=["cap:transport_handoff"],
+                requires_tags=["cap:channel_handoff"],
                 provides_tags=["sink:exec_rce"],
                 role="trust_gadget",
             )
@@ -722,10 +722,10 @@ class TestWaveC1ChainPuctAndH9(unittest.TestCase):
             )
             jid = str(jwl["jewel_id"])
 
-            # 1-hop edge from `src/submodule.c` into `src/guard.c` (where `g_guarded`'s guard lives).
+            # 1-hop edge from `src/manifest.c` into `src/guard.c` (where `g_guarded`'s guard lives).
             conn.execute(
                 "INSERT INTO repomap_edges(src_file, dst_file, symbol, weight) VALUES (?, ?, ?, ?)",
-                ("src/submodule.c", "src/guard.c", "check_bounds", 4.0),
+                ("src/manifest.c", "src/guard.c", "check_bounds", 4.0),
             )
             tip_far = add_primitive(
                 conn,
@@ -739,7 +739,7 @@ class TestWaveC1ChainPuctAndH9(unittest.TestCase):
             tip_near = add_primitive(
                 conn,
                 kind="near_root",
-                locus="src/submodule.c:1",
+                locus="src/manifest.c:1",
                 preconditions="untrusted",
                 postconditions="cap:near",
                 evidence_cmd="true",

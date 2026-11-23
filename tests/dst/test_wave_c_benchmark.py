@@ -1,7 +1,7 @@
 """20-seed 3-way quantitative A/B benchmark for Wave-C (`v3.3-sim` vs `v3.4-base` vs `v3.4-wave-c`).
 
 Measures deterministic lift across `N = 20` PRNG seeds (`random.Random(1000 + trial)`) on a
-synthetic 12-island, 60-file `git`-scale systems repository (`uncapped_research`, `cogs_cap_usd = 0.0`,
+synthetic 12-island, 60-file C-scale systems repository (`uncapped_research`, `cogs_cap_usd = 0.0`,
 `stopping_criterion = 'crown-jewel'`):
   1. Subsystem Illumination @ 16 Explore Leases (`>= 0.80` vs `<= 0.55` / `<= 0.35`)
   2. Max Single-Island Explore Lease Share (`<= 0.35` vs `>= 0.45` / `>= 0.55`)
@@ -44,20 +44,20 @@ from ajar.hooks import evaluate_claude_stop_hook
 from ajar.store import KIND_SALIENCE_FLOORS, PRIORITY_BASE_SALIENCE, immediate_tx
 
 ISLAND_FILES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("isl:apply", ("apply.c", "apply-check.c", "apply-mbox.c", "apply-patch.c", "apply-symlink.c")),
-    ("isl:merge", ("merge.c", "merge-ort.c", "merge-recursive.c", "merge-blobs.c", "merge-index.c")),
-    ("isl:xdiff", ("xdiff.c", "xdiff-interface.c", "xdiff-merge.c", "xdiff-fast.c", "xdiff-histogram.c")),
-    ("isl:pack", ("pack.c", "pack-objects.c", "pack-bitmap.c", "pack-check.c", "pack-write.c")),
+    ("isl:unpack", ("unpack.c", "unpack-check.c", "unpack-tar.c", "unpack-patch.c", "unpack-links.c")),
+    ("isl:reconcile", ("reconcile.c", "reconcile-tree.c", "reconcile-threeway.c", "reconcile-blobs.c", "reconcile-index.c")),
+    ("isl:diffcore", ("diffcore.c", "diffcore-api.c", "diffcore-reconcile.c", "diffcore-fast.c", "diffcore-hist.c")),
+    ("isl:storage", ("storage.c", "storage-objects.c", "storage-bitmap.c", "storage-check.c", "storage-write.c")),
     (
-        "isl:transport",
-        ("transport.c", "transport-helper.c", "transport-internal.c", "transport-http.c", "transport-fd.c"),
+        "isl:channel",
+        ("channel.c", "channel-helper.c", "channel-internal.c", "channel-http.c", "channel-fd.c"),
     ),
-    ("isl:refs", ("refs.c", "refs-files.c", "refs-packed.c", "refs-iterator.c", "refs-cache.c")),
+    ("isl:indexdb", ("indexdb.c", "indexdb-files.c", "indexdb-packed.c", "indexdb-iter.c", "indexdb-cache.c")),
     ("isl:attr", ("attr.c", "attr-check.c", "attr-stack.c", "attr-macro.c", "attr-tree.c")),
-    ("isl:worktree", ("worktree.c", "worktree-add.c", "worktree-list.c", "worktree-lock.c", "worktree-prune.c")),
+    ("isl:sandbox", ("sandbox.c", "sandbox-add.c", "sandbox-list.c", "sandbox-lock.c", "sandbox-prune.c")),
     (
-        "isl:submodule",
-        ("submodule.c", "submodule-config.c", "submodule-cache.c", "submodule-init.c", "submodule-sync.c"),
+        "isl:manifest",
+        ("manifest.c", "manifest-config.c", "manifest-cache.c", "manifest-init.c", "manifest-sync.c"),
     ),
     (
         "isl:credential",
@@ -69,15 +69,15 @@ ISLAND_FILES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "credential-url.c",
         ),
     ),
-    ("isl:upload", ("upload.c", "upload-pack.c", "upload-archive.c", "upload-filter.c", "upload-v2.c")),
+    ("isl:ingest", ("ingest.c", "ingest-stream.c", "ingest-archive.c", "ingest-filter.c", "ingest-v2.c")),
     (
-        "isl:run_cmd",
+        "isl:procexec",
         (
-            "run_cmd/run-command.c",
-            "run_cmd/child-proc.c",
-            "run_cmd/hook-exec.c",
-            "run_cmd/async-pipe.c",
-            "run_cmd/spawn-env.c",
+            "procexec/proc-exec.c",
+            "procexec/child-proc.c",
+            "procexec/plugin-exec.c",
+            "procexec/async-pipe.c",
+            "procexec/spawn-env.c",
         ),
     ),
 )
@@ -584,16 +584,16 @@ def _build_base_template_db(base_dir: pathlib.Path, target_dir: pathlib.Path) ->
                         (f"sym-{sym_idx:03d}", rel, f"fn_{sym_idx}"),
                     )
 
-            # 2-hop structural call path: `submodule.c -> transport.c -> run_cmd/run-command.c`
+            # 2-hop structural call path: `manifest.c -> channel.c -> procexec/proc-exec.c`
             conn.execute(
                 """
                 INSERT INTO repomap_edges(src_file, dst_file, symbol, weight)
-                VALUES ('submodule.c', 'transport.c', 'transport_push_refspec', 4.8),
-                       ('transport.c', 'run_cmd/run-command.c', 'run_command', 4.8)
+                VALUES ('manifest.c', 'channel.c', 'channel_push_frame', 4.8),
+                       ('channel.c', 'procexec/proc-exec.c', 'run_command', 4.8)
                 """
             )
 
-            # Crown Jewel in `isl:run_cmd` + 3-tag conjunctive surface sink in `isl:pack`
+            # Crown Jewel in `isl:procexec` + 3-tag conjunctive surface sink in `isl:storage`
             conn.execute(
                 """
                 INSERT INTO crown_jewels(
@@ -601,7 +601,7 @@ def _build_base_template_db(base_dir: pathlib.Path, target_dir: pathlib.Path) ->
                     max_interaction_steps, require_default_config, forbid_visible_error,
                     status, created_at, updated_at
                 ) VALUES (
-                    'cjw-rce', 'Child Command Execution', 'run_cmd', 'run_cmd/run-command.c:42',
+                    'cjw-rce', 'Child Command Execution', 'procexec', 'procexec/proc-exec.c:42',
                     'rce', '["run_command", "cap:ExecHook"]', 1, 1, 1, 'locked', ?, ?
                 )
                 """,
@@ -612,10 +612,10 @@ def _build_base_template_db(base_dir: pathlib.Path, target_dir: pathlib.Path) ->
                 INSERT INTO surfaces(
                     surface_id, name, kind, subsystem, locus, priority, requires_tags_json, created_at
                 ) VALUES (
-                    'surf-conj', 'Conjunctive Pack Sink', 'cli', 'pack', 'pack-objects.c:80',
+                    'surf-conj', 'Conjunctive Storage Sink', 'cli', 'storage', 'storage-objects.c:80',
                     'critical', '["cap:hook_mode", "cap:path_norm", "cap:symlink_stage"]', ?
                 ), (
-                    'surf-apply', 'Apply Entry', 'cli', 'apply', 'apply.c:10', 'high', '[]', ?
+                    'surf-unpack', 'Unpack Entry', 'cli', 'unpack', 'unpack.c:10', 'high', '[]', ?
                 )
                 """,
                 (now, now),
@@ -628,28 +628,28 @@ def _build_base_template_db(base_dir: pathlib.Path, target_dir: pathlib.Path) ->
                     primitive_id, subsystem, locus, kind, role, symbols_json, preconditions, postconditions,
                     provides_tags_json, requires_tags_json, evidence_cmd, status, created_at
                 ) VALUES (
-                    'prim-decoy-0', 'apply', 'apply.c:4', 'input_frame', 'capability', '[]',
+                    'prim-decoy-0', 'unpack', 'unpack.c:4', 'input_frame', 'capability', '[]',
                     'patch header', 'emits raw path', '["cap:raw_hdr"]', '[]', 'true', 'active', '2026-11-23T00:00:01Z'
                 ), (
-                    'prim-decoy-1', 'apply', 'apply.c:12', 'path_fold', 'capability', '[]',
+                    'prim-decoy-1', 'unpack', 'unpack.c:12', 'path_fold', 'capability', '[]',
                     'cap:raw_hdr', 'partial path norm', '["cap:path_norm"]', '["cap:raw_hdr"]', 'true', 'active', '2026-11-23T00:00:02Z'
                 )
                 """
             )
 
-            # Forward Tips #1..#10: 10 unrelated source_root noise capabilities inside `isl:apply` / `isl:submodule`
+            # Forward Tips #1..#10: 10 unrelated source_root noise capabilities inside `isl:unpack` / `isl:manifest`
             # (pushing `prim-stage1` to index #11 > 8 while keeping greenfield islands unvisited at t=0!)
             noise_loci = (
-                "apply.c:18",
-                "apply-check.c:6",
-                "apply-mbox.c:6",
-                "apply-patch.c:6",
-                "apply-symlink.c:6",
-                "apply.c:26",
-                "apply-check.c:12",
-                "apply-mbox.c:12",
-                "submodule-config.c:8",
-                "submodule-cache.c:8",
+                "unpack.c:18",
+                "unpack-check.c:6",
+                "unpack-tar.c:6",
+                "unpack-patch.c:6",
+                "unpack-links.c:6",
+                "unpack.c:26",
+                "unpack-check.c:12",
+                "unpack-tar.c:12",
+                "manifest-config.c:8",
+                "manifest-cache.c:8",
             )
             for idx, nloc in enumerate(noise_loci, start=1):
                 conn.execute(
@@ -668,7 +668,7 @@ def _build_base_template_db(base_dir: pathlib.Path, target_dir: pathlib.Path) ->
                     ),
                 )
 
-            # Forward Tip #11 (past old `[:8]` slice!): `prim-stage1` in `isl:submodule` with materialized `snp-stage1`
+            # Forward Tip #11 (past old `[:8]` slice!): `prim-stage1` in `isl:manifest` with materialized `snp-stage1`
             conn.execute(
                 """
                 INSERT INTO repro_snapshots(
@@ -683,21 +683,21 @@ def _build_base_template_db(base_dir: pathlib.Path, target_dir: pathlib.Path) ->
                     primitive_id, subsystem, locus, kind, role, symbols_json, preconditions, postconditions,
                     provides_tags_json, requires_tags_json, snapshot_id, evidence_cmd, status, created_at
                 ) VALUES (
-                    'prim-stage1', 'submodule', 'submodule.c:18', 'config_inject', 'capability', '[]',
-                    'gitmodules url', 'injects alias state', '["cap:ConfigAlias"]', '[]',
+                    'prim-stage1', 'manifest', 'manifest.c:18', 'config_inject', 'capability', '[]',
+                    'manifest descriptor', 'injects alias state', '["cap:ConfigAlias"]', '[]',
                     'snp-stage1', 'true', 'active', '2026-11-23T00:02:00Z'
                 )
                 """
             )
 
-            # Backward Entries #1..#8 (inside `isl:run_cmd` ahead of `prim-stage3`, pushing `prim-stage3` to index >= 9 > 8!)
+            # Backward Entries #1..#8 (inside `isl:procexec` ahead of `prim-stage3`, pushing `prim-stage3` to index >= 9 > 8!)
             for bidx in range(1, 9):
                 conn.execute(
                     """
                     INSERT INTO primitives(
                         primitive_id, subsystem, locus, kind, role, symbols_json, preconditions, postconditions,
                         provides_tags_json, requires_tags_json, evidence_cmd, status, created_at
-                    ) VALUES (?, 'run_cmd', 'run_cmd/spawn-env.c:20', 'sink_gadget', 'trust_gadget', '["run_command"]',
+                    ) VALUES (?, 'procexec', 'procexec/spawn-env.c:20', 'sink_gadget', 'trust_gadget', '["run_command"]',
                               'multi-precond', 'calls run_command', '["cap:ExecHook"]', ?, 'true', 'active', ?)
                     """,
                     (
@@ -707,15 +707,15 @@ def _build_base_template_db(base_dir: pathlib.Path, target_dir: pathlib.Path) ->
                     ),
                 )
 
-            # Backward Entry #9 (past old `[:8]` slice!): true Stage-3 gadget in `isl:run_cmd` requiring 1 tag `cap:TransportHandoff`
+            # Backward Entry #9 (past old `[:8]` slice!): true Stage-3 gadget in `isl:procexec` requiring 1 tag `cap:ChannelHandoff`
             conn.execute(
                 """
                 INSERT INTO primitives(
                     primitive_id, subsystem, locus, kind, role, symbols_json, preconditions, postconditions,
                     provides_tags_json, requires_tags_json, evidence_cmd, status, created_at
                 ) VALUES (
-                    'prim-stage3', 'run_cmd', 'run_cmd/run-command.c:25', 'hook_handoff', 'trust_gadget', '["run_command"]',
-                    'cap:TransportHandoff', 'executes run_command', '["cap:ExecHook"]', '["cap:TransportHandoff"]',
+                    'prim-stage3', 'procexec', 'procexec/proc-exec.c:25', 'hook_handoff', 'trust_gadget', '["run_command"]',
+                    'cap:ChannelHandoff', 'executes run_command', '["cap:ExecHook"]', '["cap:ChannelHandoff"]',
                     'true', 'active', '2026-11-23T00:04:00Z'
                 )
                 """
@@ -735,15 +735,15 @@ def _rescore_legacy_arm(conn: sqlite3.Connection, *, arm: str) -> None:
             prio = str(r["priority"] or "high")
             loc = str(r["locus"] or "")
             if arm == "v3.3-sim":
-                # v3.3 had no root plateau throttle and no QD-Islands (`high` + unchained prim in apply = 68 > 60).
+                # v3.3 had no root plateau throttle and no QD-Islands (`high` + unchained prim in unpack = 68 > 60).
                 score = PRIORITY_BASE_SALIENCE.get(prio, 60)
-                if loc.startswith("apply"):
+                if loc.startswith("unpack"):
                     score += 8
             else:
                 # v3.4-base (`2944993`) has KIND_SALIENCE_FLOORS (`escalate` = 82) + file-only `compute_root_plateau_throttles`.
                 base_floor = KIND_SALIENCE_FLOORS.get(kind, 0)
                 score = max(PRIORITY_BASE_SALIENCE.get(prio, 60), base_floor)
-                if loc.startswith("apply"):
+                if loc.startswith("unpack"):
                     score += 8
                 rfile = loc.split(":", 1)[0].strip()
                 if rfile in throttles and throttles[rfile]["throttled"] and kind in ("investigate", "escalate"):
@@ -752,11 +752,11 @@ def _rescore_legacy_arm(conn: sqlite3.Connection, *, arm: str) -> None:
 
 
 def _seed_trial_tasks(conn: sqlite3.Connection, rng: random.Random) -> None:
-    """Seed Lease-1 `apply.c` root task plus 1 `high` greenfield `investigate` task per each of the 11 other islands."""
+    """Seed Lease-1 `unpack.c` root task plus 1 `high` greenfield `investigate` task per each of the 11 other islands."""
     now = "2026-11-23T00:05:00Z"
     other_tasks: list[tuple[str, str, str]] = []
     for isl, files in ISLAND_FILES:
-        if isl == "isl:apply":
+        if isl == "isl:unpack":
             continue
         other_tasks.append((isl, files[0], f"{files[0]}:10"))
     rng.shuffle(other_tasks)
@@ -768,8 +768,8 @@ def _seed_trial_tasks(conn: sqlite3.Connection, rng: random.Random) -> None:
                 task_id, surface_id, kind, direction, title, subsystem, locus,
                 priority, status, salience_score, created_at, updated_at
             ) VALUES (
-                'tsk-apply-00', 'surf-apply', 'investigate', 'outside_in',
-                'Audit apply.c root', 'apply', 'apply.c:10', 'critical', 'open', 80, ?, ?
+                'tsk-unpack-00', 'surf-unpack', 'investigate', 'outside_in',
+                'Audit unpack.c root', 'unpack', 'unpack.c:10', 'critical', 'open', 80, ?, ?
             )
             """,
             (now, now),
@@ -876,9 +876,9 @@ def _run_single_arm_trial(
                     "UPDATE tasks SET status = 'done', closed_epoch = ?, updated_at = ? WHERE task_id = ?",
                     (time.time() + step, step_ts, leased_tid),
                 )
-                if leased_tid == "tsk-apply-00":
-                    # Adversarial Mode-Collapse Trap (`git-wave1a`): Lease 1 yields a `medium` `stepping_stone` finding
-                    # on `apply.c` and enqueues 12 derivative `escalate` tasks (4 on `apply.c` + 8 across sibling `apply-*.c`).
+                if leased_tid == "tsk-unpack-00":
+                    # Adversarial Mode-Collapse Trap (`78.8h C systems campaign`): Lease 1 yields a `medium` `stepping_stone` finding
+                    # on `unpack.c` and enqueues 12 derivative `escalate` tasks (4 on `unpack.c` + 8 across sibling `unpack-*.c`).
                     conn.execute(
                         """
                         INSERT INTO claims(
@@ -886,7 +886,7 @@ def _run_single_arm_trial(
                             mechanism, mechanism_key, severity, falsification_prediction, falsification_test,
                             status, research_state, evidence_state, created_at, updated_at
                         ) VALUES (
-                            'clm-apply-step', 'w1', 'w2', 'Apply stepping stone', 'apply', 'apply.c:10',
+                            'clm-unpack-step', 'w1', 'w2', 'Unpack stepping stone', 'unpack', 'unpack.c:10',
                             'm', 'm', 'medium', 'pred', 'true', 'reproduced', 'confirmed', 'reproduced',
                             '2026-11-23T01:00:01Z', '2026-11-23T01:00:01Z'
                         )
@@ -899,29 +899,29 @@ def _run_single_arm_trial(
                             arm1_clean_poc_json, arm2_clean_ctrl_json, arm3_patch_poc_json, arm4_patch_ctrl_json,
                             realism_tier, attribution, created_at
                         ) VALUES (
-                            'fnd-apply-step', 'clm-apply-step', 'Apply stepping stone', 'medium', 'apply.c:10',
+                            'fnd-unpack-step', 'clm-unpack-step', 'Unpack stepping stone', 'medium', 'unpack.c:10',
                             'm', 'true', 'true', '{}', '{}', '{}', '{}',
                             'stepping_stone', 'found_autonomously_by_ajar', '2026-11-23T01:00:01Z'
                         )
                         """
                     )
                     deriv_loci = (
-                        "apply.c:20",
-                        "apply.c:30",
-                        "apply.c:40",
-                        "apply.c:50",
-                        "apply.c:60",
-                        "apply.c:70",
-                        "apply.c:80",
-                        "apply.c:90",
-                        "apply-check.c:15",
-                        "apply-check.c:35",
-                        "apply-mbox.c:15",
-                        "apply-mbox.c:35",
-                        "apply-patch.c:15",
-                        "apply-patch.c:35",
-                        "apply-symlink.c:15",
-                        "apply-symlink.c:35",
+                        "unpack.c:20",
+                        "unpack.c:30",
+                        "unpack.c:40",
+                        "unpack.c:50",
+                        "unpack.c:60",
+                        "unpack.c:70",
+                        "unpack.c:80",
+                        "unpack.c:90",
+                        "unpack-check.c:15",
+                        "unpack-check.c:35",
+                        "unpack-tar.c:15",
+                        "unpack-tar.c:35",
+                        "unpack-patch.c:15",
+                        "unpack-patch.c:35",
+                        "unpack-links.c:15",
+                        "unpack-links.c:35",
                     )
                     for didx, dloc in enumerate(deriv_loci, start=1):
                         conn.execute(
@@ -929,21 +929,21 @@ def _run_single_arm_trial(
                             INSERT INTO tasks(
                                 task_id, kind, direction, title, subsystem, locus,
                                 priority, status, salience_score, created_at, updated_at
-                            ) VALUES (?, 'escalate', 'outside_in', ?, 'apply', ?, 'high', 'open', 82, ?, ?)
+                            ) VALUES (?, 'escalate', 'outside_in', ?, 'unpack', ?, 'high', 'open', 82, ?, ?)
                             """,
-                            (f"tsk-apply-esc-{didx:02d}", f"Corroborate {dloc}", dloc, step_ts, step_ts),
+                            (f"tsk-unpack-esc-{didx:02d}", f"Corroborate {dloc}", dloc, step_ts, step_ts),
                         )
 
-                # When `transport.c:10` is explored, the middle link `prim-stage2` (`cap:ConfigAlias -> cap:TransportHandoff`) lands!
-                if leased_loc == "transport.c:10" and not percolated_jewel:
+                # When `channel.c:10` is explored, the middle link `prim-stage2` (`cap:ConfigAlias -> cap:ChannelHandoff`) lands!
+                if leased_loc == "channel.c:10" and not percolated_jewel:
                     conn.execute(
                         """
                         INSERT INTO primitives(
                             primitive_id, subsystem, locus, kind, role, symbols_json, preconditions, postconditions,
                             provides_tags_json, requires_tags_json, evidence_cmd, status, created_at
                         ) VALUES (
-                            'prim-stage2', 'transport', 'transport.c:10', 'protocol_handoff', 'capability', '[]',
-                            'cap:ConfigAlias', 'emits cap:TransportHandoff', '["cap:TransportHandoff"]', '["cap:ConfigAlias"]',
+                            'prim-stage2', 'channel', 'channel.c:10', 'protocol_handoff', 'capability', '[]',
+                            'cap:ConfigAlias', 'emits cap:ChannelHandoff', '["cap:ChannelHandoff"]', '["cap:ConfigAlias"]',
                             'true', 'active', ?
                         )
                         """,
@@ -964,11 +964,11 @@ def _run_single_arm_trial(
 
         # 3. 25-Event Bureaucratic Churn Burst: compare `max_ev > prev_ev` vs Grounded Lyapunov `Phi(t)`.
         churn_actions: Sequence[tuple[str, str, dict[str, Any]]] = (
-            ("finding_calibrated", "fnd-apply-step", {"new_severity": "low"}),
+            ("finding_calibrated", "fnd-unpack-step", {"new_severity": "low"}),
             ("lead_vote_cast", "vot-b", {"ev_score": 77.0}),
-            ("task_leased", "tsk-apply-00", {"kind": "investigate"}),
-            ("task_checkpointed", "tsk-apply-00", {"progress": "reading"}),
-            ("claim_repro_failed", "clm-apply-step", {"failed_repro_count": 1}),
+            ("task_leased", "tsk-unpack-00", {"kind": "investigate"}),
+            ("task_checkpointed", "tsk-unpack-00", {"progress": "reading"}),
+            ("claim_repro_failed", "clm-unpack-step", {"failed_repro_count": 1}),
             ("chain_proposed", "chn-bad", {"verified": False, "steps": ["prim-decoy-0"]}),
         )
         false_resets = 0
@@ -1030,7 +1030,7 @@ def run_wave_c_benchmark(trials: int = 20) -> dict[str, dict[str, float]]:
 
     with tempfile.TemporaryDirectory(prefix="ajar-wave-c-bench-") as td:
         base = pathlib.Path(td)
-        target_dir = base / "git-sim"
+        target_dir = base / "sys-sim"
         target_dir.mkdir(parents=True, exist_ok=True)
         for _isl, files in ISLAND_FILES:
             for rel in files:

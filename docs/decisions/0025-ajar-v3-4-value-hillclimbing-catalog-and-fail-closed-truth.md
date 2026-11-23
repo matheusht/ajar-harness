@@ -3,10 +3,11 @@
 - **Status:** Accepted (Active)
 - **Date:** 2026-11-23
 - **Builds On:** [ADR-0022](0022-ajar-v3-3-reactive-open-doors-and-phase-split.md), [ADR-0023](0023-agent-friendly-layered-architecture-and-dst.md), [ADR-0024](0024-modular-dag-zero-cycles-and-swarm-resilience.md)
+- **Related Guide:** [Campaign Ladder & Horizon Roadmap](../campaigns-and-roadmap.md)
 
 ## Context
 
-Forensic analysis of Ajar's 78.8-hour (`348.7` strict agent-hour, `355`-session) source campaign on upstream Git exposed five structural harness bottlenecks:
+Forensic analysis of Ajar's 78.8h C systems campaign (`348.7` strict agent-hours, `355` sessions) exposed seven structural harness bottlenecks:
 
 1. **Compute Misallocation & Discovery Stall:** Over `40%` of swarm compute went into ledger/package churn and premature multi-version production patch iterations (`PatchV1..V6`) while greenfield discovery received `< 5%` of compute and stalled after the first hour. `compute_task_salience` accidentally dropped `KIND_SALIENCE_FLOORS` when recomputing salience, `portfolio` claim dispatch sorted FIFO instead of by severity, and `ajar phase advance` permitted entering `remediate` before `G5` chain convergence finished.
 2. **Disconnected Composable Pieces:** Capabilities, normal-code `trust_gadget` transitions, config-gated claims, unexplained anomalies, and Open Doors lived in separate tables without a unified search or backward sink-to-source call-cone slicer (`callee <- caller`) to surface indirect sinks (`Upload2Shell`-style write-to-loader bridges) and unvisited upstream callers.
@@ -18,10 +19,11 @@ Forensic analysis of Ajar's 78.8-hour (`348.7` strict agent-hour, `355`-session)
 
 ## Decision
 
-1. **Multi-Agent Expected-Value Lead Voting, Per-Root Plateau Breaker, & Phase Gate (`ajar lead`, `ajar phase`, `ajar map --unvisited`):**
+1. **Multi-Agent Expected-Value Lead Voting, Per-Root Plateau Breaker, Hard `hunt`-Phase Patch Firewall, & Frictionless `ajar init` Quote UX (`ajar lead`, `ajar phase`, `ajar init`, `ajar map --unvisited`):**
    - Add `lead_votes` (`LeadTargetKind`, `ajar lead {vote,rank,throttles}`, MCP `ajar_lead_vote` / `ajar_lead_rank`) computing `compute_lead_ev_formula` (`1..10` impact, plausibility, chainability, effort + multi-worker quorum bonus) and feeding consensus EV (`-15..+15`) directly into `compute_task_salience`.
    - Restore `KIND_SALIENCE_FLOORS` (`chain=75`, `reproduce=72`, `falsify=70`, `bridge=68`) in `compute_task_salience`, penalize post-reproduction non-chain churn on already-reproduced files via `compute_root_plateau_throttles` (`-35` after `>= 2` closed post-repro tasks unless a `ready` Open Door or `crown_jewel` is active), sort `portfolio` claims by severity, and add `ajar map --unvisited` (`scout_coverage_pct`, `unvisited_slices`).
-   - Gate `ajar phase advance --to remediate|full` on `G5_anomalies_and_chains` (`0` unexplained anomalies, `0` unwaived `ready` doors, `0` nonterminal high-salience chains) and `0` open/leased `critical` hunt/chain/verify tasks unless `--force --notes <reason>` records an explicit operator `scope_authority` touch.
+   - Hard-fail `ajar patch verify` (and MCP `ajar_patch_verify`) plus `ajar swarm brief` on `kind='patch'` with `EXIT_GATE_BLOCKED` while `campaign_phase == 'hunt'`, and gate `ajar phase advance --to remediate|full` on `G5_anomalies_and_chains` (`0` unexplained anomalies, `0` unwaived `ready` doors, `0` nonterminal high-salience chains) and `0` open/leased `critical` hunt/chain/verify tasks unless `--force --notes <reason>` records an explicit operator `scope_authority` touch.
+   - Add `--max-spend <usd>`, `--warn-above-usd <usd>` (`25.0` default), and `--yes` to `ajar init` so runs start in a single command with inline quote estimation, automatic COGS cap clamping, and non-blocking budget notices.
 2. **Unified Issue & Gadget Catalog, Backward Sink Slicing, & Modular Backup-Slot Chains (`ajar/catalog.py`, `ajar chain propose --backup-step`):**
    - Add `ajar/catalog.py` (`ajar catalog {search,backslice}`, MCP `ajar_catalog_search` / `ajar_catalog_backslice`) indexing findings, capabilities, `trust_gadget` transitions, candidate claims, anomalies, and Open Doors, synthesizing 1-hop composable pairs and walking `repomap_edges` backward (`callee <- caller`) up to `6` hops from any Crown Jewel, Open Door, locus, or symbol while highlighting `unvisited_caller_files`.
    - Keep `surfaces` active alongside `crown_jewels` in `compute_chain_frontier` and rank 1-link `crown_jewel` `unicorn_gaps` first.

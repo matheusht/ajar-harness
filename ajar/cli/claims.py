@@ -251,6 +251,7 @@ def cmd_claim(args: argparse.Namespace) -> int:
                     warm_cross_kill_claims=siblings,
                     claim_locus=str(clm["locus"]),
                     shared_guard_locus=str(getattr(args, "shared_guard_locus", None) or ""),
+                    max_changed_lines=int(getattr(args, "max_changed_lines", 16) or 16),
                     release_cmd=rel_cmd,
                     release_control_cmd=rel_ctrl_cmd,
                     surface_kind=surf_kind,
@@ -296,18 +297,20 @@ def cmd_claim(args: argparse.Namespace) -> int:
 
             if not res["passed"]:
                 err_cls = str(res.get("error_class") or "target_negative")
+                poc_proven = bool(res.get("poc_proven", False))
                 if str(clm["status"]) == "reproduced":
                     log_event(
                         conn,
                         args.worker,
                         "claim_repro_rerun_failed_preserved",
                         args.claim_id,
-                        {"error_class": err_cls, "reason": str(res.get("reason", ""))[:200]},
+                        {"error_class": err_cls, "poc_proven": poc_proven, "reason": str(res.get("reason", ""))[:200]},
                     )
                     pivot = {
                         "claim_id": args.claim_id,
                         "status": "reproduced",
                         "error_class": err_cls,
+                        "poc_proven": poc_proven,
                         "strike_recorded": False,
                         "failed_repro_count": int(clm["failed_repro_count"] or 0),
                         "pivoted_to_instrumentation": False,
@@ -320,18 +323,20 @@ def cmd_claim(args: argparse.Namespace) -> int:
                         observation_hash=str(res.get("observation_hash", "")),
                         reason=str(res.get("reason", "")),
                     )
+                    pivot["poc_proven"] = poc_proven
                 else:
                     log_event(
                         conn,
                         args.worker,
                         "claim_repro_non_strike_error",
                         args.claim_id,
-                        {"error_class": err_cls, "reason": str(res.get("reason", ""))[:200]},
+                        {"error_class": err_cls, "poc_proven": poc_proven, "reason": str(res.get("reason", ""))[:200]},
                     )
                     pivot = {
                         "claim_id": args.claim_id,
                         "status": str(clm["status"]),
                         "error_class": err_cls,
+                        "poc_proven": poc_proven,
                         "strike_recorded": False,
                         "failed_repro_count": int(clm["failed_repro_count"] or 0),
                         "pivoted_to_instrumentation": False,
@@ -384,6 +389,7 @@ def cmd_chain(args: argparse.Namespace) -> int:
                 snapshot_id=args.from_snapshot,
                 cmd=args.cmd,
                 patch_path=patch_p,
+                build_cmd=str(getattr(args, "build_cmd", None) or ""),
                 oracle=oracle_dict,
                 timeout_sec=int(getattr(args, "timeout", 60)),
                 worker_id=str(getattr(args, "worker", "worker")),

@@ -132,6 +132,7 @@ class EnvBlockerKind(StrEnum):
 class ReproOutcome(StrEnum):
     CONFIRMED = "confirmed"
     TARGET_NEGATIVE = "target_negative"
+    MICROPATCH_ERROR = "micropatch_error"
     PREFLIGHT_ERROR = "preflight_error"
     BUILD_OR_ENV_ERROR = "build_or_env_error"
 

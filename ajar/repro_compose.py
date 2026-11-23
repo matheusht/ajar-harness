@@ -861,6 +861,7 @@ def run_snapshot_chain_probe(
     snapshot_id: str,
     cmd: str,
     patch_path: pathlib.Path | None = None,
+    build_cmd: str = "",
     oracle: dict[str, Any] | None = None,
     timeout_sec: int = 60,
     worker_id: str = "worker",
@@ -895,6 +896,7 @@ def run_snapshot_chain_probe(
     watermark_file = cache_dir / "watermark_ns"
     touched: list[str] = []
     extracted_paths: list[str] = []
+    build_res: dict[str, Any] | None = None
 
     try:
         _prepare_slot_worktree(mirror_dir, slot_dir)
@@ -953,6 +955,20 @@ def run_snapshot_chain_probe(
             _neutralize_python_pth_escapes(slot_dir)
             _bump_files_mtime(slot_dir, touched, watermark_file)
 
+        if build_cmd.strip():
+            build_res = _run_shell_in_slot(
+                build_cmd.strip(),
+                slot_dir=slot_dir,
+                cache_dir=cache_dir,
+                timeout_sec=max(int(timeout_sec), 180),
+                helpers_dir=helpers_dir,
+            )
+            if build_res["exit_code"] != 0 or build_res["timed_out"]:
+                raise AjarError(
+                    f"`ajar chain probe` --build-cmd failed (exit={build_res['exit_code']}): {scrub_text(str(build_res.get('stderr', ''))[:240])}",
+                    EXIT_USER_ERROR,
+                )
+
         res = _run_shell_in_slot(
             cmd,
             slot_dir=slot_dir,
@@ -981,13 +997,16 @@ def run_snapshot_chain_probe(
         snapshot_id,
         {"slot_index": slot_idx, "exit_code": res["exit_code"], "defect_fired": fired},
     )
-    return {
+    out: dict[str, Any] = {
         "snapshot_id": snapshot_id,
         "slot_index": slot_idx,
         "rel_dir": str(srow["rel_dir"]),
         "defect_fired": fired,
         "probe": res,
     }
+    if build_res is not None:
+        out["build"] = build_res
+    return out
 
 
 def run_claim_instrumentation(

@@ -719,6 +719,7 @@ def _ensure_v32_schema(conn: sqlite3.Connection) -> None:
     )
 
     # Upgrade legacy CHECK constraints on `tasks.kind` (`'escalate'`) and `claims.status` (`'config_gated'`) if needed.
+    conn.execute("PRAGMA legacy_alter_table=ON")
     tasks_ddl = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").fetchone()
     if tasks_ddl and "'escalate'" not in str(tasks_ddl[0] or ""):
         cols = [r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()]
@@ -734,7 +735,7 @@ def _ensure_v32_schema(conn: sqlite3.Connection) -> None:
                 parent_claim_id TEXT,
                 surface_id TEXT,
                 kind TEXT NOT NULL
-                    CHECK(kind IN ('map', 'investigate', 'falsify', 'reproduce', 'instrument', 'chain', 'patch', 'escalate')),
+                    CHECK(kind IN ('map', 'investigate', 'bridge', 'falsify', 'reproduce', 'instrument', 'chain', 'patch', 'escalate')),
                 direction TEXT NOT NULL DEFAULT 'outside_in'
                     CHECK(direction IN ('outside_in', 'inside_out', 'native_ffi', 'peer_symmetry')),
                 title TEXT NOT NULL,
@@ -758,6 +759,7 @@ def _ensure_v32_schema(conn: sqlite3.Connection) -> None:
                 slice_loc INTEGER NOT NULL DEFAULT 0,
                 checkpoint_json TEXT NOT NULL DEFAULT '{{}}',
                 diff_state TEXT NOT NULL DEFAULT '',
+                door_id TEXT NOT NULL DEFAULT '',
                 summary TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
@@ -821,8 +823,9 @@ def _ensure_v32_schema(conn: sqlite3.Connection) -> None:
                 customer_state TEXT NOT NULL DEFAULT 'pending'
                     CHECK(customer_state IN ('pending', 'accepted', 'disputed')),
                 remediation_state TEXT NOT NULL DEFAULT 'unpatched'
-                    CHECK(remediation_state IN ('unpatched', 'micropatched', 'maintainer_patched')),
+                    CHECK(remediation_state IN ('unpatched', 'micropatched', 'verified_local', 'maintainer_patched')),
                 duplicate_of_claim_id TEXT,
+                env_blocker TEXT NOT NULL DEFAULT '',
                 blocker_reason TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
@@ -834,6 +837,7 @@ def _ensure_v32_schema(conn: sqlite3.Connection) -> None:
             """
         )
         conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA legacy_alter_table=OFF")
 
 
 def _ensure_v322_schema(conn: sqlite3.Connection) -> None:
@@ -869,6 +873,8 @@ def _ensure_v33_schema(conn: sqlite3.Connection) -> None:
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
     if not tables:
         return
+
+    conn.execute("PRAGMA legacy_alter_table=ON")
 
     # 1. Rebuild `runs` if `crown-jewel` or `campaign_phase` is absent from DDL.
     runs_ddl = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='runs'").fetchone()
@@ -1188,3 +1194,4 @@ def _ensure_v33_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_doors_status ON parked_doors(status, subsystem);
         """
     )
+    conn.execute("PRAGMA legacy_alter_table=OFF")

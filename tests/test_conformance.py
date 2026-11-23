@@ -193,6 +193,7 @@ class TestConformance(unittest.TestCase):
             REPO_ROOT / "docs" / "decisions" / "0022-ajar-v3-3-reactive-open-doors-and-phase-split.md",
             REPO_ROOT / "docs" / "decisions" / "0023-agent-friendly-layered-architecture-and-dst.md",
             REPO_ROOT / "docs" / "decisions" / "0024-modular-dag-zero-cycles-and-swarm-resilience.md",
+            REPO_ROOT / "docs" / "decisions" / "0025-ajar-v3-4-value-hillclimbing-catalog-and-fail-closed-truth.md",
             REPO_ROOT / "docs" / "engineering" / "AGENTS.md",
         ]
         md_files.extend(sorted((REPO_ROOT / "skills").rglob("*.md")))

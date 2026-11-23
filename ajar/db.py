@@ -59,6 +59,9 @@ from ajar.store.util import (
     _assert_no_symlink_components as _assert_no_symlink_components,
 )
 from ajar.store.util import (
+    apply_latest_finding_corrections as apply_latest_finding_corrections,
+)
+from ajar.store.util import (
     compute_commitment_hash as compute_commitment_hash,
 )
 from ajar.store.util import (

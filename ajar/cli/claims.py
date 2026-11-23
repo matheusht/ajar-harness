@@ -19,6 +19,7 @@ from ajar.chain_planner import (
 from ajar.cli.common import _emit
 from ajar.db import (
     AjarError,
+    apply_latest_finding_corrections,
     calibrate_finding,
     list_rows,
     log_event,
@@ -575,14 +576,17 @@ def cmd_finding(args: argparse.Namespace) -> int:
             _emit(res, True)
             return EXIT_OK
 
-        rows = list_rows(
+        rows = apply_latest_finding_corrections(
             conn,
-            """
-            SELECT f.*, c.remediation_state
-            FROM findings f
-            JOIN claims c ON f.claim_id = c.claim_id
-            ORDER BY f.created_at ASC
-            """,
+            list_rows(
+                conn,
+                """
+                SELECT f.*, c.remediation_state
+                FROM findings f
+                JOIN claims c ON f.claim_id = c.claim_id
+                ORDER BY f.created_at ASC
+                """,
+            ),
         )
         _emit({"findings": rows}, True)
         return EXIT_OK

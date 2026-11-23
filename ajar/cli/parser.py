@@ -32,7 +32,9 @@ from ajar.cli.hunt import (
 )
 from ajar.cli.ops import (
     cmd_brief,
+    cmd_bundle,
     cmd_catalog,
+    cmd_close,
     cmd_context,
     cmd_doctor,
     cmd_economics,
@@ -943,6 +945,34 @@ def build_parser() -> argparse.ArgumentParser:
     pct_b.add_argument("--limit", type=int, default=20)
     pct_b.add_argument("--run")
     p_cat.set_defaults(func=cmd_catalog)
+
+    # close (Explicit operator non-gate closeout without split-brain stop_reason)
+    p_cls = sub.add_parser(
+        "close",
+        help="Explicitly close a run stopped by operator or window without claiming `all_gates_passed`.",
+    )
+    p_cls.add_argument(
+        "--reason",
+        choices=("stopped_by_operator", "window_reached", "superseded"),
+        required=True,
+    )
+    p_cls.add_argument("--notes", required=True, help="Explicit explanation recorded in `human_touches` and `events`.")
+    p_cls.add_argument("--actor", default="operator")
+    p_cls.add_argument("--run")
+    p_cls.set_defaults(func=cmd_close)
+
+    # bundle (Atomic symlink-safe disclosure/deliverable sealer & verifier)
+    p_bnd = sub.add_parser(
+        "bundle",
+        help="Atomically seal or verify a self-contained deliverable directory (`BUNDLE-MANIFEST.json` + `SEAL.sha256`).",
+    )
+    bnd_sub = p_bnd.add_subparsers(dest="bundle_cmd", required=True)
+    pbnd_s = bnd_sub.add_parser("seal", help="Reject symlinks/secrets/local-paths, check writer stability, and emit `BUNDLE-MANIFEST.json` + `SEAL.sha256`.")
+    pbnd_s.add_argument("bundle_dir")
+    pbnd_s.add_argument("--allow-local-paths", action="store_true", help="Allow local absolute paths when sealing internal-only scratch bundles.")
+    pbnd_v = bnd_sub.add_parser("verify", help="Verify `BUNDLE-MANIFEST.json` and `SEAL.sha256` against on-disk regular files.")
+    pbnd_v.add_argument("bundle_dir")
+    p_bnd.set_defaults(func=cmd_bundle)
 
     return p
 

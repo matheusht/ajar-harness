@@ -25,6 +25,7 @@ from ajar.db import (
     AjarError,
     add_steer,
     add_threat_assumption,
+    compute_harness_code_sha256,
     compute_root_plateau_throttles,
     list_rows,
     list_steers,
@@ -60,11 +61,14 @@ from ajar.services import (
     advance_phase,
     build_commit_preimage,
     cast_lead_vote,
+    close_run_early,
     export_run_economics,
     finish_run,
     rank_leads,
     record_human_touch,
     record_spend_entry,
+    seal_bundle,
+    verify_bundle,
     write_restricted_json,
 )
 from ajar.swarm import (
@@ -105,7 +109,7 @@ def _diagnose_run_health(run_id: str, *, prune_slots: bool = False) -> dict[str,
         quick_check_ok = qc_rows == ["ok"]
         ver_row = conn.execute("PRAGMA user_version;").fetchone()
         schema_version = int(ver_row[0]) if ver_row is not None else 0
-        run_row = conn.execute("SELECT status, campaign_phase FROM runs LIMIT 1").fetchone()
+        run_row = conn.execute("SELECT status, campaign_phase, harness_sha256 FROM runs LIMIT 1").fetchone()
         open_tasks = int(conn.execute("SELECT COUNT(*) AS c FROM tasks WHERE status = 'open'").fetchone()["c"])
         leased_tasks = int(conn.execute("SELECT COUNT(*) AS c FROM tasks WHERE status = 'leased'").fetchone()["c"])
         now_ep = time.time()
@@ -117,6 +121,10 @@ def _diagnose_run_health(run_id: str, *, prune_slots: bool = False) -> dict[str,
         )
     finally:
         conn.close()
+
+    rec_harness_sha = str(run_row["harness_sha256"] or "").strip() if run_row and "harness_sha256" in run_row.keys() else ""
+    cur_harness_sha = compute_harness_code_sha256()
+    harness_modified_mid_run = bool(rec_harness_sha and rec_harness_sha != cur_harness_sha)
 
     repro_dir = rdir / "repro"
     slots_info: list[dict[str, Any]] = []
@@ -172,6 +180,9 @@ def _diagnose_run_health(run_id: str, *, prune_slots: bool = False) -> dict[str,
         "schema_version": schema_version,
         "run_status": str(run_row["status"]) if run_row else "unknown",
         "campaign_phase": str(run_row["campaign_phase"]) if run_row else "unknown",
+        "recorded_harness_sha256": rec_harness_sha,
+        "current_harness_sha256": cur_harness_sha,
+        "harness_modified_mid_run": harness_modified_mid_run,
         "open_tasks": open_tasks,
         "leased_tasks": leased_tasks,
         "stale_leases": stale_leases,
@@ -945,5 +956,49 @@ def cmd_catalog(args: argparse.Namespace) -> int:
         return EXIT_OK
     finally:
         conn.close()
+
+
+def cmd_close(args: argparse.Namespace) -> int:
+    rid = resolve_run_id(args.run)
+    rdir = run_dir_for(rid)
+    conn = open_run_db(rid)
+    try:
+        run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
+        tpath = pathlib.Path(run["target_path"]) if run else None
+        res = close_run_early(
+            conn,
+            run_id=rid,
+            stop_reason=args.reason,
+            notes=args.notes,
+            target_dir=tpath,
+            actor=args.actor,
+        )
+        md = render_markdown_report(conn)
+        js = build_report_data(conn, include_rejected_appendix=True)
+    finally:
+        conn.close()
+
+    art_dir = rdir / "artifacts"
+    art_dir.mkdir(parents=True, exist_ok=True)
+    (art_dir / "report.md").write_text(md, encoding="utf-8")
+    (art_dir / "report.json").write_text(json.dumps(js, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    res["report_markdown_path"] = str(art_dir / "report.md")
+    res["report_json_path"] = str(art_dir / "report.json")
+    mirror_info = sync_run_to_shared_mirror(rid)
+    if mirror_info is not None:
+        res["shared_mirror_dir"] = mirror_info["mirror_dir"]
+    _emit(res, True)
+    return EXIT_OK
+
+
+def cmd_bundle(args: argparse.Namespace) -> int:
+    if args.bundle_cmd == "seal":
+        res = seal_bundle(args.bundle_dir, allow_local_paths=bool(args.allow_local_paths))
+        _emit(res, True)
+        return EXIT_OK
+    res = verify_bundle(args.bundle_dir)
+    _emit(res, True)
+    return EXIT_OK if res["verified"] else EXIT_GATE_BLOCKED
+
 
 

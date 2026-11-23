@@ -1020,6 +1020,8 @@ BUILD_OR_ENV_ERROR_RE = re.compile(
     r"|error\[E0463\]:\s*can't find crate"
     r"|collect2:\s*error:\s*ld returned"
     r"|clang(?:\+\+)?:\s*error:\s*linker command failed"
+    r"|\b(?:gcc|clang|cc|g\+\+|clang\+\+|rustc|javac):\s*(?:fatal\s+)?error:"
+    r"|\b(?:SyntaxError|IndentationError|TabError|ModuleNotFoundError):\s*\S+"
     r"|CMake Error"
     r")",
     re.IGNORECASE,

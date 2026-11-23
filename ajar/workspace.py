@@ -22,6 +22,7 @@ from ajar import EXIT_GATE_BLOCKED, EXIT_USER_ERROR
 from ajar.db import (
     AjarError,
     compute_commitment_hash,
+    compute_harness_code_sha256,
     get_ajar_home,
     log_event,
     new_id,
@@ -305,6 +306,7 @@ def init_run_workspace(
     created_at = utc_now_iso()
     clean_goal = scrub_text(goal)
     commit_hash = compute_commitment_hash(target_sha, clean_goal, stopping_criterion, created_at)
+    harness_sha = compute_harness_code_sha256()
 
     diff_sync_summary: dict[str, Any] | None = None
     conn = open_run_db(rid, create=True, ajar_home=home)
@@ -316,8 +318,8 @@ def init_run_workspace(
                 INSERT INTO runs(
                     run_id, target_path, workspace_path, target_mode, workspace_mode,
                     goal, stopping_criterion, campaign_phase, budget_usd, in_scope_loc, code_quote_usd,
-                    cogs_cap_usd, pricing_mode, commitment_hash, status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+                    cogs_cap_usd, pricing_mode, commitment_hash, harness_sha256, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
                 """,
                 (
                     rid,
@@ -334,6 +336,7 @@ def init_run_workspace(
                     eff_cogs_cap,
                     pricing_mode,
                     commit_hash,
+                    harness_sha,
                     created_at,
                 ),
             )
@@ -406,6 +409,7 @@ def init_run_workspace(
                 "diff_range": (diff_range or "").strip(),
                 "parent_run_id": (parent_run_id or "").strip(),
                 "commitment_hash": commit_hash,
+                "harness_sha256": harness_sha,
             },
         )
     finally:
@@ -430,6 +434,7 @@ def init_run_workspace(
         "budget_usd": eff_cogs_cap,
         "brief_path": brief_saved_path,
         "commitment_hash": commit_hash,
+        "harness_sha256": harness_sha,
         "repomap": map_summary,
         "indexed_docs": oracle_counts,
     }

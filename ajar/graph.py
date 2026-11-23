@@ -27,7 +27,7 @@ from ajar.db import list_rows, list_steers
 from ajar.domain.models import AjarError
 from ajar.gates import check_all_gates
 from ajar.redact import scrub_json_value, scrub_text, scrubbed_subprocess_env
-from ajar.store import infer_subsystem, parse_tag_list
+from ajar.store import apply_latest_finding_corrections, infer_subsystem, parse_tag_list
 
 VALID_GRAPH_SCHEMAS: tuple[str, ...] = ("v1", "v2")
 VALID_GRAPH_VISIBILITIES: tuple[str, ...] = (
@@ -333,14 +333,18 @@ def _export_v1_graph(
     surfaces = list_rows(conn, "SELECT * FROM surfaces ORDER BY priority ASC, surface_id ASC")
     primitives = list_rows(conn, "SELECT * FROM primitives ORDER BY primitive_id ASC")
     anomalies = list_rows(conn, "SELECT * FROM anomalies ORDER BY anomaly_id ASC")
-    findings = list_rows(
+    findings = apply_latest_finding_corrections(
         conn,
-        """
-        SELECT f.*, c.surface_id, c.remediation_state
-        FROM findings f
-        JOIN claims c ON f.claim_id = c.claim_id
-        ORDER BY f.finding_id ASC
-        """,
+        list_rows(
+            conn,
+            """
+            SELECT f.*, c.surface_id, c.remediation_state
+            FROM findings f
+            JOIN claims c ON f.claim_id = c.claim_id
+            ORDER BY f.finding_id ASC
+            """,
+        ),
+        preserve_order=True,
     )
     chains = list_rows(conn, "SELECT * FROM chains ORDER BY chain_id ASC")
     dry_tasks = list_rows(
@@ -637,15 +641,19 @@ def _export_v2_graph(
     surfaces = list_rows(conn, "SELECT * FROM surfaces ORDER BY priority ASC, surface_id ASC")
     primitives = list_rows(conn, "SELECT * FROM primitives ORDER BY primitive_id ASC")
     anomalies = list_rows(conn, "SELECT * FROM anomalies ORDER BY anomaly_id ASC")
-    findings = list_rows(
+    findings = apply_latest_finding_corrections(
         conn,
-        """
-        SELECT f.*, c.surface_id, c.proposer_worker_id, c.falsifier_worker_id,
-               c.customer_state, c.remediation_state
-        FROM findings f
-        JOIN claims c ON f.claim_id = c.claim_id
-        ORDER BY f.finding_id ASC
-        """,
+        list_rows(
+            conn,
+            """
+            SELECT f.*, c.surface_id, c.proposer_worker_id, c.falsifier_worker_id,
+                   c.customer_state, c.remediation_state
+            FROM findings f
+            JOIN claims c ON f.claim_id = c.claim_id
+            ORDER BY f.finding_id ASC
+            """,
+        ),
+        preserve_order=True,
     )
     chains = list_rows(conn, "SELECT * FROM chains ORDER BY chain_id ASC")
     crown_jewels = list_rows(conn, "SELECT * FROM crown_jewels ORDER BY created_at ASC, jewel_id ASC")

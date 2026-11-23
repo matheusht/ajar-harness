@@ -3,6 +3,8 @@
 from ajar.services.proof import (
     build_commit_preimage,
     export_run_economics,
+    seal_bundle,
+    verify_bundle,
     verify_commit_preimage,
     write_restricted_json,
 )
@@ -17,6 +19,7 @@ from ajar.services.workflow import (
     block_task,
     calibrate_chain,
     cast_lead_vote,
+    close_run_early,
     close_task_done,
     close_task_dry,
     explain_anomaly,
@@ -46,6 +49,7 @@ __all__ = [
     "build_commit_preimage",
     "calibrate_chain",
     "cast_lead_vote",
+    "close_run_early",
     "close_task_done",
     "close_task_dry",
     "explain_anomaly",
@@ -61,7 +65,9 @@ __all__ = [
     "record_reproduction_outcome",
     "record_spend_entry",
     "rescope_claim_service",
+    "seal_bundle",
     "survive_claim",
+    "verify_bundle",
     "verify_commit_preimage",
     "write_restricted_json",
 ]

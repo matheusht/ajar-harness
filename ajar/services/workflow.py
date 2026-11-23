@@ -1691,3 +1691,61 @@ def calibrate_chain(
     }
 
 
+def close_run_early(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    stop_reason: str,
+    notes: str,
+    target_dir: pathlib.Path | None = None,
+    actor: str = "operator",
+) -> dict[str, Any]:
+    """Explicitly close a run without claiming `all_gates_passed` when stopped by operator or window."""
+    from ajar.gates import check_all_gates
+
+    sr = (stop_reason or "").strip()
+    if sr not in ("stopped_by_operator", "window_reached", "superseded"):
+        raise AjarError(
+            f"Unsupported --reason {sr!r}; choose stopped_by_operator, window_reached, or superseded.",
+            EXIT_USER_ERROR,
+        )
+    clean_notes = scrub_text((notes or "").strip())
+    if len(clean_notes) < 8:
+        raise AjarError("`ajar close` requires `--notes` (>= 8 chars) recording why the run stopped.", EXIT_USER_ERROR)
+    clean_actor = (actor or "").strip() or "operator"
+    now_iso = utc_now_iso()
+
+    with immediate_tx(conn):
+        assert_run_mutable(conn, operation="close_run")
+        gates = check_all_gates(conn, target_dir=target_dir, auto_enqueue_chain=False, reconcile=False)
+        conn.execute(
+            "UPDATE runs SET status = 'finished', stop_reason = ?, finished_at = ? WHERE run_id = ?",
+            (sr, now_iso, run_id),
+        )
+        conn.execute(
+            "INSERT INTO human_touches(touch_id, kind, actor, notes, created_at) VALUES (?, 'scope_authority', ?, ?, ?)",
+            (new_id("tch"), clean_actor, f"[ajar close:{sr}] {clean_notes}", now_iso),
+        )
+        log_event(
+            conn,
+            clean_actor,
+            "run_closed_early",
+            run_id,
+            {
+                "stop_reason": sr,
+                "gates_passed": bool(gates["passed"]),
+                "findings_count": gates.get("findings_count", 0),
+                "notes": clean_notes[:240],
+            },
+        )
+    return {
+        "run_id": run_id,
+        "status": "finished",
+        "stop_reason": sr,
+        "gates_passed": bool(gates["passed"]),
+        "findings_count": gates.get("findings_count", 0),
+        "blockers_at_close": gates.get("blockers", []),
+    }
+
+
+

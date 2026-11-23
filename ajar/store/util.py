@@ -440,3 +440,80 @@ def recompute_all_open_salience(conn: sqlite3.Connection) -> int:
 
 def list_rows(conn: sqlite3.Connection, sql: str, params: Sequence[Any] = ()) -> list[dict[str, Any]]:
     return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+def apply_latest_finding_corrections(
+    conn: sqlite3.Connection,
+    findings: list[dict[str, Any]],
+    *,
+    preserve_order: bool = False,
+) -> list[dict[str, Any]]:
+    """Deterministically project latest `finding_corrections` onto finding dicts, superseded by newer `finding_calibrated` events."""
+    if not findings:
+        return findings
+    has_fc = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='finding_corrections'"
+    ).fetchone()
+    if not has_fc:
+        return findings
+
+    fc_rows = conn.execute(
+        "SELECT * FROM finding_corrections ORDER BY created_at DESC, rowid DESC"
+    ).fetchall()
+    if not fc_rows:
+        return findings
+
+    latest_fc: dict[str, sqlite3.Row] = {}
+    for row in fc_rows:
+        fid = str(row["finding_id"] or "")
+        if fid and fid not in latest_fc:
+            latest_fc[fid] = row
+
+    latest_cal_ts: dict[str, str] = {}
+    has_events = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='events'"
+    ).fetchone()
+    if has_events:
+        for ev in conn.execute(
+            "SELECT entity_id, ts FROM events WHERE action = 'finding_calibrated' ORDER BY ts DESC, event_id DESC"
+        ).fetchall():
+            efid = str(ev["entity_id"] or "")
+            if efid and efid not in latest_cal_ts:
+                latest_cal_ts[efid] = str(ev["ts"] or "")
+
+    merged: list[dict[str, Any]] = []
+    for item in findings:
+        out = dict(item)
+        fid = str(out.get("finding_id") or "")
+        fc = latest_fc.get(fid)
+        if fc is not None:
+            fc_ts = str(fc["created_at"] or "")
+            cal_ts = latest_cal_ts.get(fid, "")
+            if not cal_ts or fc_ts >= cal_ts:
+                try:
+                    payload = json.loads(str(fc["payload_json"] or "{}"))
+                except (ValueError, TypeError):
+                    payload = {}
+                if isinstance(payload, dict):
+                    sev = str(payload.get("severity") or "").strip().lower()
+                    if sev in ("critical", "high", "medium", "low"):
+                        out["severity"] = sev
+                        if sev in ("medium", "low") and out.get("realism_tier") != "stepping_stone":
+                            out["realism_tier"] = "stepping_stone"
+                    ttl = str(payload.get("title") or "").strip()
+                    if ttl:
+                        out["title"] = scrub_text(ttl)
+                    rem = str(payload.get("remediation_state") or "").strip()
+                    if rem in ("unpatched", "micropatched", "verified_local", "maintainer_patched") and "remediation_state" in out:
+                        out["remediation_state"] = rem
+                    rtier = str(payload.get("realism_tier") or "").strip()
+                    if rtier in ("crown_jewel", "high_impact", "stepping_stone"):
+                        out["realism_tier"] = rtier
+                out["applied_correction_id"] = str(fc["correction_id"])
+        merged.append(out)
+
+    if not preserve_order:
+        sev_rank = {"critical": 1, "high": 2, "medium": 3, "low": 4}
+        merged.sort(key=lambda d: (sev_rank.get(str(d.get("severity") or "low"), 5), str(d.get("created_at") or "")))
+    return merged
+

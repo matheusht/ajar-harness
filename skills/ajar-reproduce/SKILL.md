@@ -39,14 +39,14 @@ Interrogate every PoC, control, and micro-patch against all 12 lenses before inv
 
 ### Source Targets (`--mode source`)
 
-1. **Strike-Free Smoke Probe (`ajar repro try`):** Before running full 4-arm reproduction, validate compiler flags, fixtures (`$AJAR_ARTIFACTS_DIR`), and candidate patches inside scratch `slot-inst` with zero `failed_repro_count` impact (`build_or_env_error` and `preflight_error` never burn strikes on `ajar claim reproduce` either):
+1. **Strike-Free Smoke Probe (`ajar repro try`):** Before running full 4-arm reproduction, validate compiler flags, fixtures (`$AJAR_ARTIFACTS_DIR`), and candidate patches inside the shared 8-slot pool (`slot-<k>`) with zero `failed_repro_count` impact (`build_or_env_error`, `preflight_error`, and Arm-3/Arm-4 `micropatch_error` never burn strikes on `ajar claim reproduce`; when Arm 1 + Arm 2 already passed, `poc_proven: true` tells you to refine only `--micropatch` rather than rewriting the PoC):
    ```bash
    ajar repro try \
      [--build-cmd "<incremental build command>"] \
      --cmd "<exploratory PoC command>" \
      [--patch <path/to/candidate.diff>]
    ```
-2. **4-Arm Reproduction + Post-State Snapshot (`--save-post-state`):** Supply `--build-cmd` when compiling untracked target binaries across clean/patched resets, `--save-post-state <rel_dir>` to archive Arm-1 post-state (`snp-*` `.tar.gz`) for downstream `ajar door park` / `ajar chain probe`, and `--release-cmd` when `H6_RELEASE_UB_DIFF` fires. Never pass caller-supplied self-execution flags (`-c core.sshCommand=`, `--upload-pack=`, `GIT_SSH_COMMAND=`, `LD_PRELOAD=` — rejected by `evaluate_precondition_realism`):
+2. **Fail-Closed 4-Arm Reproduction + Post-State Snapshot (`--save-post-state`):** Arm 3 passes only when the micropatched target completes without compiler/runtime/missing-binary errors, without timeout or `SIGKILL`/`OOM` (`exit 137`/`-9`), and without triggering the exploit oracle. Supply `--build-cmd` when compiling untracked target binaries across clean/patched resets, `--max-changed-lines` (`<= 16` default) for root-cause counterfactual patches, `--save-post-state <rel_dir>` to archive Arm-1 post-state (`snp-*` `.tar.gz`, failing closed if the path is missing), and `--release-cmd` when `H6_RELEASE_UB_DIFF` fires. Never pass caller-supplied self-execution flags (`-c core.sshCommand=`, `--upload-pack=`, `GIT_SSH_COMMAND=`, `LD_PRELOAD=` — rejected by `evaluate_precondition_realism`):
    ```bash
    ajar claim reproduce <claim_id> \
      --worker <worker_id> \
@@ -55,6 +55,7 @@ Interrogate every PoC, control, and micro-patch against all 12 lenses before inv
      --poc-cmd "<command proving exploit impact>" \
      --control-cmd "<command exercising benign caller path>" \
      --micropatch <path/to/micropatch.diff> \
+     [--max-changed-lines 16] \
      [--save-post-state "<rel_dir_written_by_arm1>"] \
      [--provides-tags "<ns:capability_unlocked>"] \
      [--declared-steps <N>] \
@@ -63,7 +64,7 @@ Interrogate every PoC, control, and micro-patch against all 12 lenses before inv
      [--shared-guard-locus "<file:line>"] \
      --determinism deterministic
    ```
-3. **Single-Command Realism Calibration (`ajar finding calibrate`):** If post-confirm review finds that a reproduced finding requires multi-step caller interaction or carries a lower standalone ceiling (`stepping_stone`), calibrate it in one atomic command (`ajar finding calibrate <finding_id> --severity <sev> --reason "..."`).
+3. **Single-Command Realism Calibration (`ajar finding calibrate`):** If post-confirm review finds that a reproduced finding requires multi-step caller interaction or carries a lower standalone ceiling (`stepping_stone`), calibrate it in one atomic command (`ajar finding calibrate <finding_id> --severity <sev> [--declared-steps <N>] [--realism-tier <stepping_stone|high_impact|crown_jewel>] --reason "..."`).
 
 ### Stripped or Closed-Source Binaries (`--mode binary`)
 

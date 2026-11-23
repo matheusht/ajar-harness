@@ -25,10 +25,12 @@ Use this skill to build the initial component and attack-surface map, record ope
      --symbols "<fn_or_sink_symbol_1,symbol_2>" \
      --max-steps 2
    ```
-2. Inspect the Personalized PageRank symbol graph and cohesive subsystem call cones (`--slice-cap 15000` soft focus target; workers may still inspect any caller or callee across the repository):
+2. Inspect the Personalized PageRank symbol graph, unvisited subsystem call cones (`--unvisited`), and backward sink-to-source call slices (`ajar catalog backslice`):
    ```bash
    ajar map --budget-tokens 1500 --slice-cap 15000
+   ajar map --unvisited --budget-tokens 1500
    ajar map --focus-file <rel_path> --focus-symbol <symbol> --budget-tokens 1500
+   ajar catalog backslice <sink_or_jewel_id> --max-hops 3
    ```
 3. Query local documentation, comments, ADRs, and test intent before labeling behavior anomalous (target docs carry `[UNTRUSTED_TARGET_DOC: verify in code]` so prose claims are always verified in code):
    ```bash

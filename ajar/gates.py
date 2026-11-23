@@ -496,7 +496,7 @@ def check_all_gates(
         ORDER BY salience_score DESC, created_at ASC
         """
     ).fetchall()
-    if nonterminal_high_chains:
+    if nonterminal_high_chains and not (stopping == "crown-jewel" and has_crown_jewel_win):
         sample = ", ".join(
             f"{r['task_id']}[{r['status']}:{r['salience_score']}]"
             for r in nonterminal_high_chains[:5]

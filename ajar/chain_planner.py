@@ -1145,6 +1145,22 @@ def mark_chain_doors_and_jewels_resolved(
                 """,
                 (chain_id, now_iso, jewel_id),
             )
+
+        open_chains = conn.execute(
+            "SELECT task_id, title, summary FROM tasks WHERE kind = 'chain' AND status IN ('open', 'leased')"
+        ).fetchall()
+        step_csv = ",".join(step_ids)
+        for oc in open_chains:
+            blob = f"{oc['title']} {oc['summary']}"
+            matched_steps = bool(step_csv and step_csv in blob) or (
+                len(step_set) >= 2 and all(sid in blob for sid in step_set)
+            )
+            matched_jewel = bool(realism_tier == "crown_jewel" and jewel_id and jewel_id in blob)
+            if matched_steps or matched_jewel:
+                conn.execute(
+                    "UPDATE tasks SET status = 'done', summary = ?, updated_at = ? WHERE task_id = ?",
+                    (f"Resolved by verified chain {chain_id}", now_iso, str(oc["task_id"])),
+                )
     return resolved_doors
 
 
@@ -1425,8 +1441,8 @@ def detect_percolated_multi_hop_paths(
         key=lambda g: (
             0 if bool(g.get("reaches_crown_jewel")) else 1,
             len(g["unmet_requires"]),
-            int(g["total_chain_hops_if_bridged"]),
-            -len(g["forward_provides"]),
+            -len(g["backward_suffix"]),
+            -int(g["total_chain_hops_if_bridged"]),
             str(g["backward_entry_id"]),
         )
     )

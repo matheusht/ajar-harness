@@ -98,9 +98,12 @@ ajar claim propose \
   --locus "<file:line>" \
   --mechanism "<entry -> missing guard -> corrupted invariant -> impact>" \
   --severity <critical|high|medium|low> \
+  [--same-root-of <parent_claim_id>] \
   --falsification-prediction "<what must hold if a hidden upstream guard blocks this path>" \
   --falsification-test "<exact caller check or negative-control command to try disproving the claim>"
 ```
+
+When a candidate claim turns out to share the exact root defect as an earlier claim, close it cleanly via `ajar claim duplicate <claim_id> --of <parent_claim_id> --worker <worker_id> --reason "<shared root locus>"`. Vote on high-upside surfaces, Open Doors, or subsystem slices via `ajar lead vote --worker <worker_id> --target-kind <surface|door|slice|chain|subsystem> --target-id <id> --impact 9 --plausibility 8 --chainability 9 --effort 4 --rationale "<why>"` and inspect swarm consensus + root plateau throttles via `ajar lead rank` and `ajar lead throttles`.
 
 ## 5. Close the Task Cleanly
 

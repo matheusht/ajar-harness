@@ -18,6 +18,7 @@ from ajar.epistemic_hooks import (
     consume_hooks_for_locus,
     detect_capability_bridges,
     register_epistemic_hook,
+    register_invariant_symmetry_hook,
     scan_source_for_epistemic_signals,
 )
 from ajar.store import (
@@ -46,7 +47,7 @@ def on_primitive_added(
     postconditions: str = "",
     spawn_guard_task: bool = True,
 ) -> list[dict[str, Any]]:
-    """Evaluate `H1`, `H4`, Open-Door wakeup, and Adaptive Threat-Model assumptions when a primitive is recorded."""
+    """Evaluate `H1`, `H9`, `H4`, Open-Door wakeup, and Adaptive Threat-Model assumptions when a primitive is recorded."""
     fired: list[dict[str, Any]] = []
     now_iso = utc_now_iso()
     with immediate_tx(conn):
@@ -57,7 +58,8 @@ def on_primitive_added(
                 provided_tags=provides_tags,
             )
 
-        # H1: Guarded inner primitive -> register guard-symmetry hook and optional inside-out guard task.
+        # H1 + H9: Guarded inner primitive -> register guard-symmetry hook, invariant-symmetry hook (for capabilities),
+        # and optional inside-out guard task.
         gloc = guarded_by_locus.strip()
         if gloc:
             spawned_tid: str | None = None
@@ -114,6 +116,16 @@ def on_primitive_added(
                 ),
             )
             fired.append(h1)
+            if (role or "capability").strip() == "capability":
+                h9 = register_invariant_symmetry_hook(
+                    conn,
+                    primitive_id=primitive_id,
+                    capability_locus=locus,
+                    guarded_by_locus=gloc,
+                    subsystem=gsub,
+                    spawned_task_id=spawned_tid,
+                )
+                fired.append(h9)
 
         # H4: Typed state bridge across subsystems (`provides_tags <-> requires_tags`).
         if provides_tags or requires_tags:

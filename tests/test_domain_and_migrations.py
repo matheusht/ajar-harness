@@ -29,6 +29,7 @@ from ajar.domain import (
     ImpactClass,
     InvalidTransitionError,
     JewelStatus,
+    LeadTargetKind,
     PricingMode,
     PrimitiveRole,
     PrimitiveStatus,
@@ -118,6 +119,7 @@ class TestDomainAndMigrations(unittest.TestCase):
             ("kind", TouchKind),
             ("stage", SwarmStage),
             ("wire_profile", WireProfile),
+            ("target_kind", LeadTargetKind),
         ]
         # Verify every distinct SQL CHECK set matches its corresponding domain enum
         by_col: dict[str, list[set[str]]] = {}

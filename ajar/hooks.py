@@ -16,36 +16,9 @@ from ajar import EXIT_OK, EXIT_STALLED_RELEASE, EXIT_USER_ERROR
 from ajar.db import log_event, open_run_db
 from ajar.gates import check_all_gates
 from ajar.redact import scrub_text
-from ajar.store import immediate_tx
+from ajar.store import compute_epistemic_delta, compute_epistemic_potential, immediate_tx
 
 MAX_CONSECUTIVE_STALLS = 3
-
-# Non-progress telemetry actions that must NOT reset the 3-stall circuit breaker.
-_NON_PROGRESS_ACTIONS: tuple[str, ...] = (
-    "stop_hook_check",
-    "spend_added",
-    "task_checkpoint",
-    "task_checkpointed",
-    "human_touch_recorded",
-)
-_NON_PROGRESS_PLACEHOLDERS = ", ".join("?" for _ in _NON_PROGRESS_ACTIONS)
-
-
-def _semantic_progress_tuple(conn: Any) -> tuple[int, int, int, int, int]:
-    """Return `(max_semantic_event_id, closed_tasks, claims, findings, chains)` ignoring noise events."""
-    max_ev = int(
-        conn.execute(
-            f"SELECT COALESCE(MAX(event_id), 0) AS m FROM events WHERE action NOT IN ({_NON_PROGRESS_PLACEHOLDERS})",
-            _NON_PROGRESS_ACTIONS,
-        ).fetchone()["m"]
-    )
-    closed_tasks = int(
-        conn.execute("SELECT COUNT(*) AS c FROM tasks WHERE status IN ('done', 'dry')").fetchone()["c"]
-    )
-    claims = int(conn.execute("SELECT COUNT(*) AS c FROM claims").fetchone()["c"])
-    findings = int(conn.execute("SELECT COUNT(*) AS c FROM findings").fetchone()["c"])
-    chains = int(conn.execute("SELECT COUNT(*) AS c FROM chains").fetchone()["c"])
-    return (max_ev, closed_tasks, claims, findings, chains)
 
 
 def evaluate_claude_stop_hook(
@@ -53,7 +26,7 @@ def evaluate_claude_stop_hook(
     *,
     target_dir: pathlib.Path | None = None,
 ) -> tuple[int, dict[str, Any]]:
-    """Evaluate Claude Code `Stop` hook against `run.db` gates and stall counter.
+    """Evaluate Claude Code `Stop` hook against `run.db` gates and Lyapunov `Phi(t)` stall counter.
 
     Returns `(exit_code, payload)`:
     - `0` allows the host session to stop cleanly (gates passed, already finished, or stalled 3x)
@@ -61,24 +34,58 @@ def evaluate_claude_stop_hook(
     """
     run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
     if run is None or run["status"] in ("finished", "blocked"):
-        return (EXIT_OK, {"decision": "approve", "reason": "Run is already finished or blocked."})
+        ep_done = compute_epistemic_delta(conn, reference_actions=("stop_hook_check",)) if run is not None else {
+            "epistemic_potential": 0.0,
+            "delta_phi": 0.0,
+        }
+        return (
+            EXIT_OK,
+            {
+                "decision": "approve",
+                "reason": "Run is already finished or blocked.",
+                "epistemic_potential": ep_done["epistemic_potential"],
+                "delta_phi": ep_done["delta_phi"],
+            },
+        )
 
     gate_res = check_all_gates(conn, target_dir=target_dir, auto_enqueue_chain=True)
     if gate_res["passed"]:
-        return (EXIT_OK, {"decision": "approve", "reason": "All closeout gates G1-G5 passed."})
+        ep_pass = compute_epistemic_delta(conn, reference_actions=("stop_hook_check",))
+        return (
+            EXIT_OK,
+            {
+                "decision": "approve",
+                "reason": "All closeout gates G1-G5 passed.",
+                "epistemic_potential": ep_pass["epistemic_potential"],
+                "delta_phi": ep_pass["delta_phi"],
+            },
+        )
 
-    # Measure semantic progress since previous stop check (ignoring noisy telemetry events).
+    # Measure grounded Lyapunov progress `Delta Phi(t)` since previous stop check.
     with immediate_tx(conn):
         run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
         if run is None or run["status"] in ("finished", "blocked"):
-            return (EXIT_OK, {"decision": "approve", "reason": "Run is already finished or blocked."})
+            ep_done2 = compute_epistemic_delta(conn, reference_actions=("stop_hook_check",)) if run is not None else {
+                "epistemic_potential": 0.0,
+                "delta_phi": 0.0,
+            }
+            return (
+                EXIT_OK,
+                {
+                    "decision": "approve",
+                    "reason": "Run is already finished or blocked.",
+                    "epistemic_potential": ep_done2["epistemic_potential"],
+                    "delta_phi": ep_done2["delta_phi"],
+                },
+            )
 
-        sem_tuple = _semantic_progress_tuple(conn)
-        max_ev = sem_tuple[0]
-        prev_ev = int(run["last_stop_event_id"] or 0)
+        ep_state = compute_epistemic_delta(conn, reference_actions=("stop_hook_check",))
+        max_ev = int(conn.execute("SELECT COALESCE(MAX(event_id), 0) AS m FROM events").fetchone()["m"])
         stalls = int(run["consecutive_stall_checks"] or 0)
 
-        if max_ev <= prev_ev:
+        if not ep_state["has_prior_checkpoint"]:
+            stalls = 0
+        elif float(ep_state["delta_phi"]) <= 0.0:
             stalls += 1
         else:
             stalls = 0
@@ -95,13 +102,15 @@ def evaluate_claude_stop_hook(
             {
                 "stalls": stalls,
                 "blockers_count": len(gate_res["blockers"]),
-                "semantic_progress": list(sem_tuple),
+                "epistemic_potential": ep_state["epistemic_potential"],
+                "delta_phi": ep_state["delta_phi"],
+                "components": ep_state["components"],
             },
         )
 
         if stalls >= MAX_CONSECUTIVE_STALLS:
             reason = (
-                f"Released stalled host session after {stalls} consecutive stop checks with zero semantic progress."
+                f"Released stalled host session after {stalls} consecutive stop checks with zero epistemic progress."
             )
             conn.execute("UPDATE runs SET stop_reason = ? WHERE run_id = ?", (reason, run["run_id"]))
             return (
@@ -112,6 +121,8 @@ def evaluate_claude_stop_hook(
                     "exit_hint": EXIT_STALLED_RELEASE,
                     "reason": reason,
                     "remaining_blockers": gate_res["blockers"][:6],
+                    "epistemic_potential": ep_state["epistemic_potential"],
+                    "delta_phi": ep_state["delta_phi"],
                 },
             )
 
@@ -123,6 +134,8 @@ def evaluate_claude_stop_hook(
             "reason": f"Run {run['run_id']} cannot finish yet: {summary}",
             "stalls": stalls,
             "blockers": gate_res["blockers"],
+            "epistemic_potential": ep_state["epistemic_potential"],
+            "delta_phi": ep_state["delta_phi"],
         },
     )
 
@@ -159,7 +172,7 @@ def run_host_continuation_loop(
             gate_res = check_all_gates(conn, target_dir=tpath, auto_enqueue_chain=True)
             if gate_res["passed"] or (run and run["status"] == "finished"):
                 return {"completed": True, "rounds_run": rounds_run, "gates": gate_res}
-            before_progress = _semantic_progress_tuple(conn)
+            before_phi = float(compute_epistemic_potential(conn)["epistemic_potential"])
             ws_path = str(run["workspace_path"]) if run else "."
             blocker_prompt = "Continue Ajar run " + run_id + ". Remaining gates: " + " | ".join(gate_res["blockers"][:4])
         finally:
@@ -180,8 +193,8 @@ def run_host_continuation_loop(
 
         conn2 = open_run_db(run_id, ajar_home=ajar_home)
         try:
-            after_progress = _semantic_progress_tuple(conn2)
-            if after_progress <= before_progress:
+            after_phi = float(compute_epistemic_potential(conn2)["epistemic_potential"])
+            if after_phi <= before_phi:
                 stalled_rounds += 1
             else:
                 stalled_rounds = 0
@@ -190,6 +203,7 @@ def run_host_continuation_loop(
                     "completed": False,
                     "rounds_run": rounds_run,
                     "stalled": True,
+                    "epistemic_potential": after_phi,
                     "reason": scrub_text(f"Host loop stalled after {stalled_rounds} zero-progress rounds."),
                 }
         finally:

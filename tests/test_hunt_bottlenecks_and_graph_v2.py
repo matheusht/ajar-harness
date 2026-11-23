@@ -1399,7 +1399,7 @@ class TestPlatformGraphV2(unittest.TestCase):
                     self.assertEqual(g_int["schema"], "ajar-platform-graph/2")
                     self.assertEqual(g_int["visibility"], "internal_full")
                     self.assertEqual(g_int["run"]["repo_slug"], "acme/demo-target")
-                    self.assertEqual(g_int["run"]["target_path"], str(target))
+                    self.assertEqual(g_int["run"]["target_path"], str(target.resolve()))
                     self.assertTrue(g_int["run"]["head_sha"])
                     self.assertEqual(g_int["summary"]["dangling_edges"], 0)
 

@@ -132,6 +132,7 @@ class EnvBlockerKind(StrEnum):
 class ReproOutcome(StrEnum):
     CONFIRMED = "confirmed"
     TARGET_NEGATIVE = "target_negative"
+    MICROPATCH_ERROR = "micropatch_error"
     PREFLIGHT_ERROR = "preflight_error"
     BUILD_OR_ENV_ERROR = "build_or_env_error"
 
@@ -215,6 +216,7 @@ class HookCode(StrEnum):
     H6_RELEASE_UB_DIFF = "H6_RELEASE_UB_DIFF"
     H7_TRUST_METADATA_AND_FSM_ORDER = "H7_TRUST_METADATA_AND_FSM_ORDER"
     H8_PROJECTION_UNDER_CONSTRAINT = "H8_PROJECTION_UNDER_CONSTRAINT"
+    H9_INVARIANT_SYMMETRY = "H9_INVARIANT_SYMMETRY"
 
 
 class AssumptionStatus(StrEnum):
@@ -269,3 +271,14 @@ class TouchKind(StrEnum):
 class SpendPhase(StrEnum):
     EXPLORE = "explore"
     VERIFY = "verify"
+
+
+class LeadTargetKind(StrEnum):
+    SURFACE = "surface"
+    DOOR = "door"
+    SLICE = "slice"
+    CHAIN = "chain"
+    SUBSYSTEM = "subsystem"
+    CLAIM = "claim"
+    PRIMITIVE = "primitive"
+    FINDING = "finding"

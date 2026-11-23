@@ -18,20 +18,22 @@ Use this skill to verify run completion against SQL closeout gates `G1–G5`, ex
    - `G3`: Every confirmed finding carries a locus-bound 4-arm reproduction record and independent falsification (`proposer_worker_id != falsifier_worker_id`).
    - `G4`: Zero-Skill First-Principles worker quota satisfied when `>= 2` workers ran, and every `dry` closure cites a valid `file:line` locus with zero unchained guarded primitives.
    - `G5`: Zero orphaned `unexplained` anomalies and Stage-5 `Converge` (`chain`) evaluation completed across all composable and guarded primitives.
-2. Export the deterministic `Platform` component and attack-flow graph (`ajar-platform-graph/1`):
+2. Export the deterministic `Platform` component and attack-flow graph (`ajar-platform-graph/2`):
    ```bash
    ajar export-graph --output graph.json
    ```
-3. Seal the run and emit `artifacts/report.md` and `artifacts/report.json`:
+3. Seal the run and emit `artifacts/report.md` and `artifacts/report.json` (or close explicitly via `ajar close --reason <stopped_by_operator|window_reached|superseded> --notes "<why>"` when an operator stops a campaign before `G1–G5` complete, without claiming `all_gates_passed`):
    ```bash
    ajar finish
    ```
-4. Render standalone Markdown or JSON deliverables when needed:
+4. Render standalone Markdown or JSON deliverables and atomically seal external disclosure/deliverable directories (`BUNDLE-MANIFEST.json` + `SEAL.sha256`, rejecting symlinks, secrets, and local filesystem paths):
    ```bash
    ajar report --format md --output report.md
    ajar report --format json --output report.json
+   ajar bundle seal <bundle_dir>
+   ajar bundle verify <bundle_dir>
    ```
-   Customer reports include causally verified `findings` (noting `micropatched` vs 8-arm `maintainer_patched` remediation status), verified `chains`, active operator `Steers`, and bounded `dry` surface coverage. Pass `--include-rejected-appendix` only for internal postmortems.
+   Customer reports include causally verified `findings` (applying timestamp-ordered calibration/correction records and noting `distinct_root_causes_count`, `harness_modified_mid_run`, and `micropatched` vs `verified_local` remediation status), verified `chains`, active operator `Steers`, and bounded `dry` surface coverage. Pass `--include-rejected-appendix` only for internal postmortems.
 
 ## 2. Precedent-Grounded Severity Calibration
 

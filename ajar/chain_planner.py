@@ -13,13 +13,20 @@ Zero-LLM relational engine coordinating:
 from __future__ import annotations
 
 import json
+import math
 import re
 import sqlite3
+from collections import deque
 from typing import Any, Sequence
 
 from ajar import EXIT_GATE_BLOCKED, EXIT_USER_ERROR
+from ajar.domain.enums import HookCode
 from ajar.domain.models import AjarError
-from ajar.epistemic_hooks import detect_capability_bridges, register_epistemic_hook
+from ajar.epistemic_hooks import (
+    consume_hooks_for_locus,
+    detect_capability_bridges,
+    register_epistemic_hook,
+)
 from ajar.redact import scrub_text
 from ajar.store import immediate_tx, infer_subsystem, log_event, new_id, parse_tag_list, utc_now_iso
 
@@ -34,11 +41,71 @@ VALID_IMPACT_CLASSES: tuple[str, ...] = (
     "mem_corrupt",
 )
 
+JEWEL_IMPACT_WEIGHTS: dict[str, float] = {
+    "rce": 1.00,
+    "sandbox_escape": 1.00,
+    "fund_drain": 1.00,
+    "auth_bypass": 0.92,
+    "state_takeover": 0.92,
+    "key_exfil": 0.90,
+    "arbitrary_write": 0.86,
+    "mem_corrupt": 0.85,
+}
+
 VALID_DOOR_DIRECTIONS: tuple[str, ...] = (
     "sink_to_source",
     "source_to_sink",
     "bidirectional",
 )
+
+
+def ah_puct_score(
+    *,
+    reaches_crown_jewel: bool,
+    impact_class: str = "rce",
+    unmet_requires_count: int = 1,
+    has_unmet_guard: bool = False,
+    call_hop_distance: int | None = None,
+    max_edge_weight: float = 0.0,
+    has_snapshot: bool = False,
+    backward_proved_steps: int = 0,
+    bridge_visits: int = 0,
+    total_bridge_visits: int = 0,
+    gamma: float = 0.82,
+    c_puct: float = 0.35,
+) -> float:
+    """Compute Abductive Cut-Lemma PUCT score for a 1-link `(forward_tip, backward_entry)` gap."""
+    w_impact = JEWEL_IMPACT_WEIGHTS.get(impact_class.lower(), 0.90) if reaches_crown_jewel else 0.55
+    hop_penalty = (
+        0.0
+        if call_hop_distance == 0
+        else 0.15
+        if call_hop_distance == 1
+        else 0.35
+        if call_hop_distance == 2
+        else 0.65
+    )
+    guard_extra = 0.50 if (unmet_requires_count == 0 and has_unmet_guard) else 0.0
+    d_hat = max(1.0, float(max(0, unmet_requires_count)) + guard_extra + hop_penalty)
+
+    # Exploitation: Crown-Jewel impact * gamma^{d_hat} + tie-breaking credit for already-proved backward suffix steps.
+    q_val = (w_impact * math.pow(max(0.0, gamma), d_hat)) + (0.02 * float(min(4, max(0, backward_proved_steps))))
+
+    # Structural prior: repomap_edges 0/1/2-hop call proximity + materialized repro_snapshots bonus.
+    norm_w = min(1.0, max(0.0, float(max_edge_weight)) / 5.0)
+    if call_hop_distance == 0:
+        s_call = 1.0
+    elif call_hop_distance == 1:
+        s_call = 0.80 + (0.20 * norm_w)
+    elif call_hop_distance == 2:
+        s_call = 0.45 + (0.20 * norm_w)
+    else:
+        s_call = 0.10
+    s_snap = 1.0 if has_snapshot else 0.0
+    prior = min(1.0, 0.15 + (0.55 * s_call) + (0.30 * s_snap))
+
+    u_val = c_puct * prior * (math.sqrt(1.0 + max(0, total_bridge_visits)) / (1.0 + max(0, bridge_visits)))
+    return float(round(q_val + u_val, 6))
 
 DELUSIONAL_EXEC_OVERRIDE_RE = re.compile(
     r"(?:"
@@ -52,7 +119,7 @@ DELUSIONAL_EXEC_OVERRIDE_RE = re.compile(
 )
 
 VISIBLE_ERROR_NOISE_RE = re.compile(
-    r"(?:^|\n)\s*(?:fatal:|Traceback \(most recent call last\):|thread '[^']+' panicked at|Segmentation fault)",
+    r"(?:^|\n)\s*(?:fatal:|error:|Traceback \(most recent call last\):|thread '[^']+' panicked at|Segmentation fault)",
     re.IGNORECASE,
 )
 
@@ -1102,6 +1169,13 @@ def mark_chain_doors_and_jewels_resolved(
     step_set = set(step_ids)
 
     with immediate_tx(conn):
+        for sid in step_ids:
+            consume_hooks_for_locus(
+                conn,
+                source_entity_id=str(sid),
+                hook_code=HookCode.H9_INVARIANT_SYMMETRY.value,
+            )
+
         candidates = conn.execute(
             "SELECT * FROM parked_doors WHERE status IN ('ready', 'parked', 'bridging')"
         ).fetchall()
@@ -1145,6 +1219,22 @@ def mark_chain_doors_and_jewels_resolved(
                 """,
                 (chain_id, now_iso, jewel_id),
             )
+
+        open_chains = conn.execute(
+            "SELECT task_id, title, summary FROM tasks WHERE kind = 'chain' AND status IN ('open', 'leased')"
+        ).fetchall()
+        step_csv = ",".join(step_ids)
+        for oc in open_chains:
+            blob = f"{oc['title']} {oc['summary']}"
+            matched_steps = bool(step_csv and step_csv in blob) or (
+                len(step_set) >= 2 and all(sid in blob for sid in step_set)
+            )
+            matched_jewel = bool(realism_tier == "crown_jewel" and jewel_id and jewel_id in blob)
+            if matched_steps or matched_jewel:
+                conn.execute(
+                    "UPDATE tasks SET status = 'done', summary = ?, updated_at = ? WHERE task_id = ?",
+                    (f"Resolved by verified chain {chain_id}", now_iso, str(oc["task_id"])),
+                )
     return resolved_doors
 
 
@@ -1154,31 +1244,36 @@ def detect_percolated_multi_hop_paths(
     max_hops: int = 10,
     enqueue_tasks: bool = False,
 ) -> dict[str, Any]:
-    """Transitive $N$-hop graph percolation ('7 CVSS-5 annoyances + 8th middle unicorn = 10.0 chain').
+    """Transitive $N$-hop conjunctive graph percolation ('7 CVSS-5 annoyances + 8th middle unicorn = 10.0 chain').
 
     Builds the directed Weird-Machine transition graph over all active `primitives`
     (`capability` + `trust_gadget`), confirmed `findings`, and `crown_jewels`:
     - `source_roots`: unguarded findings/primitives with zero unmet `requires_tags`
       (reachable from untrusted input even when standalone severity is low);
-    - `edges (u -> v)`: tag satisfaction (`provides_tags(u) & requires_tags(v)`),
+    - `edges (u -> v)`: conjunctive prefix-accumulated tag satisfaction
+      (`requires_tags(v) <= accumulated_provides`), multi-root witness merge,
       guard-locus unlock (`u.locus` hits `v.guarded_by_locus`), or explicit symbol
-      handoff (`u.symbols & v.requires_symbols`);
-    - `percolated_paths`: complete `2..max_hops` chains from a `source_root` into a
-      `crown_jewel` (or high-impact guarded sink) that snap together as soon as a
-      middle link lands;
-    - `unicorn_gaps`: `(forward_tip, backward_entry)` pairs separated by a single
-      missing intermediate transition so hunters see which middle link completes a
-      deep multi-step chain.
+      handoff;
+    - `percolated_paths`: complete `2..max_hops` chains from grounded roots into a
+      `crown_jewel` (or high-impact guarded sink) that snap together as soon as all
+      required links land;
+    - `unicorn_gaps`: full-pair `(forward_tip, backward_entry)` gaps ranked by
+      `ah_puct_score` (Crown-Jewel impact * gamma^{d_hat} + `repomap_edges` 0/1/2-hop
+      call proximity + `repro_snapshots` bonus + visit decay).
     """
-    from collections import deque
-
     nodes: dict[str, dict[str, Any]] = {}
+    snapshot_bearing_ids: set[str] = set()
+    finding_by_claim: dict[str, str] = {}
+
     for p in conn.execute("SELECT * FROM primitives WHERE status != 'dry' ORDER BY created_at ASC").fetchall():
         pid = str(p["primitive_id"])
         prov = set(parse_tag_list(p["provides_tags_json"]))
         req = set(parse_tag_list(p["requires_tags_json"]))
         syms = {s.lower() for s in _parse_symbol_list(p["symbols_json"] if "symbols_json" in p.keys() else "[]")}
         g_loc = str(p["guarded_by_locus"] or "").strip()
+        p_snap = str(p["snapshot_id"] if "snapshot_id" in p.keys() else "").strip()
+        if p_snap:
+            snapshot_bearing_ids.add(pid)
         nodes[pid] = {
             "id": pid,
             "kind": str(p["role"] if "role" in p.keys() else "capability"),
@@ -1188,9 +1283,14 @@ def detect_percolated_multi_hop_paths(
             "requires": req,
             "guarded_by": g_loc,
             "symbols": syms,
-            "is_source_root": (len(req) == 0 and not g_loc and str(p["role"] if "role" in p.keys() else "capability") == "capability"),
+            "is_source_root": (
+                len(req) == 0
+                and not g_loc
+                and str(p["role"] if "role" in p.keys() else "capability") == "capability"
+            ),
             "is_sink": False,
             "jewel_id": "",
+            "impact_class": "",
         }
 
     for f in conn.execute(
@@ -1205,6 +1305,12 @@ def detect_percolated_multi_hop_paths(
         fid = str(f["finding_id"])
         prov = set(parse_tag_list(f["provides_tags_json"] if "provides_tags_json" in f.keys() else "[]"))
         req = set(parse_tag_list(f["surface_requires_tags_json"] if "surface_requires_tags_json" in f.keys() else "[]"))
+        f_snap = str(f["snapshot_id"] if "snapshot_id" in f.keys() else "").strip()
+        if f_snap:
+            snapshot_bearing_ids.add(fid)
+        f_cid = str(f["claim_id"] or "").strip()
+        if f_cid:
+            finding_by_claim[f_cid] = fid
         nodes[fid] = {
             "id": fid,
             "kind": "finding",
@@ -1213,11 +1319,28 @@ def detect_percolated_multi_hop_paths(
             "provides": prov,
             "requires": req,
             "guarded_by": "",
-            "symbols": _extract_artifact_code_symbols(conn, locus=str(f["locus"]), text_blob=f"{f['title']} {f['root_cause']}"),
+            "symbols": _extract_artifact_code_symbols(
+                conn,
+                locus=str(f["locus"]),
+                text_blob=f"{f['title']} {f['root_cause']}",
+            ),
             "is_source_root": len(req) == 0,
             "is_sink": False,
             "jewel_id": "",
+            "impact_class": "",
         }
+
+    has_snapshots_tbl = (
+        conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='repro_snapshots'").fetchone()
+        is not None
+    )
+    if has_snapshots_tbl:
+        for sr in conn.execute("SELECT claim_id FROM repro_snapshots").fetchall():
+            scid = str(sr["claim_id"] or "").strip()
+            if scid in finding_by_claim:
+                snapshot_bearing_ids.add(finding_by_claim[scid])
+            if scid in nodes:
+                snapshot_bearing_ids.add(scid)
 
     jewels = list_crown_jewels(conn)
     for cj in jewels:
@@ -1236,30 +1359,33 @@ def detect_percolated_multi_hop_paths(
             "is_source_root": False,
             "is_sink": True,
             "jewel_id": jid,
+            "impact_class": str(cj.get("impact_class") or "rce").lower(),
         }
 
-    # Also treat guarded primitives / requires-tag surfaces as terminal sinks when no crown_jewels exist yet.
-    if not jewels:
-        for s in conn.execute("SELECT * FROM surfaces ORDER BY created_at ASC").fetchall():
-            rtags = set(parse_tag_list(s["requires_tags_json"] if "requires_tags_json" in s.keys() else "[]"))
-            if rtags:
-                sid = str(s["surface_id"])
-                nodes[sid] = {
-                    "id": sid,
-                    "kind": "surface_sink",
-                    "locus": str(s["locus"]),
-                    "subsystem": str(s["subsystem"]),
-                    "provides": set(),
-                    "requires": rtags,
-                    "guarded_by": "",
-                    "symbols": set(),
-                    "is_source_root": False,
-                    "is_sink": True,
-                    "jewel_id": "",
-                }
+    # Keep requires-tag surfaces active alongside `crown_jewels` (skipping exact locus duplicates).
+    jewel_loci = {str(cj["locus"]) for cj in jewels}
+    for s in conn.execute("SELECT * FROM surfaces ORDER BY created_at ASC").fetchall():
+        rtags = set(parse_tag_list(s["requires_tags_json"] if "requires_tags_json" in s.keys() else "[]"))
+        if rtags and str(s["locus"]) not in jewel_loci:
+            sid = str(s["surface_id"])
+            nodes[sid] = {
+                "id": sid,
+                "kind": "surface_sink",
+                "locus": str(s["locus"]),
+                "subsystem": str(s["subsystem"]),
+                "provides": set(),
+                "requires": rtags,
+                "guarded_by": "",
+                "symbols": set(),
+                "is_source_root": False,
+                "is_sink": True,
+                "jewel_id": "",
+                "impact_class": "",
+            }
 
     out_adj: dict[str, list[str]] = {nid: [] for nid in nodes}
     in_adj: dict[str, list[str]] = {nid: [] for nid in nodes}
+    edge_modes: dict[tuple[str, str], set[str]] = {}
 
     node_list = list(nodes.values())
     for u in node_list:
@@ -1271,20 +1397,24 @@ def detect_percolated_multi_hop_paths(
             vid = v["id"]
             if uid == vid:
                 continue
-            connected = False
+            modes: set[str] = set()
             if u["provides"] and v["requires"] and (u["provides"] & v["requires"]):
-                connected = True
-            elif v["guarded_by"]:
+                modes.add("tag")
+            if v["guarded_by"]:
                 g_file, g_line = _locus_file_and_line(v["guarded_by"])
                 if u_file and g_file and u_file == g_file and (g_line == 0 or u_line == 0 or abs(u_line - g_line) <= 80):
-                    connected = True
-            elif v["kind"] == "crown_jewel":
+                    modes.add("guard")
+            if v["kind"] == "crown_jewel" and not v["requires"]:
                 v_file, _ = _locus_file_and_line(v["locus"])
-                if (u_file and v_file and u_file == v_file) or (u["symbols"] and v["symbols"] and (u["symbols"] & v["symbols"])):
-                    connected = True
-            if connected and vid not in out_adj[uid]:
-                out_adj[uid].append(vid)
-                in_adj[vid].append(uid)
+                if (u_file and v_file and u_file == v_file) or (
+                    u["symbols"] and v["symbols"] and (u["symbols"] & v["symbols"])
+                ):
+                    modes.add("jewel_locus_or_sym")
+            if modes:
+                edge_modes.setdefault((uid, vid), set()).update(modes)
+                if vid not in out_adj[uid]:
+                    out_adj[uid].append(vid)
+                    in_adj[vid].append(uid)
 
     # Also wire woken `ready` doors as explicit directed bridges (`held -> matched -> jewel/anchor`).
     for rd in conn.execute("SELECT * FROM parked_doors WHERE status = 'ready'").fetchall():
@@ -1297,68 +1427,148 @@ def detect_percolated_multi_hop_paths(
         jid = str(rd["jewel_id"] or "")
         for h in held:
             for m in mids:
-                if h != m and m not in out_adj[h]:
-                    out_adj[h].append(m)
-                    in_adj[m].append(h)
+                if h != m:
+                    edge_modes.setdefault((h, m), set()).add("ready_door")
+                    if m not in out_adj[h]:
+                        out_adj[h].append(m)
+                        in_adj[m].append(h)
         if jid in nodes:
             for tail in (mids or held):
-                if tail != jid and jid not in out_adj[tail]:
-                    out_adj[tail].append(jid)
-                    in_adj[jid].append(tail)
+                if tail != jid:
+                    edge_modes.setdefault((tail, jid), set()).add("ready_door")
+                    if jid not in out_adj[tail]:
+                        out_adj[tail].append(jid)
+                        in_adj[jid].append(tail)
 
-    # Forward BFS from all `source_roots` (`<= max_hops`), preserving multi-hop
-    # simple paths even when an intermediate node is also a `source_root` (e.g., `finding -> finding`).
+    # Conjunctive prefix-accumulated Forward BFS from all `source_roots` (`<= max_hops`),
+    # supporting both sequential prefix accumulation and multi-root witness merges.
     fwd_paths: dict[str, list[str]] = {}
+    fwd_acc_tags: dict[str, frozenset[str]] = {}
+    grounded_tag_paths: dict[str, tuple[list[str], frozenset[str]]] = {}
     sink_multi_paths: dict[str, list[str]] = {}
-    q_fwd: deque[tuple[str, list[str]]] = deque()
+    enq_counts: dict[str, int] = {}
+    q_fwd: deque[tuple[str, list[str], frozenset[str]]] = deque()
+
+    def _record_grounded_tags(path_x: list[str], acc_x: frozenset[str]) -> None:
+        for t in acc_x:
+            prev_gt = grounded_tag_paths.get(t)
+            if prev_gt is None or len(path_x) < len(prev_gt[0]):
+                grounded_tag_paths[t] = (path_x, acc_x)
+
     for nid, nd in nodes.items():
         if nd["is_source_root"]:
+            init_acc: frozenset[str] = frozenset(nd["provides"])
             fwd_paths[nid] = [nid]
-            q_fwd.append((nid, [nid]))
+            fwd_acc_tags[nid] = init_acc
+            enq_counts[nid] = 1
+            _record_grounded_tags([nid], init_acc)
+            q_fwd.append((nid, [nid], init_acc))
+
     while q_fwd:
-        cur, cur_path = q_fwd.popleft()
+        cur, cur_path, cur_acc = q_fwd.popleft()
         if len(cur_path) >= max_hops + 1:
             continue
         for nxt in out_adj.get(cur, ()):
             if nxt in cur_path:
                 continue
-            new_path = [*cur_path, nxt]
+            modes_cn = edge_modes.get((cur, nxt), set())
+            req_nxt: set[str] = nodes[nxt]["requires"]
+            nxt_prov: frozenset[str] = frozenset(nodes[nxt]["provides"])
+
+            if "guard" in modes_cn or "ready_door" in modes_cn or ("jewel_locus_or_sym" in modes_cn and not req_nxt):
+                eff_prefix = cur_path
+                eff_acc = cur_acc | nxt_prov
+            elif len(req_nxt) >= 1:
+                if req_nxt.issubset(cur_acc):
+                    eff_prefix = cur_path
+                    eff_acc = cur_acc | nxt_prov
+                else:
+                    missing = req_nxt - cur_acc
+                    if not (cur_acc & req_nxt) or not all(m in grounded_tag_paths for m in missing):
+                        continue
+                    merged_prefix = list(cur_path)
+                    merged_acc: set[str] = set(cur_acc)
+                    for m_tag in sorted(missing):
+                        m_path, m_acc = grounded_tag_paths[m_tag]
+                        for step_id in m_path:
+                            if step_id not in merged_prefix and step_id != nxt:
+                                merged_prefix.append(step_id)
+                        merged_acc.update(m_acc)
+                    if not req_nxt.issubset(merged_acc) or len(merged_prefix) > max_hops:
+                        continue
+                    eff_prefix = merged_prefix
+                    eff_acc = frozenset(merged_acc) | nxt_prov
+            else:
+                eff_prefix = cur_path
+                eff_acc = cur_acc | nxt_prov
+
+            if nxt in eff_prefix:
+                continue
+            new_path = [*eff_prefix, nxt]
             if nodes[nxt]["is_sink"]:
                 if nxt not in fwd_paths:
                     fwd_paths[nxt] = new_path
-                if len(cur_path) >= 2 and nxt not in sink_multi_paths:
+                    fwd_acc_tags[nxt] = eff_acc
+                if len(eff_prefix) >= 2 and nxt not in sink_multi_paths:
                     sink_multi_paths[nxt] = new_path
                     fwd_paths[nxt] = new_path
+                    fwd_acc_tags[nxt] = eff_acc
                 continue
-            if len(cur_path) >= max_hops:
+            if len(eff_prefix) >= max_hops:
                 continue
+            _record_grounded_tags(new_path, eff_acc)
             prev_path = fwd_paths.get(nxt)
+            prev_acc = fwd_acc_tags.get(nxt, frozenset())
             if prev_path is None or (len(prev_path) == 1 and len(new_path) >= 2):
+                merged_node_acc = prev_acc | eff_acc
                 fwd_paths[nxt] = new_path
-                q_fwd.append((nxt, new_path))
+                fwd_acc_tags[nxt] = merged_node_acc
+                enq_counts[nxt] = enq_counts.get(nxt, 0) + 1
+                _record_grounded_tags(new_path, merged_node_acc)
+                q_fwd.append((nxt, new_path, merged_node_acc))
+            elif not eff_acc.issubset(prev_acc) and enq_counts.get(nxt, 0) < 3:
+                merged_node_acc = prev_acc | eff_acc
+                fwd_acc_tags[nxt] = merged_node_acc
+                enq_counts[nxt] = enq_counts.get(nxt, 0) + 1
+                _record_grounded_tags(new_path, merged_node_acc)
+                q_fwd.append((nxt, new_path, merged_node_acc))
 
-    # Backward BFS from all `is_sink` nodes (`<= max_hops`).
+    # Backward BFS from all `is_sink` nodes (`<= max_hops`), preferring `crown_jewel` sinks first.
+    # For conjunctive multi-tag nodes (`len(requires) >= 2`), only step backward across single-node
+    # complete providers or explicit guard/door bridges so conjunctive sinks stay in `bwd_entries`.
     bwd_paths: dict[str, list[str]] = {}
     q_bwd: deque[str] = deque()
-    for nid, nd in nodes.items():
-        if nd["is_sink"]:
-            bwd_paths[nid] = [nid]
-            q_bwd.append(nid)
+    sink_order = sorted(
+        (nid for nid, nd in nodes.items() if nd["is_sink"]),
+        key=lambda nid: (0 if nodes[nid]["kind"] == "crown_jewel" else 1, nid),
+    )
+    for nid in sink_order:
+        bwd_paths[nid] = [nid]
+        q_bwd.append(nid)
     while q_bwd:
         cur = q_bwd.popleft()
         cur_suffix = bwd_paths[cur]
         if len(cur_suffix) >= max_hops:
             continue
+        cur_req: set[str] = nodes[cur]["requires"]
         for prev in in_adj.get(cur, ()):
-            if prev not in bwd_paths and prev not in cur_suffix:
-                bwd_paths[prev] = [prev, *cur_suffix]
-                q_bwd.append(prev)
+            if prev in bwd_paths or prev in cur_suffix:
+                continue
+            if len(cur_req) >= 2:
+                pmodes = edge_modes.get((prev, cur), set())
+                if (
+                    "ready_door" not in pmodes
+                    and "guard" not in pmodes
+                    and not cur_req.issubset(nodes[prev]["provides"])
+                ):
+                    continue
+            bwd_paths[prev] = [prev, *cur_suffix]
+            q_bwd.append(prev)
 
     percolated: list[dict[str, Any]] = []
     seen_step_tuples: set[tuple[str, ...]] = set()
-    for sink_id, nd in nodes.items():
-        if not nd["is_sink"]:
-            continue
+    for sink_id in sink_order:
+        nd = nodes[sink_id]
         full_chain = sink_multi_paths.get(sink_id) or fwd_paths.get(sink_id)
         if not full_chain:
             continue
@@ -1376,8 +1586,69 @@ def detect_percolated_multi_hop_paths(
                 }
             )
 
-    # Identify 1-link "Unicorn Gaps": deepest forward tips `u` not yet reaching a sink vs
-    # deepest backward suffix entries `v` whose unmet `requires` or `guarded_by` is 1 link away!
+    # Preload file-level call graph from `repomap_edges` and `bridge` visit counts once (zero N^2 SQL queries).
+    adj_weights: dict[str, dict[str, float]] = {}
+    has_repomap_edges = (
+        conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='repomap_edges'").fetchone()
+        is not None
+    )
+    if has_repomap_edges:
+        for er in conn.execute(
+            "SELECT src_file, dst_file, MAX(weight) AS w FROM repomap_edges GROUP BY src_file, dst_file"
+        ).fetchall():
+            sf = str(er["src_file"] or "").strip().lstrip("./")
+            df = str(er["dst_file"] or "").strip().lstrip("./")
+            wt = float(er["w"] or 0.0)
+            if sf and df and sf != df:
+                if wt > adj_weights.setdefault(sf, {}).get(df, 0.0):
+                    adj_weights[sf][df] = wt
+                if wt > adj_weights.setdefault(df, {}).get(sf, 0.0):
+                    adj_weights[df][sf] = wt
+
+    prox_cache: dict[tuple[str, str], tuple[int | None, float]] = {}
+
+    def _call_proximity(file_a: str, file_b: str) -> tuple[int | None, float]:
+        fa = file_a.strip().lstrip("./")
+        fb = file_b.strip().lstrip("./")
+        if not fa or not fb:
+            return (None, 0.0)
+        if fa == fb:
+            return (0, 5.0)
+        key = (fa, fb) if fa <= fb else (fb, fa)
+        cached = prox_cache.get(key)
+        if cached is not None:
+            return cached
+        nbrs_a = adj_weights.get(fa)
+        if nbrs_a and fb in nbrs_a:
+            res: tuple[int | None, float] = (1, nbrs_a[fb])
+            prox_cache[key] = res
+            return res
+        nbrs_b = adj_weights.get(fb)
+        if nbrs_a and nbrs_b:
+            common = nbrs_a.keys() & nbrs_b.keys()
+            if common:
+                best_2 = max(min(nbrs_a[m], nbrs_b[m]) for m in common)
+                res = (2, best_2)
+                prox_cache[key] = res
+                return res
+        res = (None, 0.0)
+        prox_cache[key] = res
+        return res
+
+    bridge_sig_counts: dict[str, int] = {}
+    has_tasks_tbl = (
+        conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='tasks'").fetchone()
+        is not None
+    )
+    if has_tasks_tbl:
+        for br_row in conn.execute("SELECT title, summary FROM tasks WHERE kind = 'bridge'").fetchall():
+            blob = f"{br_row['title'] or ''} {br_row['summary'] or ''}"
+            for m_sig in set(re.findall(r"([A-Za-z0-9_.-]+->[A-Za-z0-9_.-]+)", blob)):
+                bridge_sig_counts[m_sig] = bridge_sig_counts.get(m_sig, 0) + 1
+    total_bridge_visits = sum(bridge_sig_counts.values())
+
+    # Identify 1-link "Unicorn Gaps" across ALL `(fwd_tips, bwd_entries)` pairs (no pre-sort truncation),
+    # scoring each bridge candidate with `ah_puct_score`.
     unicorn_gaps: list[dict[str, Any]] = []
     fwd_tips = [
         nid
@@ -1394,70 +1665,109 @@ def detect_percolated_multi_hop_paths(
         for nid, suffix in bwd_paths.items()
         if nid not in fwd_paths and (nodes[nid]["requires"] or nodes[nid]["guarded_by"])
     ]
-    for tip_id in fwd_tips[:6]:
-        for entry_id in bwd_entries[:6]:
+    for tip_id in fwd_tips:
+        tip_file, _ = _locus_file_and_line(nodes[tip_id]["locus"])
+        tip_acc_provides = fwd_acc_tags.get(tip_id, frozenset(nodes[tip_id]["provides"]))
+        prefix = fwd_paths[tip_id]
+        has_snap = any(sid in snapshot_bearing_ids for sid in prefix)
+        for entry_id in bwd_entries:
             if tip_id == entry_id:
                 continue
-            prefix = fwd_paths[tip_id]
             suffix = bwd_paths[entry_id]
             if len(prefix) + len(suffix) > max_hops + 1:
                 continue
-            unmet = sorted(nodes[entry_id]["requires"] - nodes[tip_id]["provides"])
+            unmet = sorted(nodes[entry_id]["requires"] - tip_acc_provides)
+            tail_sink = suffix[-1] if suffix else ""
+            reaches_jewel = bool(tail_sink in nodes and nodes[tail_sink]["kind"] == "crown_jewel")
+            imp_cls = str(nodes[tail_sink].get("impact_class") or "rce") if reaches_jewel else "rce"
+            bwd_guard = str(nodes[entry_id]["guarded_by"] or "")
+            entry_file, _ = _locus_file_and_line(nodes[entry_id]["locus"])
+            hop_dist, edge_wt = _call_proximity(tip_file, entry_file)
+            if bwd_guard:
+                guard_file, _ = _locus_file_and_line(bwd_guard)
+                g_dist, g_wt = _call_proximity(tip_file, guard_file)
+                if g_dist is not None and (
+                    hop_dist is None or g_dist < hop_dist or (g_dist == hop_dist and g_wt > edge_wt)
+                ):
+                    hop_dist, edge_wt = g_dist, g_wt
+            bwd_proved_steps = sum(1 for x in suffix if not nodes[x]["is_sink"])
+            b_visits = bridge_sig_counts.get(f"{tip_id}->{entry_id}", 0)
+            score = ah_puct_score(
+                reaches_crown_jewel=reaches_jewel,
+                impact_class=imp_cls,
+                unmet_requires_count=len(unmet),
+                has_unmet_guard=bool(bwd_guard),
+                call_hop_distance=hop_dist,
+                max_edge_weight=edge_wt,
+                has_snapshot=has_snap,
+                backward_proved_steps=bwd_proved_steps,
+                bridge_visits=b_visits,
+                total_bridge_visits=total_bridge_visits,
+            )
             unicorn_gaps.append(
                 {
                     "forward_prefix": prefix,
                     "forward_tip_id": tip_id,
                     "forward_tip_locus": nodes[tip_id]["locus"],
-                    "forward_provides": sorted(nodes[tip_id]["provides"]),
+                    "forward_provides": sorted(tip_acc_provides),
                     "backward_entry_id": entry_id,
                     "backward_entry_locus": nodes[entry_id]["locus"],
-                    "backward_guard": nodes[entry_id]["guarded_by"],
+                    "backward_guard": bwd_guard,
                     "unmet_requires": unmet,
                     "backward_suffix": suffix,
-                    "total_chain_hops_if_bridged": len(prefix) + 1 + len([x for x in suffix if not nodes[x]["is_sink"]]),
+                    "reaches_crown_jewel": reaches_jewel,
+                    "total_chain_hops_if_bridged": len(prefix) + 1 + bwd_proved_steps,
+                    "ah_puct_score": score,
+                    "call_hop_distance": hop_dist,
+                    "has_snapshot": has_snap,
                 }
             )
     unicorn_gaps.sort(
         key=lambda g: (
-            -int(g["total_chain_hops_if_bridged"]),
+            0 if bool(g.get("reaches_crown_jewel")) else 1,
+            -float(g["ah_puct_score"]),
+            len(g["unmet_requires"]),
             -len(g["backward_suffix"]),
+            -int(g["total_chain_hops_if_bridged"]),
             str(g["backward_entry_id"]),
+            str(g["forward_tip_id"]),
         )
     )
 
     spawned_tasks: list[str] = []
     if enqueue_tasks and percolated:
         now_iso = utc_now_iso()
-        for pc in percolated:
-            step_csv = ",".join(pc["step_ids"])
-            exists = conn.execute(
-                "SELECT 1 FROM tasks WHERE kind = 'chain' AND summary LIKE '%' || ? || '%' LIMIT 1",
-                (step_csv,),
-            ).fetchone()
-            already_verified = conn.execute(
-                "SELECT 1 FROM chains WHERE verified = 1 AND step_ids_json = ? LIMIT 1",
-                (json.dumps(pc["step_ids"]),),
-            ).fetchone()
-            if not exists and not already_verified:
-                tid = new_id("task")
-                conn.execute(
-                    """
-                    INSERT INTO tasks(
-                        task_id, kind, direction, title, subsystem, locus, priority, status,
-                        salience_score, summary, created_at, updated_at
-                    ) VALUES (?, 'chain', 'outside_in', ?, ?, ?, 'critical', 'open', 98, ?, ?, ?)
-                    """,
-                    (
-                        tid,
-                        f"Verify percolated {pc['hop_count']}-step chain ({step_csv}) -> {pc['sink_id']}",
-                        infer_subsystem(pc["sink_locus"]),
-                        pc["sink_locus"],
-                        f"Percolated multi-hop path [{step_csv}] -> {pc['sink_id']}@{pc['sink_locus']}; prove end-to-end with `ajar chain propose`.",
-                        now_iso,
-                        now_iso,
-                    ),
-                )
-                spawned_tasks.append(tid)
+        with immediate_tx(conn):
+            for pc in percolated:
+                step_csv = ",".join(pc["step_ids"])
+                exists = conn.execute(
+                    "SELECT 1 FROM tasks WHERE kind = 'chain' AND summary LIKE '%' || ? || '%' LIMIT 1",
+                    (step_csv,),
+                ).fetchone()
+                already_verified = conn.execute(
+                    "SELECT 1 FROM chains WHERE verified = 1 AND step_ids_json = ? LIMIT 1",
+                    (json.dumps(pc["step_ids"]),),
+                ).fetchone()
+                if not exists and not already_verified:
+                    tid = new_id("task")
+                    conn.execute(
+                        """
+                        INSERT INTO tasks(
+                            task_id, kind, direction, title, subsystem, locus, priority, status,
+                            salience_score, summary, created_at, updated_at
+                        ) VALUES (?, 'chain', 'outside_in', ?, ?, ?, 'critical', 'open', 98, ?, ?, ?)
+                        """,
+                        (
+                            tid,
+                            f"Verify percolated {pc['hop_count']}-step chain ({step_csv}) -> {pc['sink_id']}",
+                            infer_subsystem(pc["sink_locus"]),
+                            pc["sink_locus"],
+                            f"Percolated multi-hop path [{step_csv}] -> {pc['sink_id']}@{pc['sink_locus']}; prove end-to-end with `ajar chain propose`.",
+                            now_iso,
+                            now_iso,
+                        ),
+                    )
+                    spawned_tasks.append(tid)
 
     return {
         "percolated_paths": percolated,

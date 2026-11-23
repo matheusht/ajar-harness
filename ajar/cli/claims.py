@@ -17,8 +17,10 @@ from ajar.chain_planner import (
     evaluate_precondition_realism,
 )
 from ajar.cli.common import _emit
+from ajar.cli.repro import cmd_repro as cmd_repro
 from ajar.db import (
     AjarError,
+    apply_latest_finding_corrections,
     calibrate_finding,
     list_rows,
     log_event,
@@ -31,7 +33,6 @@ from ajar.epistemic_hooks import (
     claim_requires_release_ub_diff,
     parse_tag_list,
 )
-from ajar.patch_verify import run_8arm_patch_verification
 from ajar.redact import (
     scrub_text,
     scrubbed_subprocess_env,
@@ -41,24 +42,27 @@ from ajar.repro_binary_live import (
     run_live_reproduction,
 )
 from ajar.repro_compose import (
+    _parse_backup_steps,
     _parse_step_micropatches,
     run_chain_reproduction,
     run_claim_instrumentation,
     run_snapshot_chain_probe,
 )
 from ajar.repro_source import (
-    run_repro_try,
     run_source_reproduction,
 )
 from ajar.services import (
     block_claim,
+    calibrate_chain,
     falsify_claim,
+    mark_claim_duplicate,
     preflight_chain_proposal,
     propose_claim,
     record_chain_proposal,
     record_reproduction_outcome,
     rescope_claim_service,
     survive_claim,
+    verify_patch_fix,
 )
 from ajar.store import assert_run_mutable
 from ajar.swarm import sync_run_to_shared_mirror
@@ -86,8 +90,20 @@ def cmd_claim(args: argparse.Namespace) -> int:
                 severity=args.severity,
                 seeded_by_human=bool(args.seeded_by_human),
                 consume_anomaly_id=args.consume_anomaly,
+                same_root_of=getattr(args, "same_root_of", None),
                 target_dir=tpath,
                 target_mode=tmode,
+            )
+            _emit(res, True)
+            return EXIT_OK
+
+        if args.claim_cmd == "duplicate":
+            res = mark_claim_duplicate(
+                conn,
+                claim_id=args.claim_id,
+                duplicate_of_claim_id=args.of,
+                worker_id=args.worker,
+                reason=args.reason,
             )
             _emit(res, True)
             return EXIT_OK
@@ -251,6 +267,7 @@ def cmd_claim(args: argparse.Namespace) -> int:
                     warm_cross_kill_claims=siblings,
                     claim_locus=str(clm["locus"]),
                     shared_guard_locus=str(getattr(args, "shared_guard_locus", None) or ""),
+                    max_changed_lines=int(getattr(args, "max_changed_lines", 16) or 16),
                     release_cmd=rel_cmd,
                     release_control_cmd=rel_ctrl_cmd,
                     surface_kind=surf_kind,
@@ -296,18 +313,20 @@ def cmd_claim(args: argparse.Namespace) -> int:
 
             if not res["passed"]:
                 err_cls = str(res.get("error_class") or "target_negative")
+                poc_proven = bool(res.get("poc_proven", False))
                 if str(clm["status"]) == "reproduced":
                     log_event(
                         conn,
                         args.worker,
                         "claim_repro_rerun_failed_preserved",
                         args.claim_id,
-                        {"error_class": err_cls, "reason": str(res.get("reason", ""))[:200]},
+                        {"error_class": err_cls, "poc_proven": poc_proven, "reason": str(res.get("reason", ""))[:200]},
                     )
                     pivot = {
                         "claim_id": args.claim_id,
                         "status": "reproduced",
                         "error_class": err_cls,
+                        "poc_proven": poc_proven,
                         "strike_recorded": False,
                         "failed_repro_count": int(clm["failed_repro_count"] or 0),
                         "pivoted_to_instrumentation": False,
@@ -320,18 +339,20 @@ def cmd_claim(args: argparse.Namespace) -> int:
                         observation_hash=str(res.get("observation_hash", "")),
                         reason=str(res.get("reason", "")),
                     )
+                    pivot["poc_proven"] = poc_proven
                 else:
                     log_event(
                         conn,
                         args.worker,
                         "claim_repro_non_strike_error",
                         args.claim_id,
-                        {"error_class": err_cls, "reason": str(res.get("reason", ""))[:200]},
+                        {"error_class": err_cls, "poc_proven": poc_proven, "reason": str(res.get("reason", ""))[:200]},
                     )
                     pivot = {
                         "claim_id": args.claim_id,
                         "status": str(clm["status"]),
                         "error_class": err_cls,
+                        "poc_proven": poc_proven,
                         "strike_recorded": False,
                         "failed_repro_count": int(clm["failed_repro_count"] or 0),
                         "pivoted_to_instrumentation": False,
@@ -384,9 +405,23 @@ def cmd_chain(args: argparse.Namespace) -> int:
                 snapshot_id=args.from_snapshot,
                 cmd=args.cmd,
                 patch_path=patch_p,
+                build_cmd=str(getattr(args, "build_cmd", None) or ""),
                 oracle=oracle_dict,
                 timeout_sec=int(getattr(args, "timeout", 60)),
                 worker_id=str(getattr(args, "worker", "worker")),
+            )
+            _emit(res, True)
+            return EXIT_OK
+
+        if args.chain_cmd == "calibrate":
+            res = calibrate_chain(
+                conn,
+                chain_id=args.chain_id,
+                reason=args.reason,
+                realism_tier=args.realism_tier,
+                severity=args.severity,
+                declared_steps=getattr(args, "declared_steps", None),
+                worker_id=args.worker,
             )
             _emit(res, True)
             return EXIT_OK
@@ -399,6 +434,7 @@ def cmd_chain(args: argparse.Namespace) -> int:
 
             if run is not None and tmode == "source":
                 patch_map = _parse_step_micropatches(getattr(args, "step_micropatch", None))
+                backup_map = _parse_backup_steps(getattr(args, "backup_step", None))
                 res = run_chain_reproduction(
                     conn,
                     run_dir=rdir,
@@ -411,6 +447,7 @@ def cmd_chain(args: argparse.Namespace) -> int:
                     severity=args.severity,
                     oracle=oracle_dict,
                     step_micropatches=patch_map,
+                    backup_steps=backup_map,
                     ablate_steps=not bool(getattr(args, "no_ablate", False)),
                     door_id=str(getattr(args, "door", None) or ""),
                     jewel_id=str(getattr(args, "jewel", None) or ""),
@@ -460,9 +497,11 @@ def cmd_patch(args: argparse.Namespace) -> int:
     try:
         if args.patch_cmd == "verify":
             run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
-            tpath = pathlib.Path(run["target_path"])
+            if run is None:
+                raise AjarError("Run metadata missing in run.db.", EXIT_USER_ERROR)
+            tpath = pathlib.Path(str(run["target_path"]))
             oracle_dict = json.loads(args.oracle_json) if args.oracle_json else None
-            res = run_8arm_patch_verification(
+            res = verify_patch_fix(
                 conn,
                 run_dir=rdir,
                 target_dir=tpath,
@@ -492,35 +531,6 @@ def cmd_patch(args: argparse.Namespace) -> int:
         conn.close()
 
 
-def cmd_repro(args: argparse.Namespace) -> int:
-    rid = resolve_run_id(args.run)
-    rdir = run_dir_for(rid)
-    conn = open_run_db(rid)
-    try:
-        if args.repro_cmd == "try":
-            run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
-            tpath = pathlib.Path(run["target_path"])
-            oracle_dict = json.loads(args.oracle_json) if getattr(args, "oracle_json", None) else None
-            patch_p = pathlib.Path(args.patch) if getattr(args, "patch", None) else None
-            res = run_repro_try(
-                run_dir=rdir,
-                target_dir=tpath,
-                cmd=args.cmd,
-                patch_path=patch_p,
-                build_cmd=args.build_cmd or "",
-                oracle=oracle_dict,
-                timeout_sec=int(args.timeout),
-            )
-            _emit(res, True)
-            return EXIT_OK
-
-        rows = list_rows(conn, "SELECT * FROM repro_snapshots ORDER BY created_at DESC")
-        _emit({"snapshots": rows}, True)
-        return EXIT_OK
-    finally:
-        conn.close()
-
-
 def cmd_finding(args: argparse.Namespace) -> int:
     rid = resolve_run_id(args.run)
     conn = open_run_db(rid)
@@ -532,19 +542,24 @@ def cmd_finding(args: argparse.Namespace) -> int:
                 reason=args.reason,
                 severity=args.severity,
                 title=args.title,
+                declared_steps=getattr(args, "declared_steps", None),
+                realism_tier=getattr(args, "realism_tier", None),
                 worker_id=args.worker,
             )
             _emit(res, True)
             return EXIT_OK
 
-        rows = list_rows(
+        rows = apply_latest_finding_corrections(
             conn,
-            """
-            SELECT f.*, c.remediation_state
-            FROM findings f
-            JOIN claims c ON f.claim_id = c.claim_id
-            ORDER BY f.created_at ASC
-            """,
+            list_rows(
+                conn,
+                """
+                SELECT f.*, c.remediation_state
+                FROM findings f
+                JOIN claims c ON f.claim_id = c.claim_id
+                ORDER BY f.created_at ASC
+                """,
+            ),
         )
         _emit({"findings": rows}, True)
         return EXIT_OK

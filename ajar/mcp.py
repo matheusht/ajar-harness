@@ -13,6 +13,7 @@ import sys
 from typing import Any, BinaryIO
 
 from ajar import EXIT_USER_ERROR, __version__
+from ajar.catalog import search_issue_catalog, trace_backward_sink_slices
 from ajar.db import (
     AjarError,
     lease_next_task,
@@ -21,6 +22,7 @@ from ajar.db import (
     open_run_db,
     render_task_context,
     resolve_run_id,
+    run_dir_for,
 )
 from ajar.gates import check_all_gates
 from ajar.graph import export_attack_flow_graph
@@ -30,14 +32,20 @@ from ajar.repomap import build_repomap
 from ajar.services import (
     add_anomaly,
     add_surface,
+    build_worker_dispatch_brief,
+    cast_lead_vote,
     close_task_done,
     close_task_dry,
     falsify_claim,
     finish_run,
+    plan_swarm_wave,
     propose_claim,
+    rank_leads,
     rescope_claim_service,
     survive_claim,
+    verify_patch_fix,
 )
+from ajar.slice_probe import VALID_SLICE_TRACERS, run_slice_probe
 
 MCP_TOOLS: list[dict[str, Any]] = [
     {
@@ -63,6 +71,7 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "focus_files": {"type": "array", "items": {"type": "string"}},
                 "focus_symbols": {"type": "array", "items": {"type": "string"}},
                 "budget_tokens": {"type": "integer", "default": 1500},
+                "unvisited_only": {"type": "boolean", "default": False},
             },
         },
     },
@@ -160,6 +169,7 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "falsification_prediction": {"type": "string"},
                 "falsification_test": {"type": "string"},
                 "consume_anomaly_id": {"type": "string"},
+                "same_root_of": {"type": "string"},
             },
             "required": [
                 "worker_id",
@@ -224,6 +234,92 @@ MCP_TOOLS: list[dict[str, Any]] = [
         "inputSchema": {"type": "object", "properties": {"active_only": {"type": "boolean", "default": True}}},
     },
     {
+        "name": "ajar_lead_vote",
+        "description": "Cast an Expected-Value (`ev_score`) lead vote to concentrate swarm salience on top chain/hunt targets.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "worker_id": {"type": "string"},
+                "target_kind": {
+                    "type": "string",
+                    "enum": ["surface", "door", "slice", "chain", "subsystem", "claim", "primitive", "finding"],
+                },
+                "target_id": {"type": "string"},
+                "locus": {"type": "string"},
+                "subsystem": {"type": "string"},
+                "impact_score": {"type": "integer", "default": 7},
+                "plausibility_score": {"type": "integer", "default": 7},
+                "chainability_score": {"type": "integer", "default": 7},
+                "effort_cost": {"type": "integer", "default": 5},
+                "rationale": {"type": "string"},
+            },
+            "required": ["worker_id", "target_kind"],
+        },
+    },
+    {
+        "name": "ajar_lead_rank",
+        "description": "Rank multi-agent voted leads by consensus Expected Value and inspect root plateau throttles.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target_kind": {"type": "string"},
+                "limit": {"type": "integer", "default": 20},
+            },
+        },
+    },
+    {
+        "name": "ajar_catalog_search",
+        "description": "Query the unified Issue & Gadget Catalog across findings, capabilities, trust gadgets, claims, anomalies, and doors.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "default": ""},
+                "tags": {"type": "string", "default": ""},
+                "subsystem": {"type": "string", "default": ""},
+                "role": {"type": "string", "default": ""},
+                "include_unverified": {"type": "boolean", "default": True},
+                "limit": {"type": "integer", "default": 25},
+            },
+        },
+    },
+    {
+        "name": "ajar_catalog_backslice",
+        "description": "Trace backward sink-to-source call slices (`callee <- caller`) from a Crown Jewel, Open Door, locus, or symbol.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "sink": {"type": "string"},
+                "max_hops": {"type": "integer", "default": 3},
+                "limit": {"type": "integer", "default": 20},
+            },
+            "required": ["sink"],
+        },
+    },
+    {
+        "name": "ajar_swarm_plan",
+        "description": "Plan a disjoint parallel Swarm wave (`<= max_workers`), breaking discovery stalls on unvisited slices and auto-bridging Middle-Unicorn gaps.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "max_workers": {"type": "integer", "default": 6},
+                "enqueue_missing": {"type": "boolean", "default": True},
+                "stall_window": {"type": "integer", "default": 6},
+            },
+        },
+    },
+    {
+        "name": "ajar_swarm_brief",
+        "description": "Compile a compact Layer-0 Worker Dispatch Brief (`<= 40` lines) with phase lock, minimal catalog neighbors, and `falsifier != proposer` enforcement.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string"},
+                "worker_id": {"type": "string", "default": "w-1"},
+            },
+            "required": ["task_id"],
+        },
+    },
+    {
         "name": "ajar_export_graph",
         "description": "Export deterministic `ajar-platform-graph/2` (or `v1`) component and attack-flow whiteboard JSON.",
         "inputSchema": {
@@ -238,6 +334,57 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "include_snippets": {"type": "boolean", "default": False},
                 "repo_slug": {"type": "string", "default": ""},
             },
+        },
+    },
+    {
+        "name": "ajar_repro_slice_probe",
+        "description": "Execute a target command inside an isolated `slot-<k>` worktree and return `@VISITED` / `@UNREACHED` line coverage plus ASan/UBSan crash frames around `focus_locus`.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "focus_locus": {"type": "string"},
+                "cmd": {"type": "string"},
+                "build_cmd": {"type": "string", "default": ""},
+                "patch_path": {"type": "string", "default": ""},
+                "tracer": {
+                    "type": "string",
+                    "enum": list(VALID_SLICE_TRACERS),
+                    "default": "auto",
+                },
+                "sanitizer_flags": {"type": "boolean", "default": False},
+                "sanitize": {"type": "boolean", "default": False},
+                "record_coverage": {"type": "boolean", "default": False},
+                "task_id": {"type": "string", "default": ""},
+                "context_lines": {"type": "integer", "default": 8},
+                "max_rendered_lines": {"type": "integer", "default": 60},
+                "claim_id": {"type": "string", "default": ""},
+                "worker_id": {"type": "string", "default": "worker"},
+                "timeout_sec": {"type": "integer", "default": 60},
+            },
+            "required": ["focus_locus", "cmd"],
+        },
+    },
+    {
+        "name": "ajar_patch_verify",
+        "description": "Verify a production fix with the 9-arm remediation gate (`campaign_phase` must be `remediate` or `full`).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "finding_id": {"type": "string"},
+                "patch_path": {"type": "string"},
+                "suite_cmd": {"type": "string"},
+                "variant_cmds": {"type": "array", "items": {"type": "string"}},
+                "caller_audit": {"type": "string"},
+                "sibling_audit": {"type": "string"},
+                "caller_cmd": {"type": "string", "default": ""},
+                "sibling_cmd": {"type": "string", "default": ""},
+                "build_cmd": {"type": "string", "default": ""},
+                "worker_id": {"type": "string", "default": "worker"},
+                "max_changed_lines": {"type": "integer", "default": 120},
+                "timeout_sec": {"type": "integer", "default": 90},
+                "suite_timeout_sec": {"type": "integer", "default": 1800},
+            },
+            "required": ["finding_id", "patch_path", "suite_cmd", "variant_cmds", "caller_audit", "sibling_audit"],
         },
     },
     {
@@ -277,6 +424,7 @@ def dispatch_mcp_tool(
                 focus_files=args.get("focus_files") or (),
                 focus_symbols=args.get("focus_symbols") or (),
                 budget_tokens=int(args.get("budget_tokens", 1500)),
+                unvisited_only=bool(args.get("unvisited_only", False)),
             )
         if tool_name == "ajar_ref_query":
             return {
@@ -354,6 +502,7 @@ def dispatch_mcp_tool(
                 surface_id=args.get("surface_id"),
                 severity=str(args.get("severity", "high")),
                 consume_anomaly_id=args.get("consume_anomaly_id"),
+                same_root_of=args.get("same_root_of"),
                 target_dir=tpath,
                 target_mode=str(run["target_mode"] if run else "source"),
             )
@@ -391,6 +540,57 @@ def dispatch_mcp_tool(
             )
         if tool_name == "ajar_steer_list":
             return {"steers": list_steers(conn, active_only=bool(args.get("active_only", True)))}
+        if tool_name == "ajar_lead_vote":
+            return cast_lead_vote(
+                conn,
+                worker_id=str(args.get("worker_id") or args.get("worker") or ""),
+                target_kind=str(args["target_kind"]),
+                target_id=str(args.get("target_id") or ""),
+                locus=str(args.get("locus") or ""),
+                subsystem=str(args.get("subsystem") or ""),
+                impact_score=int(args.get("impact_score", 7)),
+                plausibility_score=int(args.get("plausibility_score", 7)),
+                chainability_score=int(args.get("chainability_score", 7)),
+                effort_cost=int(args.get("effort_cost", 5)),
+                rationale=str(args.get("rationale") or ""),
+            )
+        if tool_name == "ajar_lead_rank":
+            return rank_leads(
+                conn,
+                target_kind=str(args.get("target_kind") or ""),
+                limit=int(args.get("limit", 20)),
+            )
+        if tool_name == "ajar_catalog_search":
+            return search_issue_catalog(
+                conn,
+                query=str(args.get("query") or ""),
+                tags=args.get("tags"),
+                subsystem=str(args.get("subsystem") or ""),
+                role=str(args.get("role") or ""),
+                include_unverified=bool(args.get("include_unverified", True)),
+                limit=int(args.get("limit", 25)),
+            )
+        if tool_name == "ajar_catalog_backslice":
+            return trace_backward_sink_slices(
+                conn,
+                sink=str(args["sink"]),
+                max_hops=int(args.get("max_hops", 3)),
+                limit=int(args.get("limit", 20)),
+            )
+        if tool_name == "ajar_swarm_plan":
+            return plan_swarm_wave(
+                conn,
+                max_workers=int(args.get("max_workers", args.get("workers", 6))),
+                enqueue_missing=bool(args.get("enqueue_missing", True)),
+                stall_window=int(args.get("stall_window", 6)),
+            )
+        if tool_name == "ajar_swarm_brief":
+            wid = str(args.get("worker_id") if "worker_id" in args else args.get("worker", "w-1"))
+            return build_worker_dispatch_brief(
+                conn,
+                task_id=str(args["task_id"]),
+                worker_id=wid,
+            )
         if tool_name == "ajar_export_graph":
             return export_attack_flow_graph(
                 conn,
@@ -398,6 +598,56 @@ def dispatch_mcp_tool(
                 visibility=str(args.get("visibility") or "internal_full"),
                 include_snippets=bool(args.get("include_snippets", False)),
                 repo_slug=str(args.get("repo_slug") or ""),
+            )
+        if tool_name == "ajar_repro_slice_probe":
+            if run is not None and str(run["target_mode"]) != "source":
+                raise AjarError("`ajar_repro_slice_probe` requires source mode.", EXIT_USER_ERROR)
+            p_rid = pathlib.Path(run_id)
+            rdir = p_rid.parent if (p_rid.suffix == ".db" or "/" in str(run_id)) else run_dir_for(run_id, ajar_home)
+            raw_patch = str(args.get("patch_path") or args.get("patch") or "").strip()
+            patch_p = pathlib.Path(raw_patch) if raw_patch else None
+            raw_task = str(args.get("task_id") or args.get("task") or "").strip() or None
+            wid = str(args.get("worker_id") or args.get("worker") or "worker")
+            return run_slice_probe(
+                conn,
+                run_dir=rdir,
+                target_dir=tpath,
+                focus_locus=str(args["focus_locus"]),
+                cmd=str(args["cmd"]),
+                build_cmd=str(args.get("build_cmd") or ""),
+                patch_path=patch_p,
+                tracer=str(args.get("tracer") or "auto"),
+                sanitizer_flags=bool(args.get("sanitizer_flags", False) or args.get("sanitize", False)),
+                record_coverage=bool(args.get("record_coverage", False)),
+                task_id=raw_task,
+                context_lines=int(args.get("context_lines", 8)),
+                max_rendered_lines=int(args.get("max_rendered_lines", 60)),
+                claim_id=str(args.get("claim_id") or args.get("claim") or ""),
+                timeout_sec=int(args.get("timeout_sec", args.get("timeout", 60))),
+                worker_id=wid,
+            )
+        if tool_name == "ajar_patch_verify":
+            p_rid = pathlib.Path(run_id)
+            rdir = p_rid.parent if (p_rid.suffix == ".db" or "/" in str(run_id)) else run_dir_for(run_id, ajar_home)
+            raw_variants = args.get("variant_cmds") or []
+            variants = [str(v) for v in raw_variants] if isinstance(raw_variants, list) else [str(raw_variants)]
+            return verify_patch_fix(
+                conn,
+                run_dir=rdir,
+                target_dir=tpath,
+                finding_id=str(args["finding_id"]),
+                patch_path=pathlib.Path(str(args["patch_path"])),
+                suite_cmd=str(args["suite_cmd"]),
+                variant_cmds=variants,
+                caller_audit=str(args["caller_audit"]),
+                sibling_audit=str(args["sibling_audit"]),
+                caller_cmd=str(args.get("caller_cmd") or ""),
+                sibling_cmd=str(args.get("sibling_cmd") or ""),
+                build_cmd=str(args.get("build_cmd") or ""),
+                max_changed_lines=int(args.get("max_changed_lines", 120)),
+                timeout_sec=int(args.get("timeout_sec", 90)),
+                suite_timeout_sec=int(args.get("suite_timeout_sec", 1800)),
+                worker_id=str(args.get("worker_id") or args.get("worker") or "mcp"),
             )
         if tool_name == "ajar_finish":
             return finish_run(conn, run_id=run_id, target_dir=tpath, actor="mcp")

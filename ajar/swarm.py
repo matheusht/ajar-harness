@@ -106,8 +106,8 @@ def validate_structural_claim_prose(*texts: str | None) -> tuple[bool, str]:
             return (
                 False,
                 f"structural_prose_gate: claim text embeds shellcode or post-exploitation hook literal ({m.group(0)!r}). "
-                "State structural code transitions and boundary violations (for example `prepare_symlink_changes skips "
-                "SYMLINK_IN_RESULT when old_mode == 0`), not OS hook shell payloads.",
+                "State structural code transitions and boundary violations (for example `prepare_archive_links skips "
+                "LINK_PATH_CHECK when old_mode == 0`), not OS hook shell payloads.",
             )
     return (True, "ok")
 
@@ -303,7 +303,13 @@ def _select_stage_items(
                 break
 
         for ver_clm in conn.execute(
-            "SELECT claim_id, severity, locus, status, title, mechanism FROM claims WHERE status IN ('proposed', 'survived_falsify') ORDER BY created_at ASC"
+            """
+            SELECT claim_id, severity, locus, status, title, mechanism
+            FROM claims
+            WHERE status IN ('proposed', 'survived_falsify')
+            ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+                     failed_repro_count ASC, created_at ASC
+            """
         ).fetchall():
             cid = str(ver_clm["claim_id"])
             if _can_pick(cid):
@@ -446,7 +452,9 @@ def _select_stage_items(
             if _can_pick(pid):
                 seen_ids.add(pid)
                 items.append({"id": pid, "priority": str(r["kind"]), "locus": scrub_text(str(r["locus"])), "status": "unchained"})
-        for f in conn.execute("SELECT finding_id, severity, locus FROM findings ORDER BY created_at ASC").fetchall():
+        for f in conn.execute(
+            "SELECT finding_id, severity, locus FROM findings ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at ASC"
+        ).fetchall():
             fid = str(f["finding_id"])
             if _can_pick(fid):
                 seen_ids.add(fid)
@@ -555,7 +563,16 @@ def _render_packet_markdown(
         )
     lines.append("")
 
-    if wire_profile == "swarm_patch_first":
+    if wire_profile in ("swarm_patch_first", "regression_tdd") and stage not in ("reproduce", "chain"):
+        lines.extend(
+            [
+                "## Boundary-Invariant Conformance Audit Protocol",
+                "1. Audit structural state-machine and boundary invariants directly in source code; do NOT author remediation patches during discovery or falsification.",
+                "2. Record broken invariants, capabilities, or `trust_gadget` transitions using neutral state-transition descriptions (`ajar claim propose` / `ajar primitive add` / `ajar claim falsify`).",
+                "3. Cast Expected-Value votes (`ajar lead vote`) on high-upside leads and park blocked deep sinks (`ajar door park`).",
+            ]
+        )
+    elif wire_profile == "swarm_patch_first":
         lines.extend(
             [
                 "## Patch-First Execution Protocol",

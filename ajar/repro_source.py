@@ -1020,6 +1020,8 @@ BUILD_OR_ENV_ERROR_RE = re.compile(
     r"|error\[E0463\]:\s*can't find crate"
     r"|collect2:\s*error:\s*ld returned"
     r"|clang(?:\+\+)?:\s*error:\s*linker command failed"
+    r"|\b(?:gcc|clang|cc|g\+\+|clang\+\+|rustc|javac):\s*(?:fatal\s+)?error:"
+    r"|\b(?:SyntaxError|IndentationError|TabError|ModuleNotFoundError):\s*\S+"
     r"|CMake Error"
     r")",
     re.IGNORECASE,
@@ -1031,6 +1033,8 @@ def _detect_build_or_env_failure(exit_code: int, stdout: str, stderr: str) -> bo
     combined = f"{stdout or ''}\n{stderr or ''}"
     if DEBUG_ABORT_SIGNAL_RE.search(combined):
         return False
+    if int(exit_code) == getattr(os, "EX_SOFTWARE", 70) and re.search(r"(?m)^HARNESS_FAILURE:", combined):
+        return True
     if int(exit_code) == 127:
         return True
     return bool(BUILD_OR_ENV_ERROR_RE.search(combined))
@@ -1224,6 +1228,7 @@ def _persist_repro_failure_artifact(
         "recorded_at": utc_now_iso(),
         "claim_id": claim_id,
         "error_class": str(result.get("error_class") or ""),
+        "poc_proven": bool(result.get("poc_proven", False)),
         "reason": str(result.get("reason") or ""),
         "observation_hash": str(result.get("observation_hash") or ""),
         "replay": {
@@ -1509,8 +1514,24 @@ def _run_source_reproduction_impl(
                 claim_id=claim_id,
                 source_cmd=poc_cmd,
             )
-            if snap_res.get("ok"):
-                captured_snapshot = snap_res
+            if not snap_res.get("ok"):
+                snap_reason = str(snap_res.get("reason") or "Post-state snapshot capture failed.")
+                return {
+                    "passed": False,
+                    "error_class": "preflight_error",
+                    "reason": snap_reason,
+                    "observation_hash": hashlib.sha256(f"{obs_seed}|snapshot:{snap_reason}".encode("utf-8")).hexdigest()[:16],
+                    "micropatch_diff": scrub_text(diff_text[:4000]),
+                    "arm1_clean_poc": arm1,
+                    "arm2_clean_control": {"arm_passed": False, "not_run": True},
+                    "arm3_patch_poc": {"arm_passed": False, "not_run": True},
+                    "arm4_patch_control": {"arm_passed": False, "not_run": True},
+                    "arm5a_release_poc": {},
+                    "arm5b_release_control": {},
+                    "ub_divergence_class": "",
+                    "cross_killed_claim_ids": [],
+                }
+            captured_snapshot = snap_res
 
         # Clean Arm-1 scratch state between Arm 1 and Arm 2; reuse verified clean-HEAD build outputs when untouched.
         arm2_build_reused = False
@@ -1597,6 +1618,7 @@ def _run_source_reproduction_impl(
             err = scrub_text(apply_proc.stderr.strip()[:300])
             return {
                 "passed": False,
+                "poc_proven": True,
                 "error_class": "preflight_error",
                 "reason": f"Micro-patch failed `git apply` cleanly: {err}",
                 "observation_hash": hashlib.sha256((obs_seed + "|apply_fail").encode("utf-8")).hexdigest()[:16],
@@ -1630,6 +1652,7 @@ def _run_source_reproduction_impl(
                 )
                 return {
                     "passed": False,
+                    "poc_proven": True,
                     "error_class": "build_or_env_error",
                     "timed_out": bool(bld_patch["timed_out"]),
                     "reason": f"Patched --build-cmd {bld_desc}: {bld_patch['stderr'][:240]}",
@@ -1646,7 +1669,7 @@ def _run_source_reproduction_impl(
                     "cross_killed_claim_ids": [],
                 }
 
-        # Arm 3: Micro-patched target + PoC -> defect MUST stop firing (0 hits).
+        # Arm 3: Micro-patched target + PoC -> defect MUST stop firing (0 hits) AND complete cleanly across all trials!
         arm3 = _run_trials(
             poc_cmd,
             slot_dir=slot_dir,
@@ -1656,15 +1679,35 @@ def _run_source_reproduction_impl(
             trials=n_trials,
             helpers_dir=helpers_dir,
         )
-        arm3["arm_passed"] = arm3["defect_hits"] == 0 and not arm3["timed_out"]
+        arm3["arm_passed"] = arm3["defect_hits"] == 0 and arm3["clean_passes"] == n_trials
         if not arm3["arm_passed"]:
+            if arm3["defect_hits"]:
+                a3_error_class = "micropatch_error"
+                a3_reason = (
+                    f"Arm 3 (micro-patch + PoC) still triggered defect ({arm3['defect_hits']}/{n_trials} hits). "
+                    "Arms 1 & 2 passed (`poc_proven=true`); refine `--micropatch` without rewriting the PoC."
+                )
+            else:
+                is_build_err = _detect_build_or_env_failure(
+                    int(arm3["exit_code"]), str(arm3.get("stdout", "")), str(arm3.get("stderr", ""))
+                )
+                a3_exit = int(arm3["exit_code"])
+                is_signal_death = a3_exit < 0 or a3_exit >= 128
+                a3_error_class = (
+                    "build_or_env_error"
+                    if is_build_err
+                    else ("target_negative" if is_signal_death else "micropatch_error")
+                )
+                a3_reason = (
+                    "Arm 3 (micro-patch + PoC) failed to complete cleanly "
+                    f"(clean_passes={arm3['clean_passes']}/{n_trials}, exit={arm3['exit_code']}, "
+                    f"timed_out={arm3['timed_out']})."
+                )
             return {
                 "passed": False,
-                "error_class": "target_negative",
-                "reason": (
-                    f"Arm 3 (micro-patch + PoC) still triggered defect ({arm3['defect_hits']}/{n_trials} hits). "
-                    "Micro-patch did not fix the root cause triggered by the PoC."
-                ),
+                "poc_proven": True,
+                "error_class": a3_error_class,
+                "reason": a3_reason,
                 "observation_hash": hashlib.sha256((obs_seed + f"|a3:{arm3['exit_code']}").encode("utf-8")).hexdigest()[:16],
                 "micropatch_diff": scrub_text(diff_text[:4000]),
                 "arm1_clean_poc": arm1,
@@ -1694,10 +1737,11 @@ def _run_source_reproduction_impl(
             )
             return {
                 "passed": False,
-                "error_class": "build_or_env_error" if is_build_err else "target_negative",
+                "poc_proven": True,
+                "error_class": "build_or_env_error" if is_build_err else "micropatch_error",
                 "reason": (
                     f"Arm 4 (micro-patch + benign control) broke normal behavior (exit={arm4['exit_code']}). "
-                    "Destructive or over-broad micro-patches are rejected."
+                    "Arms 1 & 2 passed (`poc_proven=true`); destructive or over-broad micro-patches are rejected."
                 ),
                 "observation_hash": hashlib.sha256((obs_seed + f"|a4:{arm4['exit_code']}").encode("utf-8")).hexdigest()[:16],
                 "micropatch_diff": scrub_text(diff_text[:4000]),
@@ -1728,7 +1772,7 @@ def _run_source_reproduction_impl(
                     trials=1,
                     helpers_dir=helpers_dir,
                 )
-                if sib_res["defect_hits"] == 0 and not sib_res["timed_out"]:
+                if sib_res["defect_hits"] == 0 and sib_res["clean_passes"] == 1:
                     cross_killed.append(sib_id)
 
         # Optional Arm 5A / Arm 5B: Release-Profile UB Differential (`-O2` / `--release`).

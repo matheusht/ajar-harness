@@ -16,11 +16,19 @@ from ajar import (
     EXIT_USER_ERROR,
     __version__,
 )
+from ajar.catalog import (
+    search_issue_catalog,
+    trace_backward_sink_slices,
+)
 from ajar.cli.common import _check_sqlite_fts5, _emit
 from ajar.db import (
     AjarError,
     add_steer,
     add_threat_assumption,
+    compute_epistemic_delta,
+    compute_harness_code_sha256,
+    compute_island_illumination,
+    compute_root_plateau_throttles,
     list_rows,
     list_steers,
     log_event,
@@ -54,10 +62,17 @@ from ajar.runner import run_autonomous_schedule
 from ajar.services import (
     advance_phase,
     build_commit_preimage,
+    build_worker_dispatch_brief,
+    cast_lead_vote,
+    close_run_early,
     export_run_economics,
     finish_run,
+    plan_swarm_wave,
+    rank_leads,
     record_human_touch,
     record_spend_entry,
+    seal_bundle,
+    verify_bundle,
     write_restricted_json,
 )
 from ajar.swarm import (
@@ -98,7 +113,7 @@ def _diagnose_run_health(run_id: str, *, prune_slots: bool = False) -> dict[str,
         quick_check_ok = qc_rows == ["ok"]
         ver_row = conn.execute("PRAGMA user_version;").fetchone()
         schema_version = int(ver_row[0]) if ver_row is not None else 0
-        run_row = conn.execute("SELECT status, campaign_phase FROM runs LIMIT 1").fetchone()
+        run_row = conn.execute("SELECT status, campaign_phase, harness_sha256 FROM runs LIMIT 1").fetchone()
         open_tasks = int(conn.execute("SELECT COUNT(*) AS c FROM tasks WHERE status = 'open'").fetchone()["c"])
         leased_tasks = int(conn.execute("SELECT COUNT(*) AS c FROM tasks WHERE status = 'leased'").fetchone()["c"])
         now_ep = time.time()
@@ -110,6 +125,10 @@ def _diagnose_run_health(run_id: str, *, prune_slots: bool = False) -> dict[str,
         )
     finally:
         conn.close()
+
+    rec_harness_sha = str(run_row["harness_sha256"] or "").strip() if run_row and "harness_sha256" in run_row.keys() else ""
+    cur_harness_sha = compute_harness_code_sha256()
+    harness_modified_mid_run = bool(rec_harness_sha and rec_harness_sha != cur_harness_sha)
 
     repro_dir = rdir / "repro"
     slots_info: list[dict[str, Any]] = []
@@ -165,6 +184,9 @@ def _diagnose_run_health(run_id: str, *, prune_slots: bool = False) -> dict[str,
         "schema_version": schema_version,
         "run_status": str(run_row["status"]) if run_row else "unknown",
         "campaign_phase": str(run_row["campaign_phase"]) if run_row else "unknown",
+        "recorded_harness_sha256": rec_harness_sha,
+        "current_harness_sha256": cur_harness_sha,
+        "harness_modified_mid_run": harness_modified_mid_run,
         "open_tasks": open_tasks,
         "leased_tasks": leased_tasks,
         "stale_leases": stale_leases,
@@ -255,6 +277,9 @@ def cmd_init(args: argparse.Namespace) -> int:
         stopping_criterion=args.until,
         campaign_phase=getattr(args, "phase", "hunt") or "hunt",
         budget_usd=args.budget,
+        max_spend=getattr(args, "max_spend", None),
+        warn_above_usd=float(getattr(args, "warn_above_usd", 25.0)),
+        yes=bool(getattr(args, "yes", False)),
         uncapped=bool(args.uncapped),
         brief_file=args.brief_file,
         allowed_hosts=args.allow_host or [],
@@ -278,6 +303,8 @@ def cmd_init(args: argparse.Namespace) -> int:
         print(f"  Target ({info['target_mode']}):    {info['target_path']}")
         print(f"  Phase / Stopping:       {info['campaign_phase']} / {info['stopping_criterion']}")
         print(f"  In-scope LoC:           {info['in_scope_loc']} (Code quote: ${info['code_quote_usd']:.2f}, COGS cap: {cap_str})")
+        if info.get("ux_budget_warning"):
+            print(f"  Budget Notice:          {info['ux_budget_notice']}")
         if info.get("brief_path"):
             print(f"  Campaign Brief:         {info['brief_path']}")
         if info.get("diff_range"):
@@ -331,6 +358,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         run = dict(conn.execute("SELECT * FROM runs LIMIT 1").fetchone())
         tpath = pathlib.Path(run["target_path"])
         gates = check_all_gates(conn, target_dir=tpath, auto_enqueue_chain=False)
+        ep = compute_epistemic_delta(conn, reference_actions=("pulse", "stop_hook_check"))
+        illum = compute_island_illumination(conn)
         tm_row = conn.execute("SELECT revision FROM threat_models LIMIT 1").fetchone()
         payload = {
             "run": run,
@@ -363,6 +392,19 @@ def cmd_status(args: argparse.Namespace) -> int:
                 "SELECT COUNT(*) AS c FROM epistemic_hooks WHERE status = 'active'"
             ).fetchone()["c"],
             "findings_count": gates["findings_count"],
+            "distinct_root_causes_count": int(
+                conn.execute(
+                    """
+                    SELECT COUNT(DISTINCT COALESCE(NULLIF(c.same_root_claim_id, ''), NULLIF(c.duplicate_of_claim_id, ''), f.locus)) AS c
+                    FROM findings f
+                    JOIN claims c ON f.claim_id = c.claim_id
+                    """
+                ).fetchone()["c"]
+            ),
+            "epistemic_potential": ep["epistemic_potential"],
+            "delta_phi": ep["delta_phi"],
+            "epistemic_components": ep["components"],
+            "island_illumination": illum,
             "gates_passed": gates["passed"],
             "blockers": gates["blockers"],
             "economics": gates["economics"],
@@ -487,6 +529,7 @@ def cmd_map(args: argparse.Namespace) -> int:
             focus_symbols=args.focus_symbol or (),
             budget_tokens=args.budget_tokens,
             slice_cap=args.slice_cap,
+            unvisited_only=bool(getattr(args, "unvisited", False)),
         )
     finally:
         conn.close()
@@ -615,6 +658,7 @@ def cmd_phase(args: argparse.Namespace) -> int:
             to_phase=str(args.to),
             notes=str(args.notes or ""),
             actor="operator",
+            force=bool(getattr(args, "force", False)),
         )
         _emit(res, True)
         return EXIT_OK
@@ -814,6 +858,29 @@ def cmd_swarm(args: argparse.Namespace) -> int:
     rid = resolve_run_id(args.run)
     conn = open_run_db(rid)
     try:
+        if args.swarm_cmd == "plan":
+            res = plan_swarm_wave(
+                conn,
+                max_workers=int(args.workers),
+                enqueue_missing=not bool(args.no_enqueue),
+                stall_window=int(args.stall_window),
+            )
+            _emit(res, True)
+            return EXIT_OK
+
+        if args.swarm_cmd == "brief":
+            res = build_worker_dispatch_brief(
+                conn,
+                task_id=str(args.task_id),
+                worker_id=str(args.worker if args.worker is not None else "w-1"),
+            )
+            if bool(getattr(args, "raw", False)) and not bool(getattr(args, "json", False)):
+                rendered = str(res["rendered_brief"])
+                print(rendered, end="" if rendered.endswith("\n") else "\n")
+            else:
+                _emit(res, True)
+            return EXIT_OK
+
         if args.swarm_cmd == "packet":
             raw_items = [s.strip() for s in (args.items or "").split(",") if s.strip()]
             res = build_swarm_packet(
@@ -864,3 +931,121 @@ def cmd_reopen(args: argparse.Namespace) -> int:
     )
     _emit(res, True)
     return EXIT_OK
+
+
+def cmd_lead(args: argparse.Namespace) -> int:
+    rid = resolve_run_id(args.run)
+    conn = open_run_db(rid)
+    try:
+        if args.lead_cmd == "vote":
+            res = cast_lead_vote(
+                conn,
+                worker_id=args.worker,
+                target_kind=args.target_kind,
+                target_id=args.target_id or "",
+                locus=args.locus or "",
+                subsystem=args.subsystem or "",
+                impact_score=int(args.impact),
+                plausibility_score=int(args.plausibility),
+                chainability_score=int(args.chainability),
+                effort_cost=int(args.effort),
+                rationale=args.rationale or "",
+            )
+            _emit(res, True)
+            return EXIT_OK
+        if args.lead_cmd == "rank":
+            res = rank_leads(
+                conn,
+                target_kind=args.target_kind or "",
+                limit=int(args.limit),
+            )
+            _emit(res, True)
+            return EXIT_OK
+        throttles = compute_root_plateau_throttles(conn)
+        illum = compute_island_illumination(conn)
+        _emit(
+            {
+                "run_id": rid,
+                "root_plateau_throttles": list(throttles.values()),
+                "island_illumination": illum,
+                "over_mined_islands": [k for k, v in illum["islands"].items() if v.get("over_mined")],
+            },
+            True,
+        )
+        return EXIT_OK
+    finally:
+        conn.close()
+
+
+def cmd_catalog(args: argparse.Namespace) -> int:
+    rid = resolve_run_id(args.run)
+    conn = open_run_db(rid)
+    try:
+        if args.catalog_cmd == "search":
+            res = search_issue_catalog(
+                conn,
+                query=args.query or "",
+                tags=args.tags or "",
+                subsystem=args.subsystem or "",
+                role=args.role or "",
+                include_unverified=not bool(args.verified_only),
+                limit=int(args.limit),
+            )
+            _emit(res, True)
+            return EXIT_OK
+        res = trace_backward_sink_slices(
+            conn,
+            sink=args.sink,
+            max_hops=int(args.max_hops),
+            limit=int(args.limit),
+        )
+        _emit(res, True)
+        return EXIT_OK
+    finally:
+        conn.close()
+
+
+def cmd_close(args: argparse.Namespace) -> int:
+    rid = resolve_run_id(args.run)
+    rdir = run_dir_for(rid)
+    conn = open_run_db(rid)
+    try:
+        run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
+        tpath = pathlib.Path(run["target_path"]) if run else None
+        res = close_run_early(
+            conn,
+            run_id=rid,
+            stop_reason=args.reason,
+            notes=args.notes,
+            target_dir=tpath,
+            actor=args.actor,
+        )
+        md = render_markdown_report(conn)
+        js = build_report_data(conn, include_rejected_appendix=True)
+    finally:
+        conn.close()
+
+    art_dir = rdir / "artifacts"
+    art_dir.mkdir(parents=True, exist_ok=True)
+    (art_dir / "report.md").write_text(md, encoding="utf-8")
+    (art_dir / "report.json").write_text(json.dumps(js, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    res["report_markdown_path"] = str(art_dir / "report.md")
+    res["report_json_path"] = str(art_dir / "report.json")
+    mirror_info = sync_run_to_shared_mirror(rid)
+    if mirror_info is not None:
+        res["shared_mirror_dir"] = mirror_info["mirror_dir"]
+    _emit(res, True)
+    return EXIT_OK
+
+
+def cmd_bundle(args: argparse.Namespace) -> int:
+    if args.bundle_cmd == "seal":
+        res = seal_bundle(args.bundle_dir, allow_local_paths=bool(args.allow_local_paths))
+        _emit(res, True)
+        return EXIT_OK
+    res = verify_bundle(args.bundle_dir)
+    _emit(res, True)
+    return EXIT_OK if res["verified"] else EXIT_GATE_BLOCKED
+
+
+

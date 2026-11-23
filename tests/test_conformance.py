@@ -184,6 +184,7 @@ class TestConformance(unittest.TestCase):
             REPO_ROOT / "CLAUDE.md",
             REPO_ROOT / "README.md",
             REPO_ROOT / "docs" / "architecture.md",
+            REPO_ROOT / "docs" / "campaigns-and-roadmap.md",
             REPO_ROOT / "docs" / "decisions" / "README.md",
             REPO_ROOT / "docs" / "decisions" / "0017-ajar-v3-dual-mode-architecture.md",
             REPO_ROOT / "docs" / "decisions" / "0018-ajar-v3-1-bug-brain-and-platform-economics.md",
@@ -193,6 +194,7 @@ class TestConformance(unittest.TestCase):
             REPO_ROOT / "docs" / "decisions" / "0022-ajar-v3-3-reactive-open-doors-and-phase-split.md",
             REPO_ROOT / "docs" / "decisions" / "0023-agent-friendly-layered-architecture-and-dst.md",
             REPO_ROOT / "docs" / "decisions" / "0024-modular-dag-zero-cycles-and-swarm-resilience.md",
+            REPO_ROOT / "docs" / "decisions" / "0025-ajar-v3-4-value-hillclimbing-catalog-and-fail-closed-truth.md",
             REPO_ROOT / "docs" / "engineering" / "AGENTS.md",
         ]
         md_files.extend(sorted((REPO_ROOT / "skills").rglob("*.md")))
@@ -369,6 +371,7 @@ class TestConformance(unittest.TestCase):
             REPO_ROOT / "AGENTS.md",
             REPO_ROOT / "CLAUDE.md",
             REPO_ROOT / "docs" / "architecture.md",
+            REPO_ROOT / "docs" / "campaigns-and-roadmap.md",
             *sorted((REPO_ROOT / "skills").rglob("SKILL.md")),
         ]
         mismatches: list[str] = []

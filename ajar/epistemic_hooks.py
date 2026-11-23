@@ -3,7 +3,7 @@
 Implements "Hooks, Not Prisons":
 - Zero prompt overhead (`0` tokens) on plain code when no signal fires.
 - Evaluates deterministic SQLite state transitions and lightweight AST/source signals
-  (`H1`..`H8`), capping injected guidance at `<= 2` active hooks per task.
+  (`H1`..`H9`), capping injected guidance at `<= 2` active hooks per task.
 - Pairs every triggered hook with a mandatory 1-line `DRY` Kill Rule so workers close
   clean near-misses fast without speculative chain bias.
 - Matches typed `provides_tags` and `requires_tags` across subsystems to surface
@@ -73,7 +73,6 @@ CANONICALIZER_SIGNAL_RE = re.compile(
 )
 
 
-
 def _dedup_hash(hook_code: str, key_material: str) -> str:
     digest = hashlib.sha256(f"{hook_code}:{key_material}".encode("utf-8")).hexdigest()
     return digest[:16]
@@ -114,6 +113,7 @@ def register_epistemic_hook(
     clean_dir = scrub_text(directive_text.strip())[:180]
     clean_kill = scrub_text(kill_rule.strip())[:180]
     tok_est = min(45, _estimate_tokens(clean_dir))
+    eff_max_leases = max(1, int(max_leases))
 
     conn.execute(
         """
@@ -135,7 +135,7 @@ def register_epistemic_hook(
             clean_dir,
             clean_kill,
             tok_est,
-            max(1, int(max_leases)),
+            eff_max_leases,
             now_iso,
             now_iso,
         ),
@@ -150,9 +150,45 @@ def register_epistemic_hook(
         "directive_text": clean_dir,
         "kill_rule": clean_kill,
         "token_estimate": tok_est,
+        "max_leases": eff_max_leases,
+        "leases_seen": 0,
         "status": "active",
         "created": True,
     }
+
+
+def register_invariant_symmetry_hook(
+    conn: sqlite3.Connection,
+    *,
+    primitive_id: str,
+    capability_locus: str,
+    guarded_by_locus: str,
+    subsystem: str = "",
+    spawned_task_id: str | None = None,
+) -> dict[str, Any]:
+    """Register bounded (`max_leases=1`) `H9_INVARIANT_SYMMETRY` hook when a capability is guarded by `<locus>`."""
+    gloc = guarded_by_locus.strip()
+    cloc = capability_locus.strip()
+    gsub = subsystem.strip() or infer_subsystem(gloc)
+    return register_epistemic_hook(
+        conn,
+        hook_code=HookCode.H9_INVARIANT_SYMMETRY.value,
+        trigger_cmd="primitive.add",
+        source_entity_id=primitive_id,
+        dedup_material=f"h9_inv_sym:{primitive_id}:{gloc}:{cloc}",
+        subsystem=gsub,
+        target_locus=gloc,
+        spawned_task_id=spawned_task_id,
+        max_leases=1,
+        directive_text=(
+            f"Check whether {gloc} shares integer width/sign, path-normalization/case-folding, "
+            f"or deferred-metadata state with {primitive_id}@{cloc}."
+        ),
+        kill_rule=(
+            f"STOP and mark dry if {gloc} re-validates canonicalized input with wider/checked "
+            f"bounds independent of {cloc}."
+        ),
+    )
 
 
 def consume_hooks_for_locus(

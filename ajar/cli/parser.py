@@ -18,7 +18,6 @@ from ajar.cli.claims import (
     cmd_claim,
     cmd_finding,
     cmd_patch,
-    cmd_repro,
 )
 from ajar.cli.hunt import (
     cmd_anomaly,
@@ -32,6 +31,9 @@ from ajar.cli.hunt import (
 )
 from ajar.cli.ops import (
     cmd_brief,
+    cmd_bundle,
+    cmd_catalog,
+    cmd_close,
     cmd_context,
     cmd_doctor,
     cmd_economics,
@@ -41,6 +43,7 @@ from ajar.cli.ops import (
     cmd_gate_check,
     cmd_hook,
     cmd_init,
+    cmd_lead,
     cmd_ledger,
     cmd_loop,
     cmd_map,
@@ -58,11 +61,13 @@ from ajar.cli.ops import (
     cmd_threat_model,
     cmd_touch,
 )
+from ajar.cli.repro import cmd_repro
 from ajar.graph import (
     VALID_GRAPH_SCHEMAS,
     VALID_GRAPH_VISIBILITIES,
 )
 from ajar.mcp import serve_mcp_stdio
+from ajar.slice_probe import VALID_SLICE_TRACERS
 from ajar.swarm import (
     ENV_BLOCKER_KINDS,
     VALID_FALLBACK_REASONS,
@@ -121,6 +126,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument("--phase", choices=phase_choices, default="hunt", help="Campaign phase (`hunt` defers 9-arm `patch verify` until `remediate`).")
     p_init.add_argument("--budget", type=float, default=None, help="Explicit COGS cap override in USD (defaults to 0.35 * Code quote).")
     p_init.add_argument("--cogs-cap", dest="budget", type=float, help="Alias for --budget explicit COGS cap override in USD.")
+    p_init.add_argument("--max-spend", type=float, default=None, help="Optional USD ceiling clamping `cogs_cap_usd = min(cogs_cap_usd, max_spend)`.")
+    p_init.add_argument("--warn-above-usd", type=float, default=25.0, help="Inline quote threshold in USD for non-blocking budget notice (default: 25.0).")
+    p_init.add_argument("-y", "--yes", action="store_true", help="Silence non-blocking inline quote warning notices.")
     p_init.add_argument("--uncapped", action="store_true", help="Disable finite COGS budget caps and 25%%/80%% budget throttles (`uncapped_research`).")
     p_init.add_argument("--diff", help="Optional git diff range (`base..head`) for PR differential Code runs.")
     p_init.add_argument("--parent-run", help="Optional baseline/parent run ID to carry forward kept findings and guards.")
@@ -140,6 +148,7 @@ def build_parser() -> argparse.ArgumentParser:
     pph_a = phs_sub.add_parser("advance")
     pph_a.add_argument("--to", choices=phase_choices, required=True)
     pph_a.add_argument("--notes", default="")
+    pph_a.add_argument("--force", action="store_true", help="Operator override to advance phase while hunt/chain frontier remains active (requires `--notes`).")
     pph_a.add_argument("--run")
     p_phs.set_defaults(func=cmd_phase)
 
@@ -175,6 +184,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_map.add_argument("--focus-symbol", action="append")
     p_map.add_argument("--budget-tokens", type=int, default=1500)
     p_map.add_argument("--slice-cap", type=int, default=15000, help="Soft target LoC per cohesive subsystem call cone.")
+    p_map.add_argument("--unvisited", action="store_true", help="Emit only call slices containing files not yet covered in `coverage_spans` or closed `tasks`.")
     p_map.add_argument("--run")
     p_map.add_argument("--json", action="store_true")
     p_map.set_defaults(func=cmd_map)
@@ -455,7 +465,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_bd.set_defaults(func=cmd_binding)
 
     # claim
-    p_cl = sub.add_parser("claim", help="Manage vulnerability hypotheses (`propose`, `rescope`, `falsify`, `survive`, `instrument`, `reproduce`).")
+    p_cl = sub.add_parser("claim", help="Manage vulnerability hypotheses (`propose`, `rescope`, `falsify`, `survive`, `duplicate`, `instrument`, `reproduce`).")
     cl_sub = p_cl.add_subparsers(dest="claim_cmd", required=True)
     pc_prop = cl_sub.add_parser("propose")
     pc_prop.add_argument("--worker", required=True)
@@ -467,8 +477,16 @@ def build_parser() -> argparse.ArgumentParser:
     pc_prop.add_argument("--falsification-test", required=True)
     pc_prop.add_argument("--surface")
     pc_prop.add_argument("--consume-anomaly")
+    pc_prop.add_argument("--same-root-of", default="", help="Optional parent `clm-*` ID when proposing an alternate entry route for the same root cause.")
     pc_prop.add_argument("--seeded-by-human", action="store_true")
     pc_prop.add_argument("--run")
+
+    pc_dup = cl_sub.add_parser("duplicate", help="Close a candidate claim as `duplicate_root_cause` of an existing parent claim.")
+    pc_dup.add_argument("claim_id")
+    pc_dup.add_argument("--of", required=True, help="Parent `clm-*` ID sharing the same root defect.")
+    pc_dup.add_argument("--worker", required=True)
+    pc_dup.add_argument("--reason", required=True)
+    pc_dup.add_argument("--run")
 
     pc_rsc = cl_sub.add_parser("rescope")
     pc_rsc.add_argument("claim_id")
@@ -524,6 +542,7 @@ def build_parser() -> argparse.ArgumentParser:
     pc_rep.add_argument("--control-cmd", default="")
     pc_rep.add_argument("--build-cmd", default="", help="Optional compile command run on clean and micropatched trees without burning PoC strikes on build errors.")
     pc_rep.add_argument("--micropatch", help="Path to 1-16 line counterfactual unified diff (source mode).")
+    pc_rep.add_argument("--max-changed-lines", type=int, default=16, help="Max non-comment changed code lines allowed in `--micropatch` (default: 16).")
     pc_rep.add_argument("--save-post-state", default="", help="Optional relative directory/file inside `slot-<k>` to snapshot into `repro/snapshots/<snp_id>.tar.gz` after Arm 1.")
     pc_rep.add_argument("--provides-tags", default="", help="Optional comma-separated capability tags emitted by this confirmed finding (`ns:name`).")
     pc_rep.add_argument("--declared-steps", type=int, default=None, help="Optional explicit victim interaction step count for realism scoring.")
@@ -549,8 +568,8 @@ def build_parser() -> argparse.ArgumentParser:
     pc_lst.add_argument("--run")
     p_cl.set_defaults(func=cmd_claim)
 
-    # repro (Strike-free smoke-test & snapshots)
-    p_rpr = sub.add_parser("repro", help="Run strike-free build/PoC smoke tests (`ajar repro try`) and inspect post-state snapshots.")
+    # repro (Strike-free smoke-test, @VISITED/@UNREACHED slice-probe, & snapshots)
+    p_rpr = sub.add_parser("repro", help="Run strike-free build/PoC smoke tests (`ajar repro try`), `@VISITED`/`@UNREACHED` coverage probes (`ajar repro slice-probe`), and inspect post-state snapshots.")
     rpr_sub = p_rpr.add_subparsers(dest="repro_cmd", required=True)
     prp_t = rpr_sub.add_parser("try", help="Run a strike-free command inside the shared 8-slot pool (`slot-<k>`) without incrementing `failed_repro_count`.")
     prp_t.add_argument("--cmd", required=True)
@@ -559,17 +578,46 @@ def build_parser() -> argparse.ArgumentParser:
     prp_t.add_argument("--oracle-json", help="Optional JSON oracle rules.")
     prp_t.add_argument("--timeout", type=int, default=60)
     prp_t.add_argument("--run")
+
+    prp_sp = rpr_sub.add_parser(
+        "slice-probe",
+        help="Run `--cmd` in `slot-<k>` and annotate `--focus-locus` with `@VISITED` / `@UNREACHED` line coverage and sanitizer frames.",
+    )
+    prp_sp.add_argument("--focus-locus", required=True, help="Target slice `<file[:start[-end]]>` to annotate.")
+    prp_sp.add_argument("--cmd", required=True, help="Shell command or micro-driver to execute inside `slot-<k>`.")
+    prp_sp.add_argument("--build-cmd", default="", help="Optional compile command run before `--cmd` (`$AJAR_COV_CFLAGS`, `$AJAR_SAN_CFLAGS`).")
+    prp_sp.add_argument("--patch", default="", help="Optional candidate diff applied temporarily inside `slot-<k>`.")
+    prp_sp.add_argument("--tracer", choices=VALID_SLICE_TRACERS, default="auto", help="Coverage collector (`auto`, `python`, `gcov`, `none`).")
+    prp_sp.add_argument(
+        "--sanitize",
+        "--sanitizer-flags",
+        dest="sanitizer_flags",
+        action="store_true",
+        help="Export ASan + UBSan + coverage compiler/runtime flags (`$AJAR_SAN_CFLAGS`, `$AJAR_SANITIZER_CFLAGS`).",
+    )
+    prp_sp.add_argument("--record-coverage", action="store_true", help="Record contiguous `@VISITED` line spans into `coverage_spans`.")
+    prp_sp.add_argument("--task", default="", help="Optional `tsk-*` ID associated when `--record-coverage` is set.")
+    prp_sp.add_argument("--context-lines", type=int, default=8, help="Context lines around `--focus-locus` (default: 8).")
+    prp_sp.add_argument("--max-lines", type=int, default=60, help="Maximum rendered lines in window (default: 60).")
+    prp_sp.add_argument("--claim", default="", help="Optional `clm-*` ID to log telemetry and unblock `needs_instrumentation`.")
+    prp_sp.add_argument("--worker", default="worker")
+    prp_sp.add_argument("--timeout", type=int, default=60)
+    prp_sp.add_argument("--json", action="store_true", help="Emit full JSON receipt instead of plain annotated slice.")
+    prp_sp.add_argument("--run")
+
     prp_s = rpr_sub.add_parser("snapshots", help="List captured Arm-1 post-state snapshots (`snp-*`).")
     prp_s.add_argument("--run")
     p_rpr.set_defaults(func=cmd_repro)
 
     # finding (Operator calibration & listing)
-    p_fnd = sub.add_parser("finding", help="Inspect confirmed findings and calibrate severity/titles without raw SQL.")
+    p_fnd = sub.add_parser("finding", help="Inspect confirmed findings and calibrate severity/titles/realism without raw SQL.")
     fnd_sub = p_fnd.add_subparsers(dest="finding_cmd", required=True)
-    pfn_c = fnd_sub.add_parser("calibrate", help="Calibrate severity or title on a confirmed finding.")
+    pfn_c = fnd_sub.add_parser("calibrate", help="Calibrate severity, title, declared steps, or realism tier on a confirmed finding.")
     pfn_c.add_argument("finding_id")
     pfn_c.add_argument("--severity", choices=("critical", "high", "medium", "low"))
     pfn_c.add_argument("--title")
+    pfn_c.add_argument("--declared-steps", type=int, default=None, help="Optional calibrated victim interaction step count.")
+    pfn_c.add_argument("--realism-tier", choices=("crown_jewel", "high_impact", "stepping_stone"), help="Optional calibrated realism tier.")
     pfn_c.add_argument("--reason", required=True)
     pfn_c.add_argument("--worker", default="operator")
     pfn_c.add_argument("--run")
@@ -593,6 +641,7 @@ def build_parser() -> argparse.ArgumentParser:
     pch_p.add_argument("--severity", choices=("critical", "high", "medium", "low"), default="critical")
     pch_p.add_argument("--oracle-json", help="Optional JSON oracle rules (`expect_regex`, `expect_exit_code`).")
     pch_p.add_argument("--step-micropatch", action="append", help="Per-step counterfactual patch `<step_id>:<path/to/step.diff>` (auto-inherited for `fnd-*` and `prim-*` with `--micropatch`).")
+    pch_p.add_argument("--backup-step", action="append", help="Modular backup step `<primary_step_id>:<backup_step_id>` automatically swapped if primary fails.")
     pch_p.add_argument("--door", default="", help="Optional Open Door ID (`door-*`) resolved by this chain.")
     pch_p.add_argument("--jewel", default="", help="Optional Crown Jewel ID (`cjw-*`) reached by this chain.")
     pch_p.add_argument("--declared-steps", type=int, default=None, help="Optional explicit victim interaction step count.")
@@ -601,10 +650,20 @@ def build_parser() -> argparse.ArgumentParser:
     pch_p.add_argument("--worker", default="worker")
     pch_p.add_argument("--run")
 
+    pch_cal = ch_sub.add_parser("calibrate", help="Calibrate realism tier, severity, or declared steps on a recorded chain.")
+    pch_cal.add_argument("chain_id")
+    pch_cal.add_argument("--realism-tier", choices=("crown_jewel", "high_impact", "stepping_stone"))
+    pch_cal.add_argument("--severity", choices=("critical", "high", "medium", "low"))
+    pch_cal.add_argument("--declared-steps", type=int, default=None)
+    pch_cal.add_argument("--reason", required=True)
+    pch_cal.add_argument("--worker", default="operator")
+    pch_cal.add_argument("--run")
+
     pch_pr = ch_sub.add_parser("probe", help="Hydrate a Stage-1 post-state snapshot (`snp-*`) into the shared `slot-<k>` pool and probe Stage 2.")
     pch_pr.add_argument("--from-snapshot", required=True, help="Snapshot ID (`snp-*`) from `ajar claim reproduce --save-post-state`.")
     pch_pr.add_argument("--cmd", required=True, help="Stage-2 probe command executed inside hydrated `slot-<k>`.")
     pch_pr.add_argument("--patch", default="", help="Optional temporary diff applied inside `slot-<k>`.")
+    pch_pr.add_argument("--build-cmd", default="", help="Optional compile command run before `--cmd` inside hydrated `slot-<k>`.")
     pch_pr.add_argument("--oracle-json", help="Optional JSON oracle rules.")
     pch_pr.add_argument("--timeout", type=int, default=60)
     pch_pr.add_argument("--worker", default="worker")
@@ -796,12 +855,42 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--json", action="store_true", default=True)
     p_run.set_defaults(func=cmd_run)
 
-    # swarm (Stage-split stripped packet dispatcher + wire-profile fallback ladder)
+    # swarm (Layer-0 wave planner, minimal worker dispatch briefs, stripped packets, & fallback ladder)
     p_swm = sub.add_parser(
         "swarm",
-        help="Generate stripped Swarm Worker packets and step down `--wire-profile` fallback tiers.",
+        help="Plan disjoint Swarm waves, compile Layer-0 worker dispatch briefs, and manage `--wire-profile` packets.",
     )
     swm_sub = p_swm.add_subparsers(dest="swarm_cmd", required=True)
+
+    psw_pl = swm_sub.add_parser(
+        "plan",
+        help="Plan a disjoint parallel Swarm wave, trigger the discovery-stall breaker, and auto-bridge Middle-Unicorn gaps.",
+    )
+    psw_pl.add_argument("--workers", type=int, default=6, help="Maximum disjoint workers in the wave (default: 6).")
+    psw_pl.add_argument(
+        "--no-enqueue",
+        action="store_true",
+        help="Inspect wave selection, stall status, and unicorn gaps without auto-enqueuing missing tasks.",
+    )
+    psw_pl.add_argument(
+        "--stall-window",
+        type=int,
+        default=6,
+        help="Number of terminal (`done`/`dry`) zero-yield tasks before triggering the stall circuit breaker (default: 6).",
+    )
+    psw_pl.add_argument("--json", action="store_true", default=True)
+    psw_pl.add_argument("--run")
+
+    psw_br = swm_sub.add_parser(
+        "brief",
+        help="Compile a compact Layer-0 Worker Dispatch Brief (`<= 40` lines) with phase lock and `falsifier != proposer` gate.",
+    )
+    psw_br.add_argument("task_id", help="Task ID (`task-...`) to compile the dispatch brief for.")
+    psw_br.add_argument("--worker", default="w-1", help="Target worker ID (enforces `worker != proposer` on `falsify` tasks).")
+    psw_br.add_argument("--raw", action="store_true", help="Print rendered Markdown brief (`<= 40` lines) instead of JSON.")
+    psw_br.add_argument("--json", action="store_true", help="Emit structured JSON brief payload.")
+    psw_br.add_argument("--run")
+
     psw_p = swm_sub.add_parser("packet", help="Emit a stripped Just-Enough-Context worker assignment packet.")
     psw_p.add_argument("--stage", choices=VALID_SWARM_STAGES, required=True)
     psw_p.add_argument(
@@ -836,7 +925,7 @@ def build_parser() -> argparse.ArgumentParser:
         "reopen",
         help="Hydrate a run from shared storage and reopen zero-attempt policy-blocked claims.",
     )
-    p_reo.add_argument("run_id", help="Run ID to hydrate and reopen (for example `git-wave1a`).")
+    p_reo.add_argument("run_id", help="Run ID to hydrate and reopen (for example `run-20261120-a1`).")
     p_reo.add_argument("--keep-blocked", action="store_true", help="Keep zero-attempt blocked claims untouched.")
     p_reo.add_argument("--from-shared", default=None, help="Explicit shared mirror directory override.")
     p_reo.add_argument("--json", action="store_true", default=True)
@@ -862,6 +951,89 @@ def build_parser() -> argparse.ArgumentParser:
     pldg_cp.add_argument("--public-out", help="Optional path to write the public commitment JSON record.")
     pldg_cp.add_argument("--preimage-out", help="Optional path to write the private reveal preimage JSON (mode 0600).")
     p_ldg.set_defaults(func=cmd_ledger)
+
+    # lead (Multi-Agent Expected-Value Lead Voting & Per-Root Plateau Breaker)
+    p_lead = sub.add_parser(
+        "lead",
+        help="Vote on high-EV chain/hunt leads across swarm scouts and inspect root plateau throttles.",
+    )
+    lead_sub = p_lead.add_subparsers(dest="lead_cmd", required=True)
+    lead_target_choices = ("surface", "door", "slice", "chain", "subsystem", "claim", "primitive", "finding")
+    pld_v = lead_sub.add_parser("vote", help="Cast or update a structured Expected-Value vote (`1..10` axes) on a lead.")
+    pld_v.add_argument("--worker", required=True)
+    pld_v.add_argument("--target-kind", choices=lead_target_choices, required=True)
+    pld_v.add_argument("--target-id", default="", help="Optional surface, door, slice, chain, claim, primitive, or finding ID.")
+    pld_v.add_argument("--locus", default="", help="Optional target locus (`file:lines`).")
+    pld_v.add_argument("--subsystem", default="", help="Optional target subsystem.")
+    pld_v.add_argument("--impact", type=int, default=7, help="Impact score `1..10` (Crown-Jewel proximity / severity).")
+    pld_v.add_argument("--plausibility", type=int, default=7, help="Plausibility score `1..10` (evidence of unguarded path).")
+    pld_v.add_argument("--chainability", type=int, default=7, help="Chainability score `1..10` (composable state/capability output).")
+    pld_v.add_argument("--effort", type=int, default=5, help="Estimated effort cost `1..10` (lower is cheaper).")
+    pld_v.add_argument("--rationale", default="", help="Concise structural rationale for this EV score.")
+    pld_v.add_argument("--run")
+
+    pld_r = lead_sub.add_parser("rank", help="Rank multi-agent voted leads by consensus Expected Value.")
+    pld_r.add_argument("--target-kind", choices=lead_target_choices, default="")
+    pld_r.add_argument("--limit", type=int, default=25)
+    pld_r.add_argument("--run")
+
+    pld_t = lead_sub.add_parser("throttles", help="Inspect per-root diminishing-returns plateau throttles.")
+    pld_t.add_argument("--run")
+    p_lead.set_defaults(func=cmd_lead)
+
+    # catalog (Unified Issue & Gadget Catalog + Backward Sink-to-Source Call-Cone Slicing)
+    p_cat = sub.add_parser(
+        "catalog",
+        help="Search the unified Issue & Gadget Catalog and trace backward sink-to-source call cones.",
+    )
+    cat_sub = p_cat.add_subparsers(dest="catalog_cmd", required=True)
+    pct_s = cat_sub.add_parser("search", help="Query findings, capabilities, trust gadgets, claims, anomalies, and Open Doors.")
+    pct_s.add_argument("query", nargs="?", default="", help="Optional lexical/symbol query.")
+    pct_s.add_argument("--tags", default="", help="Optional comma-separated capability tags (`ns:name`).")
+    pct_s.add_argument("--subsystem", default="", help="Optional subsystem or file filter.")
+    pct_s.add_argument(
+        "--role",
+        choices=("finding", "capability", "trust_gadget", "candidate_claim", "anomaly", "open_door"),
+        default="",
+    )
+    pct_s.add_argument("--verified-only", action="store_true", help="Exclude unverified candidate claims and unexplained anomalies.")
+    pct_s.add_argument("--limit", type=int, default=30)
+    pct_s.add_argument("--run")
+
+    pct_b = cat_sub.add_parser("backslice", help="Walk `repomap_edges` backward (`callee <- caller`) from a sink/jewel/door/symbol.")
+    pct_b.add_argument("sink", help="Crown-Jewel ID (`cjw-*`), Open-Door ID (`door-*`), `file:line` locus, or symbol name.")
+    pct_b.add_argument("--max-hops", type=int, default=3, help="Backward call-graph hops `1..6` (default: 3).")
+    pct_b.add_argument("--limit", type=int, default=20)
+    pct_b.add_argument("--run")
+    p_cat.set_defaults(func=cmd_catalog)
+
+    # close (Explicit operator non-gate closeout without split-brain stop_reason)
+    p_cls = sub.add_parser(
+        "close",
+        help="Explicitly close a run stopped by operator or window without claiming `all_gates_passed`.",
+    )
+    p_cls.add_argument(
+        "--reason",
+        choices=("stopped_by_operator", "window_reached", "superseded"),
+        required=True,
+    )
+    p_cls.add_argument("--notes", required=True, help="Explicit explanation recorded in `human_touches` and `events`.")
+    p_cls.add_argument("--actor", default="operator")
+    p_cls.add_argument("--run")
+    p_cls.set_defaults(func=cmd_close)
+
+    # bundle (Atomic symlink-safe disclosure/deliverable sealer & verifier)
+    p_bnd = sub.add_parser(
+        "bundle",
+        help="Atomically seal or verify a self-contained deliverable directory (`BUNDLE-MANIFEST.json` + `SEAL.sha256`).",
+    )
+    bnd_sub = p_bnd.add_subparsers(dest="bundle_cmd", required=True)
+    pbnd_s = bnd_sub.add_parser("seal", help="Reject symlinks/secrets/local-paths, check writer stability, and emit `BUNDLE-MANIFEST.json` + `SEAL.sha256`.")
+    pbnd_s.add_argument("bundle_dir")
+    pbnd_s.add_argument("--allow-local-paths", action="store_true", help="Allow local absolute paths when sealing internal-only scratch bundles.")
+    pbnd_v = bnd_sub.add_parser("verify", help="Verify `BUNDLE-MANIFEST.json` and `SEAL.sha256` against on-disk regular files.")
+    pbnd_v.add_argument("bundle_dir")
+    p_bnd.set_defaults(func=cmd_bundle)
 
     return p
 

@@ -11,7 +11,12 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-from ajar.db import list_rows, list_steers
+from ajar.db import (
+    apply_latest_finding_corrections,
+    compute_harness_code_sha256,
+    list_rows,
+    list_steers,
+)
 from ajar.gates import check_all_gates
 from ajar.redact import scrub_text
 
@@ -24,11 +29,11 @@ def build_report_data(
     run_row = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
     run = dict(run_row) if run_row else {}
 
-    findings = list_rows(
+    raw_findings = list_rows(
         conn,
         """
         SELECT f.*, c.falsifier_worker_id, c.falsification_prediction,
-               c.customer_state, c.remediation_state
+               c.customer_state, c.remediation_state, c.same_root_claim_id, c.duplicate_of_claim_id
         FROM findings f
         JOIN claims c ON f.claim_id = c.claim_id
         ORDER BY CASE f.severity
@@ -36,6 +41,23 @@ def build_report_data(
             f.created_at ASC
         """,
     )
+    findings = apply_latest_finding_corrections(conn, raw_findings)
+    root_keys: set[str] = set()
+    for f in findings:
+        sr = str(f.get("same_root_claim_id") or "").strip()
+        dup = str(f.get("duplicate_of_claim_id") or "").strip()
+        loc_base = str(f.get("locus") or "").split(":", 1)[0].strip().lstrip("./")
+        root_keys.add(sr or dup or str(f.get("locus") or loc_base))
+    distinct_root_causes_count = len(root_keys)
+
+    rec_harness = str(run.get("harness_sha256") or "").strip()
+    cur_harness = compute_harness_code_sha256()
+    harness_integrity = {
+        "recorded_harness_sha256": rec_harness,
+        "current_harness_sha256": cur_harness,
+        "harness_modified_mid_run": bool(rec_harness and rec_harness != cur_harness),
+    }
+
     chains = list_rows(conn, "SELECT * FROM chains WHERE verified = 1 ORDER BY created_at ASC")
     surfaces = list_rows(conn, "SELECT * FROM surfaces ORDER BY priority ASC, created_at ASC")
     dry_controls = list_rows(
@@ -79,7 +101,9 @@ def build_report_data(
         "diff_range": run.get("diff_range", ""),
         "goal": run.get("goal", ""),
         "status": run.get("status", ""),
+        "stop_reason": run.get("stop_reason", ""),
         "commitment_hash": run.get("commitment_hash", ""),
+        "harness_integrity": harness_integrity,
         "created_at": run.get("created_at", ""),
         "finished_at": run.get("finished_at"),
         "threat_model": dict(tm_row) if (tm_row := conn.execute("SELECT * FROM threat_models LIMIT 1").fetchone()) else None,
@@ -87,6 +111,7 @@ def build_report_data(
         "crown_jewels": list_rows(conn, "SELECT * FROM crown_jewels ORDER BY created_at ASC"),
         "open_doors": list_rows(conn, "SELECT * FROM parked_doors ORDER BY created_at ASC"),
         "findings": findings,
+        "distinct_root_causes_count": distinct_root_causes_count,
         "verified_chains": chains,
         "patch_verifications": patch_verifications,
         "epistemic_hooks": epistemic_hooks,
@@ -122,17 +147,21 @@ def render_markdown_report(
 ) -> str:
     data = build_report_data(conn, include_rejected_appendix=include_rejected_appendix)
     econ = data["economics"]
+    hint = data["harness_integrity"]
     cap_label = (
         "uncapped_research"
         if econ.get("pricing_mode") == "uncapped_research"
         else f"${econ['cogs_cap_usd']:.2f}"
     )
+    stop_suffix = f", stop_reason=`{data['stop_reason']}`" if data.get("stop_reason") else ""
     lines: list[str] = [
         f"# Security Verification Report — `{data['run_id']}`",
         "",
         f"- **Target:** `{data['target_path']}` (`{data['target_mode']}`)",
-        f"- **Run Status:** `{data['status']}` (Closeout gates passed: `{data['gates_passed']}`)",
+        f"- **Run Status:** `{data['status']}` (Closeout gates passed: `{data['gates_passed']}`{stop_suffix})",
         f"- **Commitment Hash (`ajar-research-ledger/1`):** `{data['commitment_hash']}`",
+        f"- **Harness Integrity:** `harness_modified_mid_run={hint['harness_modified_mid_run']}`",
+        f"- **Distinct Root Causes / Confirmed Findings:** `{data['distinct_root_causes_count']}` / `{len(data['findings'])}`",
         f"- **In-Scope Code Size:** `{econ['in_scope_loc']}` LoC (`Code` cap quote: `${econ['code_quote_usd']:.2f}`, COGS cap: `{cap_label}`)",
         f"- **Measured Compute Spend:** `${econ['total_spend_usd']:.4f}` (`${econ['cost_usd_per_kloc']:.4f} / 1K LoC`)",
         f"- **Autonomy Checks:** `research_independence_pass={econ['research_independence_pass']}`, "

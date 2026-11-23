@@ -45,6 +45,9 @@ from ajar.store.migrations import (
     _ensure_v33_schema as _ensure_v33_schema,
 )
 from ajar.store.migrations import (
+    _ensure_v34_schema as _ensure_v34_schema,
+)
+from ajar.store.migrations import (
     _ensure_v322_schema as _ensure_v322_schema,
 )
 from ajar.store.tx import CURRENT_SCHEMA_VERSION as CURRENT_SCHEMA_VERSION
@@ -56,10 +59,37 @@ from ajar.store.util import (
     _assert_no_symlink_components as _assert_no_symlink_components,
 )
 from ajar.store.util import (
+    apply_latest_finding_corrections as apply_latest_finding_corrections,
+)
+from ajar.store.util import (
+    canonical_island_key as canonical_island_key,
+)
+from ajar.store.util import (
     compute_commitment_hash as compute_commitment_hash,
 )
 from ajar.store.util import (
+    compute_epistemic_delta as compute_epistemic_delta,
+)
+from ajar.store.util import (
+    compute_epistemic_potential as compute_epistemic_potential,
+)
+from ajar.store.util import (
+    compute_harness_code_sha256 as compute_harness_code_sha256,
+)
+from ajar.store.util import (
+    compute_island_illumination as compute_island_illumination,
+)
+from ajar.store.util import (
+    compute_lead_ev_formula as compute_lead_ev_formula,
+)
+from ajar.store.util import (
+    compute_root_plateau_throttles as compute_root_plateau_throttles,
+)
+from ajar.store.util import (
     compute_task_salience as compute_task_salience,
+)
+from ajar.store.util import (
+    evaluate_chain_failure_streak as evaluate_chain_failure_streak,
 )
 from ajar.store.util import (
     get_ajar_home as get_ajar_home,
@@ -155,6 +185,33 @@ def check_dead_end_repetition(
             )
 
 
+def _pick_best_open_task(
+    candidates: Sequence[sqlite3.Row],
+    illum_islands: dict[str, dict[str, Any]],
+) -> sqlite3.Row | None:
+    if not candidates:
+        return None
+    best = min(
+        candidates,
+        key=lambda r: (
+            -int(r["salience_score"] or 0),
+            int(
+                (
+                    illum_islands.get(
+                        canonical_island_key(str(r["locus"] or ""), str(r["subsystem"] or ""))
+                    )
+                    or {}
+                ).get("explore_leases", 0)
+            )
+            if str(r["kind"]) in ("investigate", "escalate")
+            else 0,
+            str(r["created_at"] or ""),
+            str(r["task_id"] or ""),
+        ),
+    )
+    return best
+
+
 def lease_next_task(
     conn: sqlite3.Connection,
     *,
@@ -163,7 +220,7 @@ def lease_next_task(
     ttl_sec: int = 900,
     recover: bool = False,
 ) -> dict[str, Any] | None:
-    """Atomically lease the highest-salience open task with portfolio balance and Zero-Skill quota."""
+    """Atomically lease the highest-salience open task with portfolio balance, QD-Islands, and Zero-Skill quota."""
     now = time.time()
     now_iso = utc_now_iso()
     with immediate_tx(conn):
@@ -174,6 +231,11 @@ def lease_next_task(
                 worker_id = NULL,
                 lease_expires_at = NULL,
                 attempt_count = attempt_count + 1,
+                direction = CASE
+                    WHEN kind = 'investigate' AND (attempt_count + 1) >= 2 AND direction = 'outside_in' THEN 'inside_out'
+                    WHEN kind = 'investigate' AND (attempt_count + 1) >= 2 AND direction = 'inside_out' THEN 'outside_in'
+                    ELSE direction
+                END,
                 updated_at = ?
             WHERE status = 'leased' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
             """,
@@ -200,33 +262,38 @@ def lease_next_task(
             run_row and "campaign_phase" in run_row.keys() and str(run_row["campaign_phase"] or "hunt") == "hunt"
         )
 
+        illum = compute_island_illumination(conn)
+        if int(illum["island_count"]) >= 2 and int(illum["total_explore_leases"]) >= 1:
+            recompute_all_open_salience(conn)
+        illum_islands: dict[str, dict[str, Any]] = illum.get("islands") or {}
+
         row: sqlite3.Row | None = None
         if kind:
             if (verify_only and kind in ("map", "investigate", "bridge")) or (in_hunt_phase and kind == "patch"):
                 return None
-            row = conn.execute(
+            cands = conn.execute(
                 """
                 SELECT * FROM tasks
                 WHERE status = 'open' AND kind = ?
                 ORDER BY salience_score DESC, created_at ASC
-                LIMIT 1
                 """,
                 (kind,),
-            ).fetchone()
+            ).fetchall()
+            row = _pick_best_open_task(cands, illum_islands)
         elif verify_only:
             allowed = ("falsify", "reproduce", "instrument", "chain", "escalate") if in_hunt_phase else (
                 "falsify", "reproduce", "instrument", "chain", "patch", "escalate"
             )
             placeholders = ",".join("?" for _ in allowed)
-            row = conn.execute(
+            cands = conn.execute(
                 f"""
                 SELECT * FROM tasks
                 WHERE status = 'open' AND kind IN ({placeholders})
                 ORDER BY salience_score DESC, created_at ASC
-                LIMIT 1
                 """,
                 allowed,
-            ).fetchone()
+            ).fetchall()
+            row = _pick_best_open_task(cands, illum_islands)
         else:
             # 1. Woken Open-Door / Percolated `chain` tasks (`salience >= 96`) take top priority unless one is already leased.
             leased_chain = conn.execute(
@@ -269,26 +336,26 @@ def lease_next_task(
                             "SELECT * FROM tasks WHERE status = 'open' AND kind = 'bridge' ORDER BY salience_score DESC, created_at ASC LIMIT 1"
                         ).fetchone()
                     elif bridge_share_high:
-                        row = conn.execute(
+                        cands = conn.execute(
                             """
                             SELECT * FROM tasks
                             WHERE status = 'open' AND kind != 'bridge' AND (? = 0 OR kind != 'patch')
                             ORDER BY salience_score DESC, created_at ASC
-                            LIMIT 1
                             """,
                             (1 if in_hunt_phase else 0,),
-                        ).fetchone()
+                        ).fetchall()
+                        row = _pick_best_open_task(cands, illum_islands)
 
             if row is None:
-                row = conn.execute(
+                cands = conn.execute(
                     """
                     SELECT * FROM tasks
                     WHERE status = 'open' AND (? = 0 OR kind != 'patch')
                     ORDER BY salience_score DESC, created_at ASC
-                    LIMIT 1
                     """,
                     (1 if in_hunt_phase else 0,),
-                ).fetchone()
+                ).fetchall()
+                row = _pick_best_open_task(cands, illum_islands)
 
         if row is None:
             return None
@@ -907,12 +974,16 @@ def calibrate_finding(
     reason: str,
     severity: str | None = None,
     title: str | None = None,
+    declared_steps: int | None = None,
+    realism_tier: str | None = None,
     worker_id: str = "operator",
 ) -> dict[str, Any]:
-    """Calibrate severity/title on a confirmed finding without ad-hoc SQL edits."""
+    """Calibrate severity/title/realism on a confirmed finding without ad-hoc SQL edits."""
     clean_reason = scrub_text((reason or "").strip())
     if len(clean_reason) < 8:
         raise AjarError("Finding calibration --reason must be at least 8 characters.", EXIT_USER_ERROR)
+    if realism_tier and realism_tier not in ("crown_jewel", "high_impact", "stepping_stone"):
+        raise AjarError(f"Unsupported --realism-tier: {realism_tier!r}", EXIT_USER_ERROR)
     now_iso = utc_now_iso()
     with immediate_tx(conn):
         frow = conn.execute("SELECT * FROM findings WHERE finding_id = ?", (finding_id,)).fetchone()
@@ -923,15 +994,28 @@ def calibrate_finding(
             raise AjarError(f"Unsupported severity: {new_sev!r}", EXIT_USER_ERROR)
         new_title = scrub_text(title.strip()) if title and title.strip() else str(frow["title"])
         cur_tier = str(frow["realism_tier"] if "realism_tier" in frow.keys() else "stepping_stone")
-        new_tier = "stepping_stone" if new_sev in ("medium", "low") else cur_tier
+        try:
+            r_obj = json.loads(str(frow["realism_json"] or "{}")) if "realism_json" in frow.keys() else {}
+        except (ValueError, TypeError):
+            r_obj = {}
+        if declared_steps is not None:
+            r_obj["declared_steps"] = max(1, int(declared_steps))
+            r_obj["estimated_steps"] = max(1, int(declared_steps))
+        if realism_tier:
+            new_tier = realism_tier
+        elif new_sev in ("medium", "low"):
+            new_tier = "stepping_stone"
+        else:
+            new_tier = cur_tier
+        r_obj["realism_tier"] = new_tier
 
         conn.execute(
             """
             UPDATE findings
-            SET severity = ?, title = ?, realism_tier = ?, calibration_notes = ?
+            SET severity = ?, title = ?, realism_tier = ?, realism_json = ?, calibration_notes = ?
             WHERE finding_id = ?
             """,
-            (new_sev, new_title, new_tier, clean_reason, finding_id),
+            (new_sev, new_title, new_tier, json.dumps(r_obj, sort_keys=True), clean_reason, finding_id),
         )
         conn.execute(
             "UPDATE claims SET severity = ?, title = ?, updated_at = ? WHERE claim_id = ?",
@@ -940,7 +1024,7 @@ def calibrate_finding(
         if worker_id == "operator":
             conn.execute(
                 "INSERT INTO human_touches(touch_id, kind, actor, notes, created_at) VALUES (?, 'scope_authority', 'operator', ?, ?)",
-                (new_id("tch"), f"calibrate {finding_id} -> {new_sev}: {clean_reason[:140]}", now_iso),
+                (new_id("tch"), f"calibrate {finding_id} -> {new_sev}/{new_tier}: {clean_reason[:140]}", now_iso),
             )
         log_event(
             conn,
@@ -952,6 +1036,7 @@ def calibrate_finding(
                 "new_severity": new_sev,
                 "new_title": new_title,
                 "realism_tier": new_tier,
+                "declared_steps": declared_steps,
                 "reason": clean_reason[:200],
             },
         )
@@ -962,6 +1047,7 @@ def calibrate_finding(
         "severity": new_sev,
         "title": new_title,
         "realism_tier": new_tier,
+        "declared_steps": r_obj.get("declared_steps"),
         "calibration_notes": clean_reason,
     }
 
@@ -1034,6 +1120,11 @@ def run_pulse(conn: sqlite3.Connection, *, target_dir: pathlib.Path | None = Non
                 worker_id = NULL,
                 lease_expires_at = NULL,
                 attempt_count = attempt_count + 1,
+                direction = CASE
+                    WHEN kind = 'investigate' AND (attempt_count + 1) >= 2 AND direction = 'outside_in' THEN 'inside_out'
+                    WHEN kind = 'investigate' AND (attempt_count + 1) >= 2 AND direction = 'inside_out' THEN 'outside_in'
+                    ELSE direction
+                END,
                 updated_at = ?
             WHERE status = 'leased' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
             """,
@@ -1100,6 +1191,8 @@ def run_pulse(conn: sqlite3.Connection, *, target_dir: pathlib.Path | None = Non
                     reopened_tasks.append(brow["task_id"])
 
         rescored = recompute_all_open_salience(conn)
+        ep = compute_epistemic_delta(conn, reference_actions=("pulse",))
+        illum = compute_island_illumination(conn)
         result = {
             "expired_leases": expired_leases,
             "expired_hooks": expired_hooks,
@@ -1107,6 +1200,14 @@ def run_pulse(conn: sqlite3.Connection, *, target_dir: pathlib.Path | None = Non
             "invalidated_bindings": invalidated_bindings,
             "reopened_tasks": reopened_tasks,
             "rescored_open_tasks": rescored,
+            "epistemic_potential": ep["epistemic_potential"],
+            "delta_phi": ep["delta_phi"],
+            "epistemic_components": ep["components"],
+            "island_illumination": {
+                "island_count": illum["island_count"],
+                "illuminated_count": illum["illuminated_count"],
+                "global_illumination": illum["global_illumination"],
+            },
         }
         log_event(conn, "system", "pulse", "", result)
     return result

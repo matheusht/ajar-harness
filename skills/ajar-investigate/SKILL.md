@@ -9,13 +9,15 @@ Use this skill to execute leased `investigate` or `instrument` tasks, persist ve
 
 ## 1. Lease and Hydrate Prefix-Stable Context
 
-1. Lease the highest-salience open task and recover expired worker leases:
+1. Lease the highest-salience open task (or select a disjoint parallel wave via the Layer-0 Swarm planner):
    ```bash
+   ajar swarm plan [--workers <N>] [--no-enqueue] [--stall-window <K>]
    ajar task lease --worker <worker_id> --kind investigate --recover
    ```
-2. Load the prefix-stable `< 4 KB` certified context frame:
+2. Load the prefix-stable `< 4 KB` certified context frame or compile a minimal (`<= 40`-line) Layer-0 Worker Dispatch Brief:
    ```bash
    ajar context --task <task_id>
+   ajar swarm brief <task_id> --worker <worker_id> [--raw]
    ```
 3. Follow the task's `skill_mode`, `direction`, `Active Workspace Steers`, and `Active Epistemic Hooks`:
    - **Workspace Steers:** Obey all `Active Workspace Steers` listed in the `Certified Run Prefix`. Never pursue out-of-scope paths barred by a Steer.
@@ -88,7 +90,7 @@ Push maximum depth on every promising lead. When a deep sink or partial chain hi
 
 ## 4. Propose Falsifiable Claims
 
-Trace reachability from an untrusted entrypoint to the sink and state a concrete disconfirmation test. Express `--title`, `--mechanism`, and `--falsification-test` strictly as structural code transitions and boundary violations (for example, `prepare_symlink_changes skips SYMLINK_IN_RESULT when patch->old_mode == 0, allowing writes through a renamed intra-repo symlink`), never speculative post-exploitation `.git/hooks/*` persistence scripts, reverse-shell commands, or raw shellcode literals (`ajar claim propose` deterministically rejects weaponized prose tails):
+Trace reachability from an untrusted entrypoint to the sink and state a concrete disconfirmation test. Express `--title`, `--mechanism`, and `--falsification-test` strictly as structural code transitions and boundary violations (for example, `prepare_archive_links skips LINK_PATH_CHECK when entry->old_mode == 0, allowing writes through a renamed archive link`), never speculative post-exploitation `.git/hooks/*` persistence scripts, reverse-shell commands, or raw shellcode literals (`ajar claim propose` deterministically rejects weaponized prose tails):
 
 ```bash
 ajar claim propose \
@@ -98,9 +100,12 @@ ajar claim propose \
   --locus "<file:line>" \
   --mechanism "<entry -> missing guard -> corrupted invariant -> impact>" \
   --severity <critical|high|medium|low> \
+  [--same-root-of <parent_claim_id>] \
   --falsification-prediction "<what must hold if a hidden upstream guard blocks this path>" \
   --falsification-test "<exact caller check or negative-control command to try disproving the claim>"
 ```
+
+When a candidate claim turns out to share the exact root defect as an earlier claim, close it cleanly via `ajar claim duplicate <claim_id> --of <parent_claim_id> --worker <worker_id> --reason "<shared root locus>"`. Vote on high-upside surfaces, Open Doors, or subsystem slices via `ajar lead vote --worker <worker_id> --target-kind <surface|door|slice|chain|subsystem> --target-id <id> --impact 9 --plausibility 8 --chainability 9 --effort 4 --rationale "<why>"` and inspect swarm consensus + root plateau throttles via `ajar lead rank` and `ajar lead throttles`.
 
 ## 5. Close the Task Cleanly
 

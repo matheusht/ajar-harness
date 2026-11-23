@@ -17,6 +17,7 @@ from ajar.chain_planner import (
     evaluate_precondition_realism,
 )
 from ajar.cli.common import _emit
+from ajar.cli.repro import cmd_repro as cmd_repro
 from ajar.db import (
     AjarError,
     apply_latest_finding_corrections,
@@ -49,7 +50,6 @@ from ajar.repro_compose import (
     run_snapshot_chain_probe,
 )
 from ajar.repro_source import (
-    run_repro_try,
     run_source_reproduction,
 )
 from ajar.services import (
@@ -524,35 +524,6 @@ def cmd_patch(args: argparse.Namespace) -> int:
 
         rows = list_rows(conn, "SELECT * FROM patch_verifications ORDER BY created_at ASC")
         _emit({"patch_verifications": rows}, True)
-        return EXIT_OK
-    finally:
-        conn.close()
-
-
-def cmd_repro(args: argparse.Namespace) -> int:
-    rid = resolve_run_id(args.run)
-    rdir = run_dir_for(rid)
-    conn = open_run_db(rid)
-    try:
-        if args.repro_cmd == "try":
-            run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
-            tpath = pathlib.Path(run["target_path"])
-            oracle_dict = json.loads(args.oracle_json) if getattr(args, "oracle_json", None) else None
-            patch_p = pathlib.Path(args.patch) if getattr(args, "patch", None) else None
-            res = run_repro_try(
-                run_dir=rdir,
-                target_dir=tpath,
-                cmd=args.cmd,
-                patch_path=patch_p,
-                build_cmd=args.build_cmd or "",
-                oracle=oracle_dict,
-                timeout_sec=int(args.timeout),
-            )
-            _emit(res, True)
-            return EXIT_OK
-
-        rows = list_rows(conn, "SELECT * FROM repro_snapshots ORDER BY created_at DESC")
-        _emit({"snapshots": rows}, True)
         return EXIT_OK
     finally:
         conn.close()

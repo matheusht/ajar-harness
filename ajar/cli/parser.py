@@ -18,7 +18,6 @@ from ajar.cli.claims import (
     cmd_claim,
     cmd_finding,
     cmd_patch,
-    cmd_repro,
 )
 from ajar.cli.hunt import (
     cmd_anomaly,
@@ -62,11 +61,13 @@ from ajar.cli.ops import (
     cmd_threat_model,
     cmd_touch,
 )
+from ajar.cli.repro import cmd_repro
 from ajar.graph import (
     VALID_GRAPH_SCHEMAS,
     VALID_GRAPH_VISIBILITIES,
 )
 from ajar.mcp import serve_mcp_stdio
+from ajar.slice_probe import VALID_SLICE_TRACERS
 from ajar.swarm import (
     ENV_BLOCKER_KINDS,
     VALID_FALLBACK_REASONS,
@@ -564,8 +565,8 @@ def build_parser() -> argparse.ArgumentParser:
     pc_lst.add_argument("--run")
     p_cl.set_defaults(func=cmd_claim)
 
-    # repro (Strike-free smoke-test & snapshots)
-    p_rpr = sub.add_parser("repro", help="Run strike-free build/PoC smoke tests (`ajar repro try`) and inspect post-state snapshots.")
+    # repro (Strike-free smoke-test, @VISITED/@UNREACHED slice-probe, & snapshots)
+    p_rpr = sub.add_parser("repro", help="Run strike-free build/PoC smoke tests (`ajar repro try`), `@VISITED`/`@UNREACHED` coverage probes (`ajar repro slice-probe`), and inspect post-state snapshots.")
     rpr_sub = p_rpr.add_subparsers(dest="repro_cmd", required=True)
     prp_t = rpr_sub.add_parser("try", help="Run a strike-free command inside the shared 8-slot pool (`slot-<k>`) without incrementing `failed_repro_count`.")
     prp_t.add_argument("--cmd", required=True)
@@ -574,6 +575,33 @@ def build_parser() -> argparse.ArgumentParser:
     prp_t.add_argument("--oracle-json", help="Optional JSON oracle rules.")
     prp_t.add_argument("--timeout", type=int, default=60)
     prp_t.add_argument("--run")
+
+    prp_sp = rpr_sub.add_parser(
+        "slice-probe",
+        help="Run `--cmd` in `slot-<k>` and annotate `--focus-locus` with `@VISITED` / `@UNREACHED` line coverage and sanitizer frames.",
+    )
+    prp_sp.add_argument("--focus-locus", required=True, help="Target slice `<file[:start[-end]]>` to annotate.")
+    prp_sp.add_argument("--cmd", required=True, help="Shell command or micro-driver to execute inside `slot-<k>`.")
+    prp_sp.add_argument("--build-cmd", default="", help="Optional compile command run before `--cmd` (`$AJAR_COV_CFLAGS`, `$AJAR_SAN_CFLAGS`).")
+    prp_sp.add_argument("--patch", default="", help="Optional candidate diff applied temporarily inside `slot-<k>`.")
+    prp_sp.add_argument("--tracer", choices=VALID_SLICE_TRACERS, default="auto", help="Coverage collector (`auto`, `python`, `gcov`, `none`).")
+    prp_sp.add_argument(
+        "--sanitize",
+        "--sanitizer-flags",
+        dest="sanitizer_flags",
+        action="store_true",
+        help="Export ASan + UBSan + coverage compiler/runtime flags (`$AJAR_SAN_CFLAGS`, `$AJAR_SANITIZER_CFLAGS`).",
+    )
+    prp_sp.add_argument("--record-coverage", action="store_true", help="Record contiguous `@VISITED` line spans into `coverage_spans`.")
+    prp_sp.add_argument("--task", default="", help="Optional `tsk-*` ID associated when `--record-coverage` is set.")
+    prp_sp.add_argument("--context-lines", type=int, default=8, help="Context lines around `--focus-locus` (default: 8).")
+    prp_sp.add_argument("--max-lines", type=int, default=60, help="Maximum rendered lines in window (default: 60).")
+    prp_sp.add_argument("--claim", default="", help="Optional `clm-*` ID to log telemetry and unblock `needs_instrumentation`.")
+    prp_sp.add_argument("--worker", default="worker")
+    prp_sp.add_argument("--timeout", type=int, default=60)
+    prp_sp.add_argument("--json", action="store_true", help="Emit full JSON receipt instead of plain annotated slice.")
+    prp_sp.add_argument("--run")
+
     prp_s = rpr_sub.add_parser("snapshots", help="List captured Arm-1 post-state snapshots (`snp-*`).")
     prp_s.add_argument("--run")
     p_rpr.set_defaults(func=cmd_repro)

@@ -22,6 +22,7 @@ from ajar.db import (
     open_run_db,
     render_task_context,
     resolve_run_id,
+    run_dir_for,
 )
 from ajar.gates import check_all_gates
 from ajar.graph import export_attack_flow_graph
@@ -43,6 +44,7 @@ from ajar.services import (
     rescope_claim_service,
     survive_claim,
 )
+from ajar.slice_probe import VALID_SLICE_TRACERS, run_slice_probe
 
 MCP_TOOLS: list[dict[str, Any]] = [
     {
@@ -334,6 +336,34 @@ MCP_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "ajar_repro_slice_probe",
+        "description": "Execute a target command inside an isolated `slot-<k>` worktree and return `@VISITED` / `@UNREACHED` line coverage plus ASan/UBSan crash frames around `focus_locus`.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "focus_locus": {"type": "string"},
+                "cmd": {"type": "string"},
+                "build_cmd": {"type": "string", "default": ""},
+                "patch_path": {"type": "string", "default": ""},
+                "tracer": {
+                    "type": "string",
+                    "enum": list(VALID_SLICE_TRACERS),
+                    "default": "auto",
+                },
+                "sanitizer_flags": {"type": "boolean", "default": False},
+                "sanitize": {"type": "boolean", "default": False},
+                "record_coverage": {"type": "boolean", "default": False},
+                "task_id": {"type": "string", "default": ""},
+                "context_lines": {"type": "integer", "default": 8},
+                "max_rendered_lines": {"type": "integer", "default": 60},
+                "claim_id": {"type": "string", "default": ""},
+                "worker_id": {"type": "string", "default": "worker"},
+                "timeout_sec": {"type": "integer", "default": 60},
+            },
+            "required": ["focus_locus", "cmd"],
+        },
+    },
+    {
         "name": "ajar_finish",
         "description": "Check all 5 SQL closeout gates (`G1`–`G5`) and mark the run finished if green.",
         "inputSchema": {"type": "object", "properties": {}},
@@ -544,6 +574,33 @@ def dispatch_mcp_tool(
                 visibility=str(args.get("visibility") or "internal_full"),
                 include_snippets=bool(args.get("include_snippets", False)),
                 repo_slug=str(args.get("repo_slug") or ""),
+            )
+        if tool_name == "ajar_repro_slice_probe":
+            if run is not None and str(run["target_mode"]) != "source":
+                raise AjarError("`ajar_repro_slice_probe` requires source mode.", EXIT_USER_ERROR)
+            p_rid = pathlib.Path(run_id)
+            rdir = p_rid.parent if (p_rid.suffix == ".db" or "/" in str(run_id)) else run_dir_for(run_id, ajar_home)
+            raw_patch = str(args.get("patch_path") or args.get("patch") or "").strip()
+            patch_p = pathlib.Path(raw_patch) if raw_patch else None
+            raw_task = str(args.get("task_id") or args.get("task") or "").strip() or None
+            wid = str(args.get("worker_id") or args.get("worker") or "worker")
+            return run_slice_probe(
+                conn,
+                run_dir=rdir,
+                target_dir=tpath,
+                focus_locus=str(args["focus_locus"]),
+                cmd=str(args["cmd"]),
+                build_cmd=str(args.get("build_cmd") or ""),
+                patch_path=patch_p,
+                tracer=str(args.get("tracer") or "auto"),
+                sanitizer_flags=bool(args.get("sanitizer_flags", False) or args.get("sanitize", False)),
+                record_coverage=bool(args.get("record_coverage", False)),
+                task_id=raw_task,
+                context_lines=int(args.get("context_lines", 8)),
+                max_rendered_lines=int(args.get("max_rendered_lines", 60)),
+                claim_id=str(args.get("claim_id") or args.get("claim") or ""),
+                timeout_sec=int(args.get("timeout_sec", args.get("timeout", 60))),
+                worker_id=wid,
             )
         if tool_name == "ajar_finish":
             return finish_run(conn, run_id=run_id, target_dir=tpath, actor="mcp")

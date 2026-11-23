@@ -58,6 +58,10 @@ from ajar.cli.ops import (
     cmd_threat_model,
     cmd_touch,
 )
+from ajar.graph import (
+    VALID_GRAPH_SCHEMAS,
+    VALID_GRAPH_VISIBILITIES,
+)
 from ajar.mcp import serve_mcp_stdio
 from ajar.swarm import (
     ENV_BLOCKER_KINDS,
@@ -85,6 +89,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_doc.add_argument("--no-remote", action="store_true", help="Skip live remote `gh api` / `git ls-remote` upstream checks.")
     p_doc.add_argument("--run", help="Optional run ID to diagnose SQLite integrity, stale leases, and repro slot health.")
     p_doc.add_argument("--prune-slots", action="store_true", help="With `--run`, safely remove unlocked `repro/slot-*` worktree directories.")
+    p_doc.add_argument(
+        "--failures",
+        action="store_true",
+        help="With `--run` (or `$AJAR_RUN_ID`), aggregate `repro/failures/*.json` receipts and `swarm_dispatches` fallback telemetry.",
+    )
     p_doc.add_argument("--json", action="store_true", default=True)
     p_doc.set_defaults(func=cmd_doctor)
 
@@ -487,11 +496,11 @@ def build_parser() -> argparse.ArgumentParser:
     pc_sur.add_argument("--notes", required=True)
     pc_sur.add_argument("--run")
 
-    pc_ins = cl_sub.add_parser("instrument", help="Run an isolated diagnostic probe inside scratch `slot-inst` to unblock `needs_instrumentation`.")
+    pc_ins = cl_sub.add_parser("instrument", help="Run an isolated diagnostic probe inside the shared `slot-<k>` pool to unblock `needs_instrumentation`.")
     pc_ins.add_argument("claim_id")
     pc_ins.add_argument("--worker", required=True)
     pc_ins.add_argument("--probe-cmd", required=True)
-    pc_ins.add_argument("--probe-patch", default="", help="Optional temporary diagnostic diff applied only inside `slot-inst`.")
+    pc_ins.add_argument("--probe-patch", default="", help="Optional temporary diagnostic diff applied only inside `slot-<k>`.")
     pc_ins.add_argument("--timeout", type=int, default=60)
     pc_ins.add_argument("--run")
 
@@ -576,6 +585,11 @@ def build_parser() -> argparse.ArgumentParser:
     pch_p.add_argument("--steps", required=True, help="Comma-separated `fnd-*`, `clm-*`, `prim-*`, or `anom-*` IDs.")
     pch_p.add_argument("--poc-cmd", required=True)
     pch_p.add_argument("--control-cmd", required=True)
+    pch_p.add_argument(
+        "--build-cmd",
+        default="",
+        help="Optional compile command run before full/control arms and after step micropatch apply/reset (auto-inherited from step findings if omitted).",
+    )
     pch_p.add_argument("--severity", choices=("critical", "high", "medium", "low"), default="critical")
     pch_p.add_argument("--oracle-json", help="Optional JSON oracle rules (`expect_regex`, `expect_exit_code`).")
     pch_p.add_argument("--step-micropatch", action="append", help="Per-step counterfactual patch `<step_id>:<path/to/step.diff>` (auto-inherited for `fnd-*` and `prim-*` with `--micropatch`).")
@@ -587,10 +601,10 @@ def build_parser() -> argparse.ArgumentParser:
     pch_p.add_argument("--worker", default="worker")
     pch_p.add_argument("--run")
 
-    pch_pr = ch_sub.add_parser("probe", help="Hydrate a Stage-1 post-state snapshot (`snp-*`) into `slot-inst` (`< 50 ms`) and probe Stage 2.")
+    pch_pr = ch_sub.add_parser("probe", help="Hydrate a Stage-1 post-state snapshot (`snp-*`) into the shared `slot-<k>` pool and probe Stage 2.")
     pch_pr.add_argument("--from-snapshot", required=True, help="Snapshot ID (`snp-*`) from `ajar claim reproduce --save-post-state`.")
-    pch_pr.add_argument("--cmd", required=True, help="Stage-2 probe command executed inside hydrated `slot-inst`.")
-    pch_pr.add_argument("--patch", default="", help="Optional temporary diff applied inside `slot-inst`.")
+    pch_pr.add_argument("--cmd", required=True, help="Stage-2 probe command executed inside hydrated `slot-<k>`.")
+    pch_pr.add_argument("--patch", default="", help="Optional temporary diff applied inside `slot-<k>`.")
     pch_pr.add_argument("--oracle-json", help="Optional JSON oracle rules.")
     pch_pr.add_argument("--timeout", type=int, default=60)
     pch_pr.add_argument("--worker", default="worker")
@@ -662,6 +676,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     # export-graph (Platform whiteboard feed)
     p_eg = sub.add_parser("export-graph", help="Export deterministic Platform component & attack-flow JSON graph.")
+    p_eg.add_argument(
+        "--schema",
+        choices=VALID_GRAPH_SCHEMAS,
+        default="v2",
+        help="Graph schema version (`v2` = `ajar-platform-graph/2`, `v1` = legacy `ajar-platform-graph/1`).",
+    )
+    p_eg.add_argument(
+        "--visibility",
+        choices=VALID_GRAPH_VISIBILITIES,
+        default="internal_full",
+        help="Output visibility tier (`internal_full`, `customer_private`, `public_disclosure`).",
+    )
+    p_eg.add_argument(
+        "--include-snippets",
+        action="store_true",
+        help="Include bounded scrubbed source snippets for finding, chain, and guard loci.",
+    )
+    p_eg.add_argument(
+        "--repo-slug",
+        default="",
+        help="Repository slug (`owner/repo`) emitted in `run.repo_slug` (auto-inferred when omitted).",
+    )
     p_eg.add_argument("--output", help="Optional output file path.")
     p_eg.add_argument("--run")
     p_eg.set_defaults(func=cmd_export_graph)

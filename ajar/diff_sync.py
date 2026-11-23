@@ -39,10 +39,15 @@ from ajar.repomap import SOURCE_EXTENSIONS
 from ajar.repro_helpers import ensure_helpers_runtime
 from ajar.repro_source import (
     _acquire_slot,
+    _clean_slot_preserving_objects,
+    _CleanBuildSnapshot,
     _evaluate_defect_fired,
     _prepare_slot_worktree,
     _run_shell_in_slot,
+    _snapshot_clean_build_outputs,
+    _try_clean_arm_preserving_build,
     init_source_mirror,
+    resolve_local_build_cache_dir,
 )
 from ajar.store import immediate_tx
 
@@ -179,6 +184,7 @@ def sync_pr_differential_state(
 
     kept_findings: list[str] = []
     closed_findings: list[str] = []
+    build_failed_findings: list[dict[str, str]] = []
     kept_dry_tasks: list[str] = []
     invalidated_guards: list[dict[str, str]] = []
     reopened_task_ids: list[str] = []
@@ -205,8 +211,7 @@ def sync_pr_differential_state(
                 repro_dir = run_dir / "repro"
                 slot_idx, lock_fh = _acquire_slot(repro_dir)
                 slot_dir = repro_dir / f"slot-{slot_idx}"
-                cache_dir = repro_dir / f"cache-{slot_idx}"
-                cache_dir.mkdir(parents=True, exist_ok=True)
+                cache_dir = resolve_local_build_cache_dir(run_dir, f"cache-{slot_idx}")
                 try:
                     for pf in prior_findings:
                         _prepare_slot_worktree(mirror_dir, slot_dir)
@@ -218,33 +223,114 @@ def sync_pr_differential_state(
                         except json.JSONDecodeError:
                             oracle = None
 
-                        poc_res = _run_shell_in_slot(
-                            str(pf["poc_cmd"]),
-                            slot_dir=slot_dir,
-                            cache_dir=cache_dir,
-                            timeout_sec=45,
-                            helpers_dir=helpers_dir,
-                        )
-                        poc_fired = _evaluate_defect_fired(
-                            poc_res["exit_code"], poc_res["stdout"], poc_res["stderr"], poc_res["timed_out"], oracle
-                        )
-                        subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
-                        subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, check=False)
+                        pf_build_cmd = str(pf["build_cmd"] or "").strip() if "build_cmd" in pf.keys() else ""
+                        build_ok = True
+                        clean_build_snapshot: _CleanBuildSnapshot | None = None
+                        build_err_note = ""
 
-                        ctrl_res = _run_shell_in_slot(
-                            str(pf["control_cmd"]),
-                            slot_dir=slot_dir,
-                            cache_dir=cache_dir,
-                            timeout_sec=45,
-                            helpers_dir=helpers_dir,
-                        )
-                        ctrl_fired = _evaluate_defect_fired(
-                            ctrl_res["exit_code"], ctrl_res["stdout"], ctrl_res["stderr"], ctrl_res["timed_out"], oracle
-                        )
-                        still_vulnerable = poc_fired and (not ctrl_fired) and ctrl_res["exit_code"] == 0
+                        if pf_build_cmd:
+                            bld_res = _run_shell_in_slot(
+                                pf_build_cmd,
+                                slot_dir=slot_dir,
+                                cache_dir=cache_dir,
+                                timeout_sec=180,
+                                helpers_dir=helpers_dir,
+                            )
+                            if bld_res["exit_code"] != 0 or bld_res["timed_out"]:
+                                build_ok = False
+                                build_err_note = (
+                                    f"build_cmd failed on {head_sha[:8]} (exit={bld_res['exit_code']})"
+                                )
+                            else:
+                                clean_build_snapshot = _snapshot_clean_build_outputs(slot_dir)
 
-                        new_cid = new_id("clm")
-                        if still_vulnerable:
+                        poc_res: dict[str, Any] = {"exit_code": -1, "stdout": "", "stderr": "", "timed_out": False}
+                        ctrl_res: dict[str, Any] = {"exit_code": -1, "stdout": "", "stderr": "", "timed_out": False}
+                        still_vulnerable = False
+
+                        if build_ok:
+                            poc_res = _run_shell_in_slot(
+                                str(pf["poc_cmd"]),
+                                slot_dir=slot_dir,
+                                cache_dir=cache_dir,
+                                timeout_sec=45,
+                                helpers_dir=helpers_dir,
+                            )
+                            poc_fired = _evaluate_defect_fired(
+                                poc_res["exit_code"], poc_res["stdout"], poc_res["stderr"], poc_res["timed_out"], oracle
+                            )
+                            if not (pf_build_cmd and _try_clean_arm_preserving_build(slot_dir, clean_build_snapshot)):
+                                subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
+                                _clean_slot_preserving_objects(slot_dir, check=False)
+                                if pf_build_cmd:
+                                    bld_ctrl = _run_shell_in_slot(
+                                        pf_build_cmd,
+                                        slot_dir=slot_dir,
+                                        cache_dir=cache_dir,
+                                        timeout_sec=180,
+                                        helpers_dir=helpers_dir,
+                                    )
+                                    if bld_ctrl["exit_code"] != 0 or bld_ctrl["timed_out"]:
+                                        build_ok = False
+                                        build_err_note = (
+                                            f"control build_cmd failed on {head_sha[:8]} (exit={bld_ctrl['exit_code']})"
+                                        )
+
+                            if build_ok:
+                                ctrl_res = _run_shell_in_slot(
+                                    str(pf["control_cmd"]),
+                                    slot_dir=slot_dir,
+                                    cache_dir=cache_dir,
+                                    timeout_sec=45,
+                                    helpers_dir=helpers_dir,
+                                )
+                                ctrl_fired = _evaluate_defect_fired(
+                                    ctrl_res["exit_code"], ctrl_res["stdout"], ctrl_res["stderr"], ctrl_res["timed_out"], oracle
+                                )
+                                still_vulnerable = (
+                                    poc_fired
+                                    and (not ctrl_fired)
+                                    and ctrl_res["exit_code"] == 0
+                                    and (not ctrl_res["timed_out"])
+                                )
+
+                        if not build_ok:
+                            rtid = new_id("task")
+                            f_loc = str(pf["locus"] or "")
+                            f_sub = str(pf["subsystem"] or infer_subsystem(f_loc))
+                            f_prio = "critical" if str(pf["severity"]) == "critical" else "high"
+                            with immediate_tx(conn):
+                                conn.execute(
+                                    """
+                                    INSERT INTO tasks(
+                                        task_id, surface_id, kind, direction, title, subsystem, locus, priority,
+                                        status, salience_score, diff_state, summary, created_at, updated_at
+                                    ) VALUES (?, ?, 'investigate', 'outside_in', ?, ?, ?, ?, 'open', 92, 'build_failed', ?, ?, ?)
+                                    """,
+                                    (
+                                        rtid,
+                                        pf["surface_id"],
+                                        f"Re-verify prior finding {pf['finding_id']} after PR build failure",
+                                        f_sub,
+                                        f_loc,
+                                        f_prio,
+                                        f"PR diff {norm_spec}: {build_err_note}; prior finding {pf['finding_id']} "
+                                        f"cannot be marked closed until re-verified against the updated build/interface.",
+                                        now_iso,
+                                        now_iso,
+                                    ),
+                                )
+                            build_failed_findings.append(
+                                {
+                                    "finding_id": str(pf["finding_id"]),
+                                    "locus": f_loc,
+                                    "reason": build_err_note,
+                                    "reverify_task_id": rtid,
+                                }
+                            )
+                            reopened_task_ids.append(rtid)
+                        elif still_vulnerable:
+                            new_cid = new_id("clm")
                             new_fid = new_id("fnd")
                             with immediate_tx(conn):
                                 conn.execute(
@@ -295,7 +381,7 @@ def sync_pr_differential_state(
                                         pf["root_cause"],
                                         pf["poc_cmd"],
                                         pf["control_cmd"],
-                                        pf["build_cmd"] if "build_cmd" in pf.keys() else "",
+                                        pf_build_cmd,
                                         pf["micropatch_path"],
                                         pf["micropatch_diff"],
                                         json.dumps({**poc_res, "arm_passed": True}, sort_keys=True),
@@ -309,6 +395,10 @@ def sync_pr_differential_state(
                                 )
                             kept_findings.append(new_fid)
                         else:
+                            new_cid = new_id("clm")
+                            close_reason = (
+                                f"Closed by PR diff {norm_spec}: prior PoC ({pf['finding_id']}) no longer triggers defect oracle on {head_sha[:8]}."
+                            )
                             with immediate_tx(conn):
                                 conn.execute(
                                     """
@@ -333,7 +423,7 @@ def sync_pr_differential_state(
                                         pf["severity"],
                                         pf["falsification_prediction"],
                                         pf["falsification_test"],
-                                        f"Closed by PR diff {norm_spec}: prior PoC ({pf['finding_id']}) no longer triggers defect oracle on {head_sha[:8]}.",
+                                        close_reason,
                                         pf["locus"],
                                         now_iso,
                                         now_iso,
@@ -341,11 +431,13 @@ def sync_pr_differential_state(
                                 )
                             closed_findings.append(str(pf["finding_id"]))
                 finally:
-                    if (slot_dir / ".git").exists():
-                        subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
-                        subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, check=False)
-                    fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
-                    lock_fh.close()
+                    try:
+                        if (slot_dir / ".git").exists():
+                            subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
+                            _clean_slot_preserving_objects(slot_dir, check=False)
+                    finally:
+                        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+                        lock_fh.close()
 
             with immediate_tx(conn):
                 # 2. Check prior `certified_bindings` (`kept` vs `invalidated_guard`).
@@ -557,6 +649,7 @@ def sync_pr_differential_state(
             "changed_files": sorted(changed_hunks.keys()),
             "kept_findings": kept_findings,
             "closed_findings": closed_findings,
+            "build_failed_findings": build_failed_findings,
             "kept_dry_tasks": kept_dry_tasks,
             "invalidated_guards": invalidated_guards,
             "reopened_task_ids": reopened_task_ids,

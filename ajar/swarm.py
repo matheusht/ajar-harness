@@ -193,16 +193,41 @@ def _resolve_auto_profile_for_items(conn: sqlite3.Connection, stage: str, item_i
     return WIRE_PROFILE_LADDER[max_idx]
 
 
+def _active_dispatched_item_ids(conn: sqlite3.Connection) -> set[str]:
+    """Return item IDs currently held by an active `swarm_dispatches WHERE status = 'dispatched'` row."""
+    rows = conn.execute("SELECT item_ids_json FROM swarm_dispatches WHERE status = 'dispatched'").fetchall()
+    active: set[str] = set()
+    for r in rows:
+        try:
+            parsed = json.loads(str(r["item_ids_json"] or "[]"))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, list):
+            for raw_id in parsed:
+                clean = str(raw_id).strip()
+                if clean:
+                    active.add(clean)
+    return active
+
+
 def _select_stage_items(
     conn: sqlite3.Connection,
     *,
     stage: str,
     explicit_ids: Sequence[str] = (),
     limit: int = 4,
+    exclude_active_dispatches: bool = True,
 ) -> list[dict[str, str]]:
     clean_explicit = [i.strip() for i in explicit_ids if i and i.strip()]
     items: list[dict[str, str]] = []
+    seen_ids: set[str] = set()
     cap = max(1, int(limit))
+    active_ids: set[str] = (
+        _active_dispatched_item_ids(conn) if (exclude_active_dispatches and not clean_explicit) else set()
+    )
+
+    def _can_pick(item_id: str) -> bool:
+        return len(items) < cap and item_id not in active_ids and item_id not in seen_ids
 
     if stage in ("falsify", "reproduce"):
         if clean_explicit:
@@ -223,9 +248,7 @@ def _select_stage_items(
                 FROM claims
                 WHERE status = 'proposed'
                 ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at ASC
-                LIMIT ?
-                """,
-                (cap,),
+                """
             ).fetchall()
         else:
             rows = conn.execute(
@@ -235,14 +258,16 @@ def _select_stage_items(
                 FROM claims
                 WHERE status IN ('survived_falsify', 'needs_instrumentation')
                 ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at ASC
-                LIMIT ?
-                """,
-                (cap,),
+                """
             ).fetchall()
         for r in rows:
+            cid = str(r["claim_id"])
+            if not _can_pick(cid):
+                continue
+            seen_ids.add(cid)
             items.append(
                 {
-                    "id": str(r["claim_id"]),
+                    "id": cid,
                     "priority": str(r["severity"]),
                     "severity": str(r["severity"]),
                     "locus": scrub_text(str(r["locus"])),
@@ -253,66 +278,80 @@ def _select_stage_items(
                     "falsification_test": scrub_text(str(r["falsification_test"] or ""))[:220],
                 }
             )
+            if len(items) >= cap:
+                break
         return items
 
     if stage == "portfolio":
         # Multi-lane portfolio reservation: 1 woken chain + 1 verify + 1 bridge + greenfield investigate.
-        woken_ch = conn.execute(
-            "SELECT task_id, priority, locus, title, summary, status FROM tasks WHERE kind = 'chain' AND status = 'open' ORDER BY salience_score DESC LIMIT 1"
-        ).fetchone()
-        if woken_ch is not None and len(items) < cap:
-            items.append(
-                {
-                    "id": str(woken_ch["task_id"]),
-                    "priority": f"chain:{woken_ch['priority']}",
-                    "locus": scrub_text(str(woken_ch["locus"] or woken_ch["title"])),
-                    "title": scrub_text(str(woken_ch["title"] or ""))[:180],
-                    "summary": scrub_text(str(woken_ch["summary"] or ""))[:240],
-                    "status": "open",
-                }
-            )
+        for woken_ch in conn.execute(
+            "SELECT task_id, priority, locus, title, summary, status FROM tasks WHERE kind = 'chain' AND status = 'open' ORDER BY salience_score DESC, created_at ASC"
+        ).fetchall():
+            tid = str(woken_ch["task_id"])
+            if _can_pick(tid):
+                seen_ids.add(tid)
+                items.append(
+                    {
+                        "id": tid,
+                        "priority": f"chain:{woken_ch['priority']}",
+                        "locus": scrub_text(str(woken_ch["locus"] or woken_ch["title"])),
+                        "title": scrub_text(str(woken_ch["title"] or ""))[:180],
+                        "summary": scrub_text(str(woken_ch["summary"] or ""))[:240],
+                        "status": "open",
+                    }
+                )
+                break
 
-        ver_clm = conn.execute(
-            "SELECT claim_id, severity, locus, status, title, mechanism FROM claims WHERE status IN ('proposed', 'survived_falsify') ORDER BY created_at ASC LIMIT 1"
-        ).fetchone()
-        if ver_clm is not None and len(items) < cap:
-            lane = "falsify" if str(ver_clm["status"]) == "proposed" else "reproduce"
-            items.append(
-                {
-                    "id": str(ver_clm["claim_id"]),
-                    "priority": f"{lane}:{ver_clm['severity']}",
-                    "locus": scrub_text(str(ver_clm["locus"])),
-                    "title": scrub_text(str(ver_clm["title"] or ""))[:180],
-                    "mechanism": scrub_text(str(ver_clm["mechanism"] or ""))[:240],
-                    "status": str(ver_clm["status"]),
-                }
-            )
+        for ver_clm in conn.execute(
+            "SELECT claim_id, severity, locus, status, title, mechanism FROM claims WHERE status IN ('proposed', 'survived_falsify') ORDER BY created_at ASC"
+        ).fetchall():
+            cid = str(ver_clm["claim_id"])
+            if _can_pick(cid):
+                seen_ids.add(cid)
+                lane = "falsify" if str(ver_clm["status"]) == "proposed" else "reproduce"
+                items.append(
+                    {
+                        "id": cid,
+                        "priority": f"{lane}:{ver_clm['severity']}",
+                        "locus": scrub_text(str(ver_clm["locus"])),
+                        "title": scrub_text(str(ver_clm["title"] or ""))[:180],
+                        "mechanism": scrub_text(str(ver_clm["mechanism"] or ""))[:240],
+                        "status": str(ver_clm["status"]),
+                    }
+                )
+                break
 
-        br_task = conn.execute(
-            "SELECT task_id, priority, locus, title, summary, status FROM tasks WHERE kind = 'bridge' AND status = 'open' ORDER BY salience_score DESC LIMIT 1"
-        ).fetchone()
-        if br_task is not None and len(items) < cap:
-            items.append(
-                {
-                    "id": str(br_task["task_id"]),
-                    "priority": f"bridge:{br_task['priority']}",
-                    "locus": scrub_text(str(br_task["locus"] or br_task["title"])),
-                    "title": scrub_text(str(br_task["title"] or ""))[:180],
-                    "summary": scrub_text(str(br_task["summary"] or ""))[:240],
-                    "status": "open",
-                }
-            )
+        for br_task in conn.execute(
+            "SELECT task_id, priority, locus, title, summary, status FROM tasks WHERE kind = 'bridge' AND status = 'open' ORDER BY salience_score DESC, created_at ASC"
+        ).fetchall():
+            tid = str(br_task["task_id"])
+            if _can_pick(tid):
+                seen_ids.add(tid)
+                items.append(
+                    {
+                        "id": tid,
+                        "priority": f"bridge:{br_task['priority']}",
+                        "locus": scrub_text(str(br_task["locus"] or br_task["title"])),
+                        "title": scrub_text(str(br_task["title"] or ""))[:180],
+                        "summary": scrub_text(str(br_task["summary"] or ""))[:240],
+                        "status": "open",
+                    }
+                )
+                break
 
         inv_rows = conn.execute(
-            "SELECT task_id, priority, locus, title, summary, status FROM tasks WHERE kind IN ('investigate', 'map') AND status = 'open' ORDER BY salience_score DESC, created_at ASC LIMIT ?",
-            (cap,),
+            "SELECT task_id, priority, locus, title, summary, status FROM tasks WHERE kind IN ('investigate', 'map') AND status = 'open' ORDER BY salience_score DESC, created_at ASC"
         ).fetchall()
         for ir in inv_rows:
             if len(items) >= cap:
                 break
+            tid = str(ir["task_id"])
+            if not _can_pick(tid):
+                continue
+            seen_ids.add(tid)
             items.append(
                 {
-                    "id": str(ir["task_id"]),
+                    "id": tid,
                     "priority": f"investigate:{ir['priority']}",
                     "locus": scrub_text(str(ir["locus"] or ir["title"])),
                     "title": scrub_text(str(ir["title"] or ""))[:180],
@@ -331,13 +370,16 @@ def _select_stage_items(
             ).fetchall()
         else:
             brows = conn.execute(
-                "SELECT task_id, priority, locus, title, summary, status FROM tasks WHERE kind = 'bridge' AND status IN ('open', 'leased') ORDER BY salience_score DESC, created_at ASC LIMIT ?",
-                (cap,),
+                "SELECT task_id, priority, locus, title, summary, status FROM tasks WHERE kind = 'bridge' AND status IN ('open', 'leased') ORDER BY salience_score DESC, created_at ASC"
             ).fetchall()
         for r in brows:
+            tid = str(r["task_id"])
+            if not _can_pick(tid):
+                continue
+            seen_ids.add(tid)
             items.append(
                 {
-                    "id": str(r["task_id"]),
+                    "id": tid,
                     "priority": str(r["priority"]),
                     "locus": scrub_text(str(r["locus"] or r["title"])),
                     "title": scrub_text(str(r["title"] or ""))[:180],
@@ -345,13 +387,20 @@ def _select_stage_items(
                     "status": str(r["status"]),
                 }
             )
+            if len(items) >= cap:
+                break
         if not items:
             drows = conn.execute(
-                "SELECT door_id, status, anchor_locus FROM parked_doors WHERE status IN ('bridging', 'parked') ORDER BY updated_at DESC LIMIT ?",
-                (cap,),
+                "SELECT door_id, status, anchor_locus FROM parked_doors WHERE status IN ('bridging', 'parked') ORDER BY updated_at DESC"
             ).fetchall()
             for dr in drows:
-                items.append({"id": str(dr["door_id"]), "priority": "high", "locus": scrub_text(str(dr["anchor_locus"])), "status": str(dr["status"])})
+                did = str(dr["door_id"])
+                if not _can_pick(did):
+                    continue
+                seen_ids.add(did)
+                items.append({"id": did, "priority": "high", "locus": scrub_text(str(dr["anchor_locus"])), "status": str(dr["status"])})
+                if len(items) >= cap:
+                    break
         return items
 
     if stage == "chain":
@@ -387,15 +436,21 @@ def _select_stage_items(
                     )
             return items
 
-        for rd in conn.execute("SELECT door_id, anchor_locus FROM parked_doors WHERE status = 'ready' ORDER BY updated_at DESC LIMIT ?", (cap,)).fetchall():
-            if len(items) < cap:
-                items.append({"id": str(rd["door_id"]), "priority": "ready_door", "locus": scrub_text(str(rd["anchor_locus"])), "status": "ready"})
-        for r in conn.execute("SELECT primitive_id, kind, locus FROM primitives WHERE chained = 0 AND status != 'dry' ORDER BY created_at ASC LIMIT ?", (cap,)).fetchall():
-            if len(items) < cap:
-                items.append({"id": str(r["primitive_id"]), "priority": str(r["kind"]), "locus": scrub_text(str(r["locus"])), "status": "unchained"})
-        for f in conn.execute("SELECT finding_id, severity, locus FROM findings ORDER BY created_at ASC LIMIT ?", (cap,)).fetchall():
-            if len(items) < cap:
-                items.append({"id": str(f["finding_id"]), "priority": str(f["severity"]), "locus": scrub_text(str(f["locus"])), "status": "reproduced"})
+        for rd in conn.execute("SELECT door_id, anchor_locus FROM parked_doors WHERE status = 'ready' ORDER BY updated_at DESC").fetchall():
+            did = str(rd["door_id"])
+            if _can_pick(did):
+                seen_ids.add(did)
+                items.append({"id": did, "priority": "ready_door", "locus": scrub_text(str(rd["anchor_locus"])), "status": "ready"})
+        for r in conn.execute("SELECT primitive_id, kind, locus FROM primitives WHERE chained = 0 AND status != 'dry' ORDER BY created_at ASC").fetchall():
+            pid = str(r["primitive_id"])
+            if _can_pick(pid):
+                seen_ids.add(pid)
+                items.append({"id": pid, "priority": str(r["kind"]), "locus": scrub_text(str(r["locus"])), "status": "unchained"})
+        for f in conn.execute("SELECT finding_id, severity, locus FROM findings ORDER BY created_at ASC").fetchall():
+            fid = str(f["finding_id"])
+            if _can_pick(fid):
+                seen_ids.add(fid)
+                items.append({"id": fid, "priority": str(f["severity"]), "locus": scrub_text(str(f["locus"])), "status": "reproduced"})
         if items:
             return items
 
@@ -412,14 +467,17 @@ def _select_stage_items(
             SELECT task_id, priority, locus, title, summary, status FROM tasks
             WHERE kind = ? AND status IN ('open', 'leased')
             ORDER BY salience_score DESC, created_at ASC
-            LIMIT ?
             """,
-            (stage, cap),
+            (stage,),
         ).fetchall()
     for r in trows:
+        tid = str(r["task_id"])
+        if not _can_pick(tid):
+            continue
+        seen_ids.add(tid)
         items.append(
             {
-                "id": str(r["task_id"]),
+                "id": tid,
                 "priority": str(r["priority"]),
                 "locus": scrub_text(str(r["locus"] or r["title"])),
                 "title": scrub_text(str(r["title"] or ""))[:180],
@@ -427,6 +485,8 @@ def _select_stage_items(
                 "status": str(r["status"]),
             }
         )
+        if len(items) >= cap:
+            break
     return items
 
 
@@ -583,61 +643,62 @@ def build_swarm_packet(
             EXIT_USER_ERROR,
         )
 
-    run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
-    if run is None:
-        raise AjarError("Run metadata missing in run.db.", EXIT_USER_ERROR)
-    run_id = str(run["run_id"])
-    target_path = str(run["target_path"])
+    with immediate_tx(conn):
+        run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
+        if run is None:
+            raise AjarError("Run metadata missing in run.db.", EXIT_USER_ERROR)
+        run_id = str(run["run_id"])
+        target_path = str(run["target_path"])
 
-    candidates = _select_stage_items(conn, stage=stage, explicit_ids=item_ids, limit=limit)
-    if not candidates:
-        raise AjarError(
-            f"No eligible items found for stage={stage!r} (explicit_ids={list(item_ids)}).",
-            EXIT_USER_ERROR,
+        candidates = _select_stage_items(conn, stage=stage, explicit_ids=item_ids, limit=limit)
+        if not candidates:
+            raise AjarError(
+                f"No eligible items found for stage={stage!r} (explicit_ids={list(item_ids)}).",
+                EXIT_USER_ERROR,
+            )
+
+        cand_ids = [c["id"] for c in candidates]
+        resolved_profile = (
+            _resolve_auto_profile_for_items(conn, stage, cand_ids) if wire_profile == "auto" else wire_profile
+        )
+        cap = _profile_batch_cap(resolved_profile, limit)
+        selected = candidates[:cap]
+        selected_ids = [c["id"] for c in selected]
+
+        dispatch_id = new_id("dsp")
+        eff_worker = (worker_id or "").strip() or f"w-{stage[:5]}-{dispatch_id[-4:]}"
+        now_iso = utc_now_iso()
+
+        packet_md = _render_packet_markdown(
+            run_id=run_id,
+            target_path=target_path,
+            stage=stage,
+            wire_profile=resolved_profile,
+            worker_id=eff_worker,
+            dispatch_id=dispatch_id,
+            items=selected,
         )
 
-    cand_ids = [c["id"] for c in candidates]
-    resolved_profile = (
-        _resolve_auto_profile_for_items(conn, stage, cand_ids) if wire_profile == "auto" else wire_profile
-    )
-    cap = _profile_batch_cap(resolved_profile, limit)
-    selected = candidates[:cap]
-    selected_ids = [c["id"] for c in selected]
-
-    dispatch_id = new_id("dsp")
-    eff_worker = (worker_id or "").strip() or f"w-{stage[:5]}-{dispatch_id[-4:]}"
-    now_iso = utc_now_iso()
-
-    packet_md = _render_packet_markdown(
-        run_id=run_id,
-        target_path=target_path,
-        stage=stage,
-        wire_profile=resolved_profile,
-        worker_id=eff_worker,
-        dispatch_id=dispatch_id,
-        items=selected,
-    )
-
-    conn.execute(
-        """
-        INSERT INTO swarm_dispatches(
-            dispatch_id, worker_id, stage, wire_profile, item_ids_json, status, notes, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, 'dispatched', '', ?, ?)
-        """,
-        (dispatch_id, eff_worker, stage, resolved_profile, json.dumps(selected_ids), now_iso, now_iso),
-    )
-    log_event(
-        conn,
-        "orchestrator",
-        "swarm_packet_dispatched",
-        dispatch_id,
-        {
-            "worker_id": eff_worker,
-            "stage": stage,
-            "wire_profile": resolved_profile,
-            "item_ids": selected_ids,
-        },
-    )
+        conn.execute(
+            """
+            INSERT INTO swarm_dispatches(
+                dispatch_id, worker_id, stage, wire_profile, item_ids_json, status, notes, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, 'dispatched', '', ?, ?)
+            """,
+            (dispatch_id, eff_worker, stage, resolved_profile, json.dumps(selected_ids), now_iso, now_iso),
+        )
+        log_event(
+            conn,
+            "orchestrator",
+            "swarm_packet_dispatched",
+            dispatch_id,
+            {
+                "worker_id": eff_worker,
+                "stage": stage,
+                "wire_profile": resolved_profile,
+                "item_ids": selected_ids,
+            },
+        )
     return {
         "dispatch_id": dispatch_id,
         "worker_id": eff_worker,
@@ -661,75 +722,76 @@ def escalate_swarm_fallback(
     if reason not in VALID_FALLBACK_REASONS:
         raise AjarError(f"Invalid --reason {reason!r}; expected one of {VALID_FALLBACK_REASONS}.", EXIT_USER_ERROR)
 
-    row = conn.execute(
-        """
-        SELECT * FROM swarm_dispatches
-        WHERE dispatch_id = ? OR worker_id = ?
-        ORDER BY created_at DESC
-        LIMIT 1
-        """,
-        (target.strip(), target.strip()),
-    ).fetchone()
-    if row is None:
-        raise AjarError(
-            f"No swarm dispatch found matching dispatch_id or worker_id {target!r}.",
-            EXIT_USER_ERROR,
+    with immediate_tx(conn):
+        row = conn.execute(
+            """
+            SELECT * FROM swarm_dispatches
+            WHERE dispatch_id = ? OR worker_id = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (target.strip(), target.strip()),
+        ).fetchone()
+        if row is None:
+            raise AjarError(
+                f"No swarm dispatch found matching dispatch_id or worker_id {target!r}.",
+                EXIT_USER_ERROR,
+            )
+
+        prev_id = str(row["dispatch_id"])
+        stage = str(row["stage"])
+        prev_profile = str(row["wire_profile"] or "direct")
+        try:
+            item_ids = [str(x) for x in json.loads(row["item_ids_json"] or "[]") if str(x).strip()]
+        except json.JSONDecodeError:
+            item_ids = []
+        if not item_ids:
+            raise AjarError(f"Dispatch {prev_id} has zero tracked item IDs to re-dispatch.", EXIT_USER_ERROR)
+
+        now_iso = utc_now_iso()
+        conn.execute(
+            "UPDATE swarm_dispatches SET status = ?, notes = ?, updated_at = ? WHERE dispatch_id = ?",
+            (reason, scrub_text(notes or f"Escalated due to {reason}"), now_iso, prev_id),
         )
 
-    prev_id = str(row["dispatch_id"])
-    stage = str(row["stage"])
-    prev_profile = str(row["wire_profile"] or "direct")
-    try:
-        item_ids = [str(x) for x in json.loads(row["item_ids_json"] or "[]") if str(x).strip()]
-    except json.JSONDecodeError:
-        item_ids = []
-    if not item_ids:
-        raise AjarError(f"Dispatch {prev_id} has zero tracked item IDs to re-dispatch.", EXIT_USER_ERROR)
+        prev_idx = WIRE_PROFILE_LADDER.index(prev_profile) if prev_profile in WIRE_PROFILE_LADDER else 0
+        at_ceiling = prev_idx >= (len(WIRE_PROFILE_LADDER) - 1)
+        next_profile = WIRE_PROFILE_LADDER[min(prev_idx + 1, len(WIRE_PROFILE_LADDER) - 1)]
+        chunk_size = _profile_batch_cap(next_profile, len(item_ids))
 
-    now_iso = utc_now_iso()
-    conn.execute(
-        "UPDATE swarm_dispatches SET status = ?, notes = ?, updated_at = ? WHERE dispatch_id = ?",
-        (reason, scrub_text(notes or f"Escalated due to {reason}"), now_iso, prev_id),
-    )
+        # Filter out items that were already resolved (`reproduced`, `falsified`, `done`, `dry`) before partial stall!
+        unresolved_candidates = _select_stage_items(conn, stage=stage, explicit_ids=item_ids, limit=len(item_ids))
+        unresolved_ids = [
+            c["id"]
+            for c in unresolved_candidates
+            if c["status"] not in ("reproduced", "falsified", "duplicate_root_cause", "done", "dry")
+        ] or item_ids
 
-    prev_idx = WIRE_PROFILE_LADDER.index(prev_profile) if prev_profile in WIRE_PROFILE_LADDER else 0
-    at_ceiling = prev_idx >= (len(WIRE_PROFILE_LADDER) - 1)
-    next_profile = WIRE_PROFILE_LADDER[min(prev_idx + 1, len(WIRE_PROFILE_LADDER) - 1)]
-    chunk_size = _profile_batch_cap(next_profile, len(item_ids))
+        recovery_packets: list[dict[str, Any]] = []
+        for offset in range(0, len(unresolved_ids), chunk_size):
+            batch = unresolved_ids[offset : offset + chunk_size]
+            pkt = build_swarm_packet(
+                conn,
+                stage=stage,
+                wire_profile=next_profile,
+                item_ids=batch,
+                limit=chunk_size,
+            )
+            recovery_packets.append(pkt)
 
-    # Filter out items that were already resolved (`reproduced`, `falsified`, `done`, `dry`) before partial stall!
-    unresolved_candidates = _select_stage_items(conn, stage=stage, explicit_ids=item_ids, limit=len(item_ids))
-    unresolved_ids = [
-        c["id"]
-        for c in unresolved_candidates
-        if c["status"] not in ("reproduced", "falsified", "duplicate_root_cause", "done", "dry")
-    ] or item_ids
-
-    recovery_packets: list[dict[str, Any]] = []
-    for offset in range(0, len(unresolved_ids), chunk_size):
-        batch = unresolved_ids[offset : offset + chunk_size]
-        pkt = build_swarm_packet(
+        log_event(
             conn,
-            stage=stage,
-            wire_profile=next_profile,
-            item_ids=batch,
-            limit=chunk_size,
+            "orchestrator",
+            "swarm_wire_profile_escalated",
+            prev_id,
+            {
+                "reason": reason,
+                "previous_profile": prev_profile,
+                "next_profile": next_profile,
+                "at_ladder_ceiling": at_ceiling,
+                "recovery_dispatch_ids": [p["dispatch_id"] for p in recovery_packets],
+            },
         )
-        recovery_packets.append(pkt)
-
-    log_event(
-        conn,
-        "orchestrator",
-        "swarm_wire_profile_escalated",
-        prev_id,
-        {
-            "reason": reason,
-            "previous_profile": prev_profile,
-            "next_profile": next_profile,
-            "at_ladder_ceiling": at_ceiling,
-            "recovery_dispatch_ids": [p["dispatch_id"] for p in recovery_packets],
-        },
-    )
     return {
         "previous_dispatch_id": prev_id,
         "previous_worker_id": str(row["worker_id"]),

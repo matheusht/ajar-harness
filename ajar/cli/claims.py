@@ -407,6 +407,7 @@ def cmd_chain(args: argparse.Namespace) -> int:
                     steps=steps,
                     poc_cmd=args.poc_cmd,
                     control_cmd=args.control_cmd,
+                    build_cmd=str(getattr(args, "build_cmd", None) or ""),
                     severity=args.severity,
                     oracle=oracle_dict,
                     step_micropatches=patch_map,

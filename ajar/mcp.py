@@ -225,8 +225,20 @@ MCP_TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "ajar_export_graph",
-        "description": "Export deterministic `ajar-platform-graph/1` component and attack-flow whiteboard JSON.",
-        "inputSchema": {"type": "object", "properties": {}},
+        "description": "Export deterministic `ajar-platform-graph/2` (or `v1`) component and attack-flow whiteboard JSON.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "schema": {"type": "string", "enum": ["v1", "v2"], "default": "v2"},
+                "visibility": {
+                    "type": "string",
+                    "enum": ["internal_full", "customer_private", "public_disclosure"],
+                    "default": "internal_full",
+                },
+                "include_snippets": {"type": "boolean", "default": False},
+                "repo_slug": {"type": "string", "default": ""},
+            },
+        },
     },
     {
         "name": "ajar_finish",
@@ -380,7 +392,13 @@ def dispatch_mcp_tool(
         if tool_name == "ajar_steer_list":
             return {"steers": list_steers(conn, active_only=bool(args.get("active_only", True)))}
         if tool_name == "ajar_export_graph":
-            return export_attack_flow_graph(conn)
+            return export_attack_flow_graph(
+                conn,
+                schema=str(args.get("schema") or "v2"),
+                visibility=str(args.get("visibility") or "internal_full"),
+                include_snippets=bool(args.get("include_snippets", False)),
+                repo_slug=str(args.get("repo_slug") or ""),
+            )
         if tool_name == "ajar_finish":
             return finish_run(conn, run_id=run_id, target_dir=tpath, actor="mcp")
         raise AjarError(f"Unknown MCP tool: {tool_name}")

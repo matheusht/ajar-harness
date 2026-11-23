@@ -503,12 +503,18 @@ class TestV31BugBrainAndEconomics(unittest.TestCase):
         finally:
             conn.close()
 
-        # Export Platform graph (`ajar-platform-graph/1`)
+        # Export Platform graph (default `ajar-platform-graph/2` + backward-compatible `--schema v1`)
         rc_gr, graph = _run_cli(["export-graph", "--run", "run-plat"], self.ajar_home)
         self.assertEqual(rc_gr, EXIT_OK)
-        self.assertEqual(graph["schema"], "ajar-platform-graph/1")
+        self.assertEqual(graph["schema"], "ajar-platform-graph/2")
         self.assertEqual(len(graph["active_steers"]), 1)
         self.assertTrue(any(n["id"] == sid for n in graph["nodes"]))
+
+        rc_gr1, graph1 = _run_cli(["export-graph", "--schema", "v1", "--run", "run-plat"], self.ajar_home)
+        self.assertEqual(rc_gr1, EXIT_OK)
+        self.assertEqual(graph1["schema"], "ajar-platform-graph/1")
+        self.assertEqual(len(graph1["active_steers"]), 1)
+        self.assertTrue(any(n["id"] == sid for n in graph1["nodes"]))
 
         # Adding `research_steering` flips research_independence_pass to False; revoking steer works cleanly
         _run_cli(

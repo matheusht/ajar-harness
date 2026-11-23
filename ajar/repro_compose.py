@@ -7,7 +7,7 @@ Turns verified `primitives` into read-only (`0444`) importable capability module
   `StageContext` instead of re-deriving complex framing inside monolithic shell strings.
 - `ajar chain propose` executes inside an isolated `slot-<k>` worktree with `--oracle-json`
   and proves $N$-step marginal causal contribution by ablating each primitive step.
-- `ajar claim instrument` executes scratch trace probes in `slot-inst` to unblock
+- `ajar claim instrument` executes scratch trace probes in the shared `slot-<k>` pool to unblock
   `needs_instrumentation` claims cleanly.
 """
 
@@ -55,10 +55,13 @@ from ajar.repro_source import (
     _acquire_slot,
     _bump_files_mtime,
     _clean_slot_preserving_objects,
+    _CleanBuildSnapshot,
     _evaluate_defect_fired,
     _neutralize_python_pth_escapes,
     _prepare_slot_worktree,
     _run_shell_in_slot,
+    _snapshot_clean_build_outputs,
+    _try_clean_arm_preserving_build,
     init_source_mirror,
     resolve_local_build_cache_dir,
     validate_no_static_source_cheat,
@@ -290,6 +293,7 @@ def run_chain_reproduction(
     steps: Sequence[str],
     poc_cmd: str,
     control_cmd: str,
+    build_cmd: str = "",
     severity: str = "critical",
     oracle: dict[str, Any] | None = None,
     step_micropatches: Mapping[str, pathlib.Path] | None = None,
@@ -328,6 +332,7 @@ def run_chain_reproduction(
     invariant_breaking_count = 0
     auto_patch_dir = run_dir / "repro" / "auto_step_patches"
     patch_map = dict(step_micropatches or {})
+    inherited_build_cmds: list[str] = []
 
     for sid in clean_steps:
         prow = conn.execute("SELECT * FROM primitives WHERE primitive_id = ?", (sid,)).fetchone()
@@ -363,6 +368,10 @@ def run_chain_reproduction(
             floc = str(frow["locus"] or "").split(":", 1)[0].strip()
             if floc and floc not in chain_touched_files:
                 chain_touched_files.append(floc)
+            if "build_cmd" in frow.keys():
+                fb_cmd = str(frow["build_cmd"] or "").strip()
+                if fb_cmd and fb_cmd not in inherited_build_cmds:
+                    inherited_build_cmds.append(fb_cmd)
             if sid not in patch_map:
                 mp_path = pathlib.Path(str(frow["micropatch_path"] or ""))
                 if mp_path.is_file():
@@ -397,6 +406,15 @@ def run_chain_reproduction(
             EXIT_USER_ERROR,
         )
 
+    if build_cmd.strip():
+        eff_build_cmd = build_cmd.strip()
+    elif len(inherited_build_cmds) > 1:
+        eff_build_cmd = " && ".join(f"({c})" for c in inherited_build_cmds)
+    elif inherited_build_cmds:
+        eff_build_cmd = inherited_build_cmds[0]
+    else:
+        eff_build_cmd = ""
+
     if invariant_breaking_count == 0:
         raise AjarError(
             "Gadget-only chain rejected: `--steps` contains only `trust_gadget` normal-code transitions with zero "
@@ -429,47 +447,96 @@ def run_chain_reproduction(
     watermark_file = cache_dir / "watermark_ns"
 
     ablation_matrix: list[dict[str, Any]] = []
+    full_res: dict[str, Any] = {"exit_code": -1, "stdout": "", "stderr": "", "timed_out": False, "defect_fired": False}
+    ctrl_res: dict[str, Any] = {"exit_code": -1, "stdout": "", "stderr": "", "timed_out": False, "control_passed": False}
+    full_fired = False
+    ctrl_passed = False
+    ablation_passed = True
+    ablation_failure_reason = ""
+    build_failure_reason = ""
+    clean_build_snapshot: _CleanBuildSnapshot | None = None
+    clean_build_valid = False
+    all_touched_step_files: list[str] = []
+    build_timeout = max(int(timeout_sec), 180)
 
     try:
         _prepare_slot_worktree(mirror_dir, slot_dir)
 
-        # 1. Full Chain Arm (`exploit_path`, zero ablated steps) -> oracle MUST fire.
-        full_res = _run_shell_in_slot(
-            poc_cmd,
-            slot_dir=slot_dir,
-            cache_dir=cache_dir,
-            timeout_sec=timeout_sec,
-            helpers_dir=helpers_dir,
-            extra_env={"AJAR_REPRO_MODE": "exploit_path", "AJAR_ABLATE_STEPS": ""},
-        )
-        full_fired = _evaluate_defect_fired(
-            full_res["exit_code"], full_res["stdout"], full_res["stderr"], full_res["timed_out"], oracle
-        )
-        full_res["defect_fired"] = full_fired
+        if eff_build_cmd:
+            bld_clean = _run_shell_in_slot(
+                eff_build_cmd,
+                slot_dir=slot_dir,
+                cache_dir=cache_dir,
+                timeout_sec=build_timeout,
+                helpers_dir=helpers_dir,
+            )
+            if bld_clean["exit_code"] != 0 or bld_clean["timed_out"]:
+                build_failure_reason = (
+                    f"Clean-HEAD --build-cmd failed (exit={bld_clean['exit_code']}): {bld_clean['stderr'][:240]}"
+                )
+            else:
+                clean_build_snapshot = _snapshot_clean_build_outputs(slot_dir)
+                clean_build_valid = True
 
-        subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
-        _clean_slot_preserving_objects(slot_dir, check=True)
+        if not build_failure_reason:
+            # 1. Full Chain Arm (`exploit_path`, zero ablated steps) -> oracle MUST fire.
+            full_res = _run_shell_in_slot(
+                poc_cmd,
+                slot_dir=slot_dir,
+                cache_dir=cache_dir,
+                timeout_sec=timeout_sec,
+                helpers_dir=helpers_dir,
+                extra_env={"AJAR_REPRO_MODE": "exploit_path", "AJAR_ABLATE_STEPS": ""},
+            )
+            full_fired = _evaluate_defect_fired(
+                full_res["exit_code"], full_res["stdout"], full_res["stderr"], full_res["timed_out"], oracle
+            )
+            full_res["defect_fired"] = full_fired
 
-        # 2. Benign Control Arm (`benign_control`, zero ablated steps so control_cmd tests benign input directly) -> MUST pass cleanly.
-        ctrl_res = _run_shell_in_slot(
-            control_cmd,
-            slot_dir=slot_dir,
-            cache_dir=cache_dir,
-            timeout_sec=timeout_sec,
-            helpers_dir=helpers_dir,
-            extra_env={"AJAR_REPRO_MODE": "benign_control", "AJAR_ABLATE_STEPS": ""},
-        )
-        ctrl_fired = _evaluate_defect_fired(
-            ctrl_res["exit_code"], ctrl_res["stdout"], ctrl_res["stderr"], ctrl_res["timed_out"], oracle
-        )
-        ctrl_passed = (not ctrl_fired) and ctrl_res["exit_code"] == 0 and (not ctrl_res["timed_out"])
-        ctrl_res["control_passed"] = ctrl_passed
+            if eff_build_cmd and _try_clean_arm_preserving_build(slot_dir, clean_build_snapshot):
+                clean_build_valid = True
+            else:
+                subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
+                _clean_slot_preserving_objects(slot_dir, check=True)
+                clean_build_valid = False
+                if eff_build_cmd:
+                    bld_ctrl = _run_shell_in_slot(
+                        eff_build_cmd,
+                        slot_dir=slot_dir,
+                        cache_dir=cache_dir,
+                        timeout_sec=build_timeout,
+                        helpers_dir=helpers_dir,
+                    )
+                    if bld_ctrl["exit_code"] != 0 or bld_ctrl["timed_out"]:
+                        build_failure_reason = (
+                            f"Control-arm --build-cmd failed after reset (exit={bld_ctrl['exit_code']}): {bld_ctrl['stderr'][:240]}"
+                        )
+                    else:
+                        clean_build_snapshot = _snapshot_clean_build_outputs(slot_dir)
+                        clean_build_valid = True
 
-        subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
-        _clean_slot_preserving_objects(slot_dir, check=True)
+        if not build_failure_reason:
+            # 2. Benign Control Arm (`benign_control`, zero ablated steps so control_cmd tests benign input directly) -> MUST pass cleanly.
+            ctrl_res = _run_shell_in_slot(
+                control_cmd,
+                slot_dir=slot_dir,
+                cache_dir=cache_dir,
+                timeout_sec=timeout_sec,
+                helpers_dir=helpers_dir,
+                extra_env={"AJAR_REPRO_MODE": "benign_control", "AJAR_ABLATE_STEPS": ""},
+            )
+            ctrl_fired = _evaluate_defect_fired(
+                ctrl_res["exit_code"], ctrl_res["stdout"], ctrl_res["stderr"], ctrl_res["timed_out"], oracle
+            )
+            ctrl_passed = (not ctrl_fired) and ctrl_res["exit_code"] == 0 and (not ctrl_res["timed_out"])
+            ctrl_res["control_passed"] = ctrl_passed
 
-        ablation_passed = True
-        ablation_failure_reason = ""
+            if eff_build_cmd and _try_clean_arm_preserving_build(slot_dir, clean_build_snapshot):
+                clean_build_valid = True
+            else:
+                subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
+                _clean_slot_preserving_objects(slot_dir, check=True)
+                clean_build_valid = False
 
         # 3. Automated $N$-Step Marginal-Contribution Ablation:
         env_ablatable = (
@@ -483,7 +550,7 @@ def run_chain_reproduction(
             or env_ablatable
         )
 
-        if full_fired and ctrl_passed and ablate_steps:
+        if not build_failure_reason and full_fired and ctrl_passed and ablate_steps:
             non_gadget_steps = [s for s in clean_steps if step_roles.get(s) != "trust_gadget"]
             if len(clean_steps) >= 2 and not uses_composable_ablation:
                 ablation_passed = False
@@ -520,6 +587,9 @@ def run_chain_reproduction(
 
                     touched_step_files: list[str] = []
                     if step_id in patch_map:
+                        subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
+                        _clean_slot_preserving_objects(slot_dir, check=True)
+                        clean_build_valid = False
                         pfile = patch_map[step_id]
                         ap = subprocess.run(
                             ["git", "-C", str(slot_dir), "apply", "--whitespace=nowarn", str(pfile)],
@@ -537,9 +607,66 @@ def run_chain_reproduction(
                             break
                         for ln in pfile.read_text(encoding="utf-8", errors="ignore").splitlines():
                             if ln.startswith("+++ ") and ln[4:].strip() != "/dev/null":
-                                touched_step_files.append(re.sub(r"^b/", "", ln[4:].split("\t", 1)[0].strip()))
+                                tf = re.sub(r"^b/", "", ln[4:].split("\t", 1)[0].strip())
+                                touched_step_files.append(tf)
+                                if tf and tf not in all_touched_step_files:
+                                    all_touched_step_files.append(tf)
                         _neutralize_python_pth_escapes(slot_dir)
                         _bump_files_mtime(slot_dir, touched_step_files, watermark_file)
+
+                        if eff_build_cmd:
+                            bld_step = _run_shell_in_slot(
+                                eff_build_cmd,
+                                slot_dir=slot_dir,
+                                cache_dir=cache_dir,
+                                timeout_sec=build_timeout,
+                                helpers_dir=helpers_dir,
+                            )
+                            if bld_step["exit_code"] != 0 or bld_step["timed_out"]:
+                                ablation_passed = False
+                                ablation_failure_reason = (
+                                    f"Step ablation --build-cmd failed after applying micropatch for {step_id} "
+                                    f"(exit={bld_step['exit_code']}): {bld_step['stderr'][:240]}"
+                                )
+                                ablation_matrix.append(
+                                    {
+                                        "step_id": step_id,
+                                        "ablated_via": "step_micropatch",
+                                        "causally_required": False,
+                                        "build_failed": True,
+                                        "exit_code": bld_step["exit_code"],
+                                    }
+                                )
+                                subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
+                                _clean_slot_preserving_objects(slot_dir, check=True)
+                                _bump_files_mtime(slot_dir, touched_step_files, watermark_file)
+                                break
+                    elif eff_build_cmd and not clean_build_valid:
+                        bld_clean_step = _run_shell_in_slot(
+                            eff_build_cmd,
+                            slot_dir=slot_dir,
+                            cache_dir=cache_dir,
+                            timeout_sec=build_timeout,
+                            helpers_dir=helpers_dir,
+                        )
+                        if bld_clean_step["exit_code"] != 0 or bld_clean_step["timed_out"]:
+                            ablation_passed = False
+                            ablation_failure_reason = (
+                                f"Step ablation clean-HEAD --build-cmd failed before {step_id} "
+                                f"(exit={bld_clean_step['exit_code']}): {bld_clean_step['stderr'][:240]}"
+                            )
+                            ablation_matrix.append(
+                                {
+                                    "step_id": step_id,
+                                    "ablated_via": "stage_context_env",
+                                    "causally_required": False,
+                                    "build_failed": True,
+                                    "exit_code": bld_clean_step["exit_code"],
+                                }
+                            )
+                            break
+                        clean_build_snapshot = _snapshot_clean_build_outputs(slot_dir)
+                        clean_build_valid = True
 
                     abl_res = _run_shell_in_slot(
                         poc_cmd,
@@ -562,10 +689,18 @@ def run_chain_reproduction(
                             "causally_required": step_necessary,
                         }
                     )
-                    subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
-                    _clean_slot_preserving_objects(slot_dir, check=True)
-                    if touched_step_files:
-                        _bump_files_mtime(slot_dir, touched_step_files, watermark_file)
+                    if step_id in patch_map:
+                        subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
+                        _clean_slot_preserving_objects(slot_dir, check=True)
+                        if touched_step_files:
+                            _bump_files_mtime(slot_dir, touched_step_files, watermark_file)
+                        clean_build_valid = False
+                    elif eff_build_cmd and _try_clean_arm_preserving_build(slot_dir, clean_build_snapshot):
+                        clean_build_valid = True
+                    else:
+                        subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
+                        _clean_slot_preserving_objects(slot_dir, check=True)
+                        clean_build_valid = False
 
                     if not step_necessary:
                         ablation_passed = False
@@ -582,13 +717,17 @@ def run_chain_reproduction(
                         "Marginal-contribution gate: at least one upstream capability/finding step must be causally ablated."
                     )
     finally:
-        if (slot_dir / ".git").exists():
-            subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
-            _clean_slot_preserving_objects(slot_dir, check=False)
-        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
-        lock_fh.close()
+        try:
+            if (slot_dir / ".git").exists():
+                subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
+                _clean_slot_preserving_objects(slot_dir, check=False)
+                if all_touched_step_files:
+                    _bump_files_mtime(slot_dir, all_touched_step_files, watermark_file)
+        finally:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+            lock_fh.close()
 
-    verified = bool(full_fired and ctrl_passed and ablation_passed)
+    verified = bool((not build_failure_reason) and full_fired and ctrl_passed and ablation_passed)
     tail_locus = chain_touched_files[-1] if chain_touched_files else ""
     realism = evaluate_precondition_realism(
         conn,
@@ -603,7 +742,9 @@ def run_chain_reproduction(
         explicit_jewel_id=jewel_id,
     )
 
-    if not full_fired:
+    if build_failure_reason:
+        reason = build_failure_reason
+    elif not full_fired:
         reason = f"Full chain PoC did not trigger defect oracle (exit={full_res['exit_code']})."
     elif not ctrl_passed:
         reason = f"Benign control failed or triggered defect oracle (exit={ctrl_res['exit_code']})."
@@ -619,6 +760,7 @@ def run_chain_reproduction(
     now_iso = utc_now_iso()
     ev = {
         "slot_index": slot_idx,
+        "build_cmd": scrub_text(eff_build_cmd),
         "reason": reason,
         "poc_exit": int(full_res["exit_code"]),
         "control_exit": int(ctrl_res["exit_code"]),
@@ -705,6 +847,7 @@ def run_chain_reproduction(
         "resolved_doors": resolved_doors,
         "reason": reason,
         "slot_index": slot_idx,
+        "build_cmd": scrub_text(eff_build_cmd),
         "ablation_matrix": ablation_matrix,
         "evidence": ev,
     }
@@ -722,7 +865,7 @@ def run_snapshot_chain_probe(
     timeout_sec: int = 60,
     worker_id: str = "worker",
 ) -> dict[str, Any]:
-    """Hydrate a verified Stage-1 post-state `.tar.gz` snapshot into `slot-inst` in `< 50 ms` and execute Stage 2."""
+    """Hydrate a verified Stage-1 post-state `.tar.gz` snapshot into the shared `slot-<k>` pool and execute Stage 2."""
     import tarfile
 
     srow = conn.execute("SELECT * FROM repro_snapshots WHERE snapshot_id = ?", (snapshot_id,)).fetchone()
@@ -746,18 +889,17 @@ def run_snapshot_chain_probe(
     helpers_dir = ensure_helpers_runtime(run_dir)
     mirror_dir = init_source_mirror(run_dir, target_dir)
     repro_dir = run_dir / "repro"
-    repro_dir.mkdir(parents=True, exist_ok=True)
-    lock_fh = open(repro_dir / "slot-inst.lock", "a+", encoding="utf-8")
-    fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
-    slot_dir = repro_dir / "slot-inst"
-    cache_dir = resolve_local_build_cache_dir(run_dir, "cache-inst")
+    slot_idx, lock_fh = _acquire_slot(repro_dir)
+    slot_dir = repro_dir / f"slot-{slot_idx}"
+    cache_dir = resolve_local_build_cache_dir(run_dir, f"cache-{slot_idx}")
     watermark_file = cache_dir / "watermark_ns"
     touched: list[str] = []
+    extracted_paths: list[str] = []
 
     try:
         _prepare_slot_worktree(mirror_dir, slot_dir)
 
-        # Safe tar extraction into `slot-inst` preserving validated intra-slot relative symlinks.
+        # Safe tar extraction into `slot-<k>` preserving validated intra-slot relative symlinks.
         with tarfile.open(arch_path, "r:gz") as tar:
             safe_members: list[tarfile.TarInfo] = []
             for member in tar.getmembers():
@@ -788,6 +930,8 @@ def run_snapshot_chain_probe(
                         dest.unlink(missing_ok=True)
                 try:
                     tar.extract(member, path=str(slot_dir), set_attrs=False, filter="tar")
+                    if member.isfile():
+                        extracted_paths.append(member.name)
                 except tarfile.FilterError as exc:
                     raise AjarError(f"Unsafe tar member in snapshot {snapshot_id}: {exc}", EXIT_GATE_BLOCKED) from exc
 
@@ -806,6 +950,7 @@ def run_snapshot_chain_probe(
             for ln in patch_path.read_text(encoding="utf-8", errors="ignore").splitlines():
                 if ln.startswith("+++ ") and ln[4:].strip() != "/dev/null":
                     touched.append(re.sub(r"^b/", "", ln[4:].split("\t", 1)[0].strip()))
+            _neutralize_python_pth_escapes(slot_dir)
             _bump_files_mtime(slot_dir, touched, watermark_file)
 
         res = _run_shell_in_slot(
@@ -818,23 +963,27 @@ def run_snapshot_chain_probe(
         )
         fired = _evaluate_defect_fired(res["exit_code"], res["stdout"], res["stderr"], res["timed_out"], oracle)
     finally:
-        if (slot_dir / ".git").exists():
-            subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
-            _clean_slot_preserving_objects(slot_dir, check=False)
-            if touched:
-                _bump_files_mtime(slot_dir, touched, watermark_file)
-        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
-        lock_fh.close()
+        try:
+            if (slot_dir / ".git").exists():
+                subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
+                _clean_slot_preserving_objects(slot_dir, check=False)
+                bump_paths = list(dict.fromkeys([*touched, *extracted_paths]))
+                if bump_paths:
+                    _bump_files_mtime(slot_dir, bump_paths, watermark_file)
+        finally:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+            lock_fh.close()
 
     log_event(
         conn,
         worker_id,
         "chain_snapshot_probed",
         snapshot_id,
-        {"exit_code": res["exit_code"], "defect_fired": fired},
+        {"slot_index": slot_idx, "exit_code": res["exit_code"], "defect_fired": fired},
     )
     return {
         "snapshot_id": snapshot_id,
+        "slot_index": slot_idx,
         "rel_dir": str(srow["rel_dir"]),
         "defect_fired": fired,
         "probe": res,
@@ -853,7 +1002,7 @@ def run_claim_instrumentation(
     timeout_sec: int = 60,
     worker_id: str = "worker",
 ) -> dict[str, Any]:
-    """Run an ephemeral diagnostic trace inside scratch `slot-inst` to unblock `needs_instrumentation`."""
+    """Run an ephemeral diagnostic trace inside the shared `slot-<k>` pool to unblock `needs_instrumentation`."""
     clm = conn.execute("SELECT * FROM claims WHERE claim_id = ?", (claim_id,)).fetchone()
     if clm is None:
         raise AjarError(f"Unknown claim_id: {claim_id}", EXIT_USER_ERROR)
@@ -863,11 +1012,9 @@ def run_claim_instrumentation(
     helpers_dir = ensure_helpers_runtime(run_dir)
     mirror_dir = init_source_mirror(run_dir, target_dir)
     repro_dir = run_dir / "repro"
-    repro_dir.mkdir(parents=True, exist_ok=True)
-    lock_fh = open(repro_dir / "slot-inst.lock", "a+", encoding="utf-8")
-    fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
-    slot_dir = repro_dir / "slot-inst"
-    cache_dir = resolve_local_build_cache_dir(run_dir, "cache-inst")
+    slot_idx, lock_fh = _acquire_slot(repro_dir)
+    slot_dir = repro_dir / f"slot-{slot_idx}"
+    cache_dir = resolve_local_build_cache_dir(run_dir, f"cache-{slot_idx}")
     watermark_file = cache_dir / "watermark_ns"
     touched: list[str] = []
 
@@ -899,13 +1046,15 @@ def run_claim_instrumentation(
             helpers_dir=helpers_dir,
         )
     finally:
-        if (slot_dir / ".git").exists():
-            subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
-            _clean_slot_preserving_objects(slot_dir, check=False)
-            if touched:
-                _bump_files_mtime(slot_dir, touched, watermark_file)
-        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
-        lock_fh.close()
+        try:
+            if (slot_dir / ".git").exists():
+                subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
+                _clean_slot_preserving_objects(slot_dir, check=False)
+                if touched:
+                    _bump_files_mtime(slot_dir, touched, watermark_file)
+        finally:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+            lock_fh.close()
 
     now_iso = utc_now_iso()
     trace_excerpt = scrub_text((res["stdout"] + "\n" + res["stderr"]).strip()[:600])
@@ -951,20 +1100,21 @@ def run_claim_instrumentation(
             WHERE kind = 'instrument' AND status IN ('open', 'leased')
               AND (parent_claim_id = ? OR locus = ?)
             """,
-            (worker_id, f"Completed slot-inst probe for {claim_id}", now_iso, claim_id, clm["locus"]),
+            (worker_id, f"Completed slot-{slot_idx} instrumentation probe for {claim_id}", now_iso, claim_id, clm["locus"]),
         )
         log_event(
             conn,
             worker_id,
             "claim_instrumented",
             claim_id,
-            {"exit_code": res["exit_code"], "anomaly_id": anomaly_id},
+            {"slot_index": slot_idx, "exit_code": res["exit_code"], "anomaly_id": anomaly_id},
         )
         updated_status = str(
             conn.execute("SELECT status FROM claims WHERE claim_id = ?", (claim_id,)).fetchone()["status"]
         )
     return {
         "claim_id": claim_id,
+        "slot_index": slot_idx,
         "status": updated_status,
         "instrumented_since_fail": 1,
         "anomaly_id": anomaly_id,

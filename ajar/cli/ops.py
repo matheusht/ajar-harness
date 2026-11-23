@@ -49,7 +49,7 @@ from ajar.report import (
     build_report_data,
     render_markdown_report,
 )
-from ajar.repro_source import unshare_netns_available
+from ajar.repro_source import aggregate_failure_telemetry, unshare_netns_available
 from ajar.runner import run_autonomous_schedule
 from ajar.services import (
     advance_phase,
@@ -195,13 +195,26 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     }
     base_ok = py_ok and fts5_ok and bool(found["git"])
     run_ok = True
-    if getattr(args, "run", None):
-        rh = _diagnose_run_health(
-            resolve_run_id(args.run),
-            prune_slots=bool(getattr(args, "prune_slots", False)),
-        )
-        report["run_health"] = rh
-        run_ok = bool(rh["healthy"])
+    run_arg = getattr(args, "run", None)
+    want_failures = bool(getattr(args, "failures", False))
+    if run_arg or want_failures:
+        rid = resolve_run_id(run_arg)
+        if run_arg:
+            rh = _diagnose_run_health(
+                rid,
+                prune_slots=bool(getattr(args, "prune_slots", False)),
+            )
+            report["run_health"] = rh
+            run_ok = bool(rh["healthy"])
+        if want_failures:
+            rdir = run_dir_for(rid)
+            conn = open_run_db(rid)
+            try:
+                ft = aggregate_failure_telemetry(rdir, conn=conn)
+            finally:
+                conn.close()
+            ft["run_id"] = rid
+            report["failure_telemetry"] = ft
     if getattr(args, "target", None):
         tc = evaluate_target_readiness(
             args.target,
@@ -613,7 +626,13 @@ def cmd_export_graph(args: argparse.Namespace) -> int:
     rid = resolve_run_id(args.run)
     conn = open_run_db(rid)
     try:
-        graph = export_attack_flow_graph(conn)
+        graph = export_attack_flow_graph(
+            conn,
+            schema=str(getattr(args, "schema", "v2") or "v2"),
+            visibility=str(getattr(args, "visibility", "internal_full") or "internal_full"),
+            include_snippets=bool(getattr(args, "include_snippets", False)),
+            repo_slug=str(getattr(args, "repo_slug", "") or ""),
+        )
     finally:
         conn.close()
 

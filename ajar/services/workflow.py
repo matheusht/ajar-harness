@@ -9,6 +9,7 @@ are atomic under SQLite WAL concurrency and identical across CLI and MCP interfa
 from __future__ import annotations
 
 import json
+import math
 import pathlib
 import re
 import sqlite3
@@ -67,8 +68,11 @@ from ajar.repomap import list_unvisited_slices
 from ajar.repro_source import validate_micropatch_diff
 from ajar.store import (
     assert_run_mutable,
+    canonical_island_key,
+    compute_island_illumination,
     compute_lead_ev_formula,
     compute_root_plateau_throttles,
+    evaluate_chain_failure_streak,
     immediate_tx,
     parse_tag_list,
 )
@@ -1235,13 +1239,38 @@ def record_reproduction_outcome(
     return out_payload
 
 
-def preflight_chain_proposal(conn: sqlite3.Connection, steps: list[str]) -> None:
-    """Fail fast before running PoC subprocesses if run is sealed or any step primitive is terminal."""
+def preflight_chain_proposal(
+    conn: sqlite3.Connection,
+    steps: list[str],
+    *,
+    door_id: str = "",
+) -> None:
+    """Fail fast before running PoC subprocesses if run is sealed, any step primitive is terminal, or 2-strike probe gate tripped."""
     assert_run_mutable(conn, operation="chain_propose")
-    for sid in steps:
+    clean_steps = [s.strip() for s in steps if s and s.strip()]
+    for sid in clean_steps:
         prow = conn.execute("SELECT status FROM primitives WHERE primitive_id = ?", (sid,)).fetchone()
         if prow is not None:
             assert_valid_primitive_transition(str(prow["status"]), "chained", primitive_id=sid)
+
+    clean_door = (door_id or "").strip()
+    streak = evaluate_chain_failure_streak(conn, steps=clean_steps, door_id=clean_door)
+    if int(streak["unprobed_failures"]) >= 2:
+        snap_list = list(streak.get("available_snapshots") or [])
+        snap_hint = str(snap_list[0]) if snap_list else "<snp_id>"
+        raise AjarError(
+            "Chain telemetry-pivot gate: >= 2 consecutive chain proposals failed on these steps/door without new runtime telemetry. "
+            f"Run 'ajar chain probe --from-snapshot {snap_hint}', 'ajar repro slice-probe', or 'ajar claim instrument' "
+            "to inspect intermediate state before retrying 'ajar chain propose'.",
+            EXIT_GATE_BLOCKED,
+            {
+                "chain_probe_required": True,
+                "unprobed_failures": int(streak["unprobed_failures"]),
+                "steps": clean_steps,
+                "door_id": clean_door,
+                "pivot_hint": f"Run `ajar chain probe --from-snapshot {snap_hint}` or `ajar repro slice-probe` before next `ajar chain propose`.",
+            },
+        )
 
 
 def record_chain_proposal(
@@ -1254,35 +1283,55 @@ def record_chain_proposal(
     control_cmd: str,
     verified: bool,
     evidence: dict[str, Any],
+    door_id: str = "",
     actor: str = "worker",
 ) -> dict[str, Any]:
     cid = new_id("chn")
     now_iso = utc_now_iso()
+    clean_steps = [s.strip() for s in steps if s and s.strip()]
+    clean_door = (door_id or "").strip()
     with immediate_tx(conn):
-        assert_run_mutable(conn, operation="chain_propose")
-        for sid in steps:
-            prow = conn.execute("SELECT status FROM primitives WHERE primitive_id = ?", (sid,)).fetchone()
-            if prow is not None:
-                assert_valid_primitive_transition(str(prow["status"]), "chained", primitive_id=sid)
+        preflight_chain_proposal(conn, clean_steps, door_id=clean_door)
+        streak = evaluate_chain_failure_streak(conn, steps=clean_steps, door_id=clean_door)
+        snap_list = list(streak.get("available_snapshots") or [])
+        snap_hint = str(snap_list[0]) if snap_list else "<snp_id>"
+        new_unprobed_failures = 0 if verified else (int(streak["unprobed_failures"]) + 1)
+        chain_probe_req = (not verified) and (new_unprobed_failures >= 2)
+        pivot_hint_out = (
+            f"Run `ajar chain probe --from-snapshot {snap_hint}` or `ajar repro slice-probe` before next `ajar chain propose`."
+            if chain_probe_req
+            else ""
+        )
+        ev_payload = dict(evidence)
+        ev_payload["requested_steps"] = clean_steps
+        ev_payload["unprobed_failures"] = new_unprobed_failures
+        ev_payload["chain_probe_required"] = chain_probe_req
+        if pivot_hint_out:
+            ev_payload["pivot_hint"] = pivot_hint_out
+
         conn.execute(
             """
-            INSERT INTO chains(chain_id, title, severity, step_ids_json, e2e_poc_cmd, control_cmd, verified, evidence_json, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO chains(
+                chain_id, title, severity, step_ids_json, e2e_poc_cmd, control_cmd,
+                verified, evidence_json, door_id, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 cid,
                 scrub_text(title),
                 severity,
-                json.dumps(steps),
+                json.dumps(clean_steps),
                 scrub_text(poc_cmd),
                 scrub_text(control_cmd),
                 1 if verified else 0,
-                json.dumps(evidence, sort_keys=True),
+                json.dumps(ev_payload, sort_keys=True),
+                clean_door,
                 now_iso,
             ),
         )
         if verified:
-            for sid in steps:
+            for sid in clean_steps:
                 conn.execute(
                     "UPDATE primitives SET chained = 1, status = 'chained' WHERE primitive_id = ?",
                     (sid,),
@@ -1291,8 +1340,67 @@ def record_chain_proposal(
                     "UPDATE anomalies SET status = 'consumed_by_chain', consumed_by_id = ?, updated_at = ? WHERE anomaly_id = ?",
                     (cid, now_iso, sid),
                 )
-        log_event(conn, actor.strip() or "worker", "chain_proposed", cid, {"verified": verified, "steps": steps})
-    return {"chain_id": cid, "verified": verified, "evidence": evidence}
+            if clean_door:
+                consume_hooks_for_locus(conn, source_entity_id=clean_door, hook_code="H4_TYPED_STATE_BRIDGE")
+        elif chain_probe_req:
+            hook_locus = ""
+            if clean_door:
+                d_row = conn.execute(
+                    "SELECT anchor_locus FROM parked_doors WHERE door_id = ?",
+                    (clean_door,),
+                ).fetchone()
+                if d_row is not None and str(d_row["anchor_locus"] or "").strip():
+                    hook_locus = str(d_row["anchor_locus"]).strip()
+            if not hook_locus and clean_steps:
+                p_row = conn.execute(
+                    "SELECT locus FROM primitives WHERE primitive_id = ?",
+                    (clean_steps[-1],),
+                ).fetchone()
+                if p_row is not None and str(p_row["locus"] or "").strip():
+                    hook_locus = str(p_row["locus"]).strip()
+            hook_sub = infer_subsystem(hook_locus) if hook_locus else "root"
+            register_epistemic_hook(
+                conn,
+                hook_code="H4_TYPED_STATE_BRIDGE",
+                trigger_cmd="chain.propose",
+                source_entity_id=clean_door or cid,
+                dedup_material=f"chain_2strike:{','.join(sorted(clean_steps))}:{clean_door}:{streak['last_probe_event_id']}",
+                subsystem=hook_sub,
+                target_locus=hook_locus,
+                max_leases=1,
+                directive_text=(
+                    f"2-strike chain pivot ({','.join(clean_steps[:3])}): run `ajar chain probe --from-snapshot {snap_hint}` "
+                    "to inspect intermediate state before retrying `ajar chain propose`."
+                ),
+                kill_rule=(
+                    "STOP blind `ajar chain propose` retries if Stage-1 post-state cannot reach Stage-2 preconditions; "
+                    "park or update the Open Door instead."
+                ),
+            )
+        log_event(
+            conn,
+            actor.strip() or "worker",
+            "chain_proposed",
+            cid,
+            {
+                "verified": verified,
+                "steps": clean_steps,
+                "requested_steps": clean_steps,
+                "door_id": clean_door,
+                "unprobed_failures": new_unprobed_failures,
+                "chain_probe_required": chain_probe_req,
+            },
+        )
+    out: dict[str, Any] = {
+        "chain_id": cid,
+        "verified": verified,
+        "unprobed_failures": new_unprobed_failures,
+        "chain_probe_required": chain_probe_req,
+        "evidence": ev_payload,
+    }
+    if pivot_hint_out:
+        out["pivot_hint"] = pivot_hint_out
+    return out
 
 
 def record_human_touch(
@@ -1533,6 +1641,7 @@ def rank_leads(
         "ranked_leads": ranked,
         "total_votes": int(conn.execute("SELECT COUNT(*) AS c FROM lead_votes").fetchone()["c"]),
         "root_plateau_throttles": list(throttles.values()),
+        "island_illumination": compute_island_illumination(conn),
     }
 
 
@@ -1950,6 +2059,78 @@ def _collect_backslice_unvisited_candidates(conn: sqlite3.Connection) -> list[di
     return ranked
 
 
+_STEP_ID_TOKEN_RE = re.compile(r"\b(?:prim|fnd|clm|anom)-[A-Za-z0-9_-]{3,}\b")
+
+
+def detect_worker_stagnation(
+    conn: sqlite3.Connection,
+    *,
+    worker_id: str,
+    task_id: str = "",
+) -> dict[str, Any]:
+    """Inspect recent worker events and task attempt count to flag zero-`Phi(t)` intra-worker loops."""
+    wid = (worker_id or "").strip()
+    tid = (task_id or "").strip()
+    consecutive_churn = 0
+    if wid:
+        ev_rows = conn.execute(
+            "SELECT action, payload_json FROM events WHERE actor = ? ORDER BY event_id DESC LIMIT 6",
+            (wid,),
+        ).fetchall()
+        for r in ev_rows:
+            act = str(r["action"] or "")
+            if act in ("task_checkpointed", "task_checkpoint", "claim_repro_failed"):
+                consecutive_churn += 1
+                continue
+            if act == "chain_proposed":
+                try:
+                    pld = json.loads(str(r["payload_json"] or "{}"))
+                except (ValueError, TypeError):
+                    pld = {}
+                if isinstance(pld, dict) and not bool(pld.get("verified")):
+                    consecutive_churn += 1
+                    continue
+            break
+
+    attempt_count = 0
+    repeated_attempts_unchanged = False
+    if tid:
+        trow = conn.execute(
+            "SELECT attempt_count, checkpoint_json FROM tasks WHERE task_id = ?",
+            (tid,),
+        ).fetchone()
+        if trow is not None:
+            attempt_count = int(trow["attempt_count"] or 0)
+            ckpt = str(trow["checkpoint_json"] or "{}").strip() or "{}"
+            if attempt_count >= 2:
+                if ckpt == "{}":
+                    repeated_attempts_unchanged = True
+                else:
+                    ckpt_evs = conn.execute(
+                        "SELECT payload_json FROM events WHERE action = 'task_checkpointed' AND entity_id = ? ORDER BY event_id DESC LIMIT 2",
+                        (tid,),
+                    ).fetchall()
+                    if len(ckpt_evs) < 2 or str(ckpt_evs[0]["payload_json"]) == str(ckpt_evs[1]["payload_json"]):
+                        repeated_attempts_unchanged = True
+
+    stagnant = bool(consecutive_churn >= 3 or repeated_attempts_unchanged)
+    reason = ""
+    if consecutive_churn >= 3:
+        reason = f"{consecutive_churn} consecutive zero-progress worker events recorded without increasing Phi(t)."
+    elif repeated_attempts_unchanged:
+        reason = f"Task {tid} reached attempt_count={attempt_count} with unchanged trajectory checkpoint."
+
+    return {
+        "worker_id": wid,
+        "task_id": tid,
+        "stagnant": stagnant,
+        "consecutive_zero_phi_events": consecutive_churn,
+        "attempt_count": attempt_count,
+        "repeated_attempts_unchanged": repeated_attempts_unchanged,
+        "reason": reason,
+    }
+
+
 def plan_swarm_wave(
     conn: sqlite3.Connection,
     *,
@@ -1992,6 +2173,11 @@ def plan_swarm_wave(
                     worker_id = NULL,
                     lease_expires_at = NULL,
                     attempt_count = attempt_count + 1,
+                    direction = CASE
+                        WHEN kind = 'investigate' AND (attempt_count + 1) >= 2 AND direction = 'outside_in' THEN 'inside_out'
+                        WHEN kind = 'investigate' AND (attempt_count + 1) >= 2 AND direction = 'inside_out' THEN 'outside_in'
+                        ELSE direction
+                    END,
                     updated_at = ?
                 WHERE status = 'leased' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
                 """,
@@ -2113,53 +2299,66 @@ def plan_swarm_wave(
                     ).fetchall()
                 }
                 active_explore_files.discard("")
+                cur_illum = compute_island_illumination(conn)
+                cur_islands = cur_illum.get("islands") or {}
 
-                stall_targets: list[tuple[str, str, str, str]] = []  # (file, locus, direction, note)
+                def _stall_isl_rank(locus_str: str) -> tuple[int, int]:
+                    isl_k = canonical_island_key(locus_str, infer_subsystem(locus_str))
+                    isl_d = cur_islands.get(isl_k) or {}
+                    zero_leases = 0 if int(isl_d.get("explore_leases", 0)) == 0 else 1
+                    over = 1 if bool(isl_d.get("over_mined")) else 0
+                    return (zero_leases, over)
+
+                stall_cands: list[tuple[tuple[int, int], int, str, str, str, str]] = []
+                ord_idx = 0
                 for bc in _collect_backslice_unvisited_candidates(conn):
                     bf = str(bc["file"])
-                    if bf in active_explore_files or any(x[0] == bf for x in stall_targets):
+                    if bf in active_explore_files or any(x[2] == bf for x in stall_cands):
                         continue
                     syms_note = f" via {','.join(bc['via_symbols'][:2])}" if bc.get("via_symbols") else ""
-                    stall_targets.append(
+                    bloc = str(bc["locus"])
+                    stall_cands.append(
                         (
+                            _stall_isl_rank(bloc),
+                            ord_idx,
                             bf,
-                            str(bc["locus"]),
+                            bloc,
                             "inside_out",
                             f"[stall-breaker] Unvisited {bc['hop']}-hop backward-sink slice into {bc['sink_resolved']}{syms_note}.",
                         )
                     )
-                    if len(stall_targets) >= stall_budget:
-                        break
+                    ord_idx += 1
 
-                if len(stall_targets) < stall_budget:
-                    for slc in unvisited_slices:
-                        cand_loci = [str(slc["seed_locus"])]
-                        for extra in slc.get("files") or []:
-                            ef = _norm_locus_file(str(extra))
-                            if ef and ef != _norm_locus_file(str(slc["seed_locus"])):
-                                cand_loci.append(f"{ef}:1")
-                        for cloc in cand_loci:
-                            cf = _norm_locus_file(cloc)
-                            if not cf or cf in active_explore_files or any(x[0] == cf for x in stall_targets):
-                                continue
-                            stall_targets.append(
-                                (
-                                    cf,
-                                    cloc,
-                                    "outside_in",
-                                    f"[stall-breaker] Unvisited PageRank slice ({slc['slice_id']}, rank={slc['pagerank']:.4f}) after {win} zero-yield tasks.",
-                                )
+                for slc in unvisited_slices:
+                    cand_loci = [str(slc["seed_locus"])]
+                    for extra in slc.get("files") or []:
+                        ef = _norm_locus_file(str(extra))
+                        if ef and ef != _norm_locus_file(str(slc["seed_locus"])):
+                            cand_loci.append(f"{ef}:1")
+                    for cloc in cand_loci:
+                        cf = _norm_locus_file(cloc)
+                        if not cf or cf in active_explore_files or any(x[2] == cf for x in stall_cands):
+                            continue
+                        stall_cands.append(
+                            (
+                                _stall_isl_rank(cloc),
+                                ord_idx,
+                                cf,
+                                cloc,
+                                "outside_in",
+                                f"[stall-breaker] Unvisited PageRank slice ({slc['slice_id']}, rank={slc['pagerank']:.4f}) after {win} zero-yield tasks.",
                             )
-                            if len(stall_targets) >= stall_budget:
-                                break
-                        if len(stall_targets) >= stall_budget:
-                            break
+                        )
+                        ord_idx += 1
 
-                for sfile, sloc, sdir, snote in stall_targets[:stall_budget]:
+                stall_cands.sort(key=lambda item: (item[0], item[1]))
+                stall_targets = [(c[2], c[3], c[4], c[5]) for c in stall_cands[:stall_budget]]
+
+                for sfile, sloc, sdir, snote in stall_targets:
                     stid = new_id("task")
                     ssub = infer_subsystem(sloc)
                     draft = {"kind": "investigate", "priority": "high", "subsystem": ssub, "locus": sloc, "summary": snote}
-                    ssal = max(74, compute_task_salience(conn, draft))
+                    ssal = max(74, compute_task_salience(conn, draft, _illumination=cur_illum))
                     conn.execute(
                         """
                         INSERT INTO tasks(
@@ -2315,6 +2514,8 @@ def plan_swarm_wave(
             discovery_stalled = claims_since_window == 0 and primitives_since_window == 0
 
     throttles = compute_root_plateau_throttles(conn)
+    illumination = compute_island_illumination(conn)
+    illum_islands: dict[str, dict[str, Any]] = illumination.get("islands") or {}
     leads = rank_leads(conn, limit=50)
     lead_ev_by_key: dict[str, float] = {}
     for ld in leads["ranked_leads"]:
@@ -2328,21 +2529,27 @@ def plan_swarm_wave(
                 lead_ev_by_key[key] = cev
 
     open_rows = conn.execute("SELECT * FROM tasks WHERE status = 'open'").fetchall()
-    scored_candidates: list[tuple[int, float, str, str, sqlite3.Row]] = []
+    scored_candidates: list[tuple[int, float, int, str, str, sqlite3.Row]] = []
     for row in open_rows:
-        eff_sal = compute_task_salience(conn, row)
+        eff_sal = compute_task_salience(conn, row, _illumination=illumination, _throttles=throttles)
         r_surf = str(row["surface_id"] or "").strip()
         r_door = _resolve_task_door_id(row)
         r_loc = str(row["locus"] or "").strip()
         r_sub = str(row["subsystem"] or "").strip()
+        r_isl = canonical_island_key(r_loc, r_sub)
+        isl_leases = (
+            int((illum_islands.get(r_isl) or {}).get("explore_leases", 0))
+            if str(row["kind"]) in ("investigate", "escalate")
+            else 0
+        )
         matched_ev = max(
             (lead_ev_by_key.get(k, 0.0) for k in (r_surf, r_door, r_loc, r_sub) if k),
             default=0.0,
         )
         eff_ev = round(float(eff_sal) + (0.05 * matched_ev), 2)
-        scored_candidates.append((eff_sal, eff_ev, str(row["created_at"]), str(row["task_id"]), row))
+        scored_candidates.append((eff_sal, eff_ev, isl_leases, str(row["created_at"]), str(row["task_id"]), row))
 
-    scored_candidates.sort(key=lambda item: (-item[0], -item[1], item[2], item[3]))
+    scored_candidates.sort(key=lambda item: (-item[0], -item[1], item[2], item[3], item[4]))
 
     wave: list[dict[str, Any]] = []
     locked_files: set[str] = set()
@@ -2350,8 +2557,11 @@ def plan_swarm_wave(
     locked_doors: set[str] = set()
     excluded_phase_tasks: list[str] = []
     deferred_collision_tasks: list[str] = []
+    deferred_island_cap_tasks: list[str] = []
+    island_wave_counts: dict[str, int] = {}
+    over_mined_wave_cap = max(1, math.ceil(0.25 * cap_workers))
 
-    for eff_sal, eff_ev, _created_at, tid, row in scored_candidates:
+    for eff_sal, eff_ev, _isl_leases, _created_at, tid, row in scored_candidates:
         kind = str(row["kind"])
         if campaign_phase == "hunt" and kind == "patch":
             excluded_phase_tasks.append(tid)
@@ -2361,6 +2571,7 @@ def plan_swarm_wave(
             continue
 
         loc = str(row["locus"] or "").strip()
+        rsub = str(row["subsystem"] or "")
         pfile = _norm_locus_file(loc)
         claim = _resolve_task_claim(conn, row)
         cid = str(claim["claim_id"]) if claim is not None else ""
@@ -2370,6 +2581,12 @@ def plan_swarm_wave(
         if kind != "chain":
             if (pfile and pfile in locked_files) or (cid and cid in locked_claims) or (did and did in locked_doors):
                 deferred_collision_tasks.append(tid)
+                continue
+
+        isl_key = canonical_island_key(loc, rsub)
+        if kind in ("investigate", "bridge", "escalate") and bool((illum_islands.get(isl_key) or {}).get("over_mined")):
+            if island_wave_counts.get(isl_key, 0) >= over_mined_wave_cap:
+                deferred_island_cap_tasks.append(tid)
                 continue
 
         if len(wave) >= cap_workers:
@@ -2382,6 +2599,8 @@ def plan_swarm_wave(
                 locked_claims.add(cid)
             if did:
                 locked_doors.add(did)
+        if kind in ("investigate", "bridge", "escalate"):
+            island_wave_counts[isl_key] = island_wave_counts.get(isl_key, 0) + 1
 
         must_differ = proposer_wid if kind == "falsify" else ""
         ind_note = (
@@ -2396,6 +2615,7 @@ def plan_swarm_wave(
                 "direction": str(row["direction"] or "outside_in"),
                 "title": scrub_text(str(row["title"] or "")),
                 "subsystem": str(row["subsystem"] or infer_subsystem(loc)),
+                "island": isl_key,
                 "locus": loc,
                 "primary_file": pfile,
                 "priority": str(row["priority"] or "high"),
@@ -2410,6 +2630,18 @@ def plan_swarm_wave(
                 "independence_note": ind_note,
             }
         )
+
+    sys_actors = {"system", "operator", "planner", "mapper", "engine", "host_hook", "mcp"}
+    recent_actors = [
+        str(r["actor"])
+        for r in conn.execute("SELECT DISTINCT actor FROM events ORDER BY event_id DESC LIMIT 20").fetchall()
+        if str(r["actor"] or "").strip() and str(r["actor"]) not in sys_actors
+    ]
+    stagnant_workers = [
+        st
+        for st in (detect_worker_stagnation(conn, worker_id=w) for w in recent_actors[:12])
+        if st["stagnant"]
+    ]
 
     return {
         "run_id": run_id,
@@ -2430,7 +2662,10 @@ def plan_swarm_wave(
         "spawned_chain_tasks": spawned_chain_tasks,
         "excluded_phase_tasks": excluded_phase_tasks,
         "deferred_collision_tasks": deferred_collision_tasks,
+        "deferred_island_cap_tasks": deferred_island_cap_tasks,
         "root_plateau_throttles": list(throttles.values()),
+        "island_illumination": illumination,
+        "stagnant_workers": stagnant_workers,
         "top_ranked_leads": leads["ranked_leads"][:5],
         "wave_size": len(wave),
         "wave": wave,
@@ -2465,6 +2700,7 @@ def build_worker_dispatch_brief(
     skill_mode = str(task["skill_mode"] or "domain")
     assigned_locus = str(task["locus"] or "").strip() or "(repo-wide)"
     sub = str(task["subsystem"] or infer_subsystem(str(task["locus"] or "")))
+    attempt_count = int(task["attempt_count"] or 0) if "attempt_count" in task.keys() else 0
 
     if kind == "falsify" and not raw_wid:
         raise AjarError("Fresh-falsifier separation gate requires a non-empty worker_id.", EXIT_GATE_BLOCKED)
@@ -2574,6 +2810,31 @@ def build_worker_dispatch_brief(
             f"- Disconfirm Test: `{_single_line(str(claim['falsification_test'] or ''), 105)}`"
         )
 
+    brief_step_ids = list(
+        dict.fromkeys(_STEP_ID_TOKEN_RE.findall(f"{task['title']} {task['summary']}"))
+    )
+    chain_streak: dict[str, Any] = (
+        evaluate_chain_failure_streak(conn, steps=brief_step_ids, door_id=did)
+        if (kind in ("chain", "bridge") or did or brief_step_ids)
+        else {"unprobed_failures": 0, "chain_probe_required": False, "available_snapshots": []}
+    )
+    chain_probe_req = bool(chain_streak["chain_probe_required"])
+    stag_info = detect_worker_stagnation(conn, worker_id=wid, task_id=tid)
+    snap_list = list(chain_streak.get("available_snapshots") or [])
+    snap_hint = str(door_or_gap_context.get("snapshot_id") or (snap_list[0] if snap_list else "<snp_id>"))
+
+    pivot_guidance = ""
+    if chain_probe_req:
+        pivot_guidance = (
+            f"PIVOT REQUIRED: >= 2 unverified chain attempts failed; run `ajar chain probe --from-snapshot {snap_hint}` "
+            "before retrying `ajar chain propose`."
+        )
+    elif attempt_count >= 2 or bool(stag_info["stagnant"]):
+        pivot_guidance = (
+            f"MODALITY PIVOT (attempt={attempt_count}): Prior attempts yielded delta_phi=0; switch to `{direction}` / "
+            f"`ajar chain probe --from-snapshot {snap_hint}` instead of repeating prior trajectory."
+        )
+
     steers = list_steers(conn, active_only=True, subsystem=sub, locus=str(task["locus"] or ""))[:3]
     active_hooks = select_active_hooks_for_task(conn, task, limit=2)
 
@@ -2640,6 +2901,8 @@ def build_worker_dispatch_brief(
     if task["summary"]:
         md_lines.append(f"- Summary: {_single_line(str(task['summary']), 120)}")
     md_lines.extend(context_lines[:2])
+    if pivot_guidance:
+        md_lines.append(f"- {pivot_guidance}")
 
     if steers:
         md_lines.append("")
@@ -2686,6 +2949,9 @@ def build_worker_dispatch_brief(
         "claim_id": str(claim["claim_id"]) if claim is not None else "",
         "proposer_worker_id": proposer_wid,
         "door_or_gap_context": door_or_gap_context,
+        "chain_probe_required": chain_probe_req,
+        "stagnation_guard": stag_info,
+        "pivot_guidance": pivot_guidance,
         "active_steers": [
             {"steer_id": str(s["steer_id"]), "scope": str(s["scope"]), "rule_text": _single_line(str(s["rule_text"]), 120)}
             for s in steers

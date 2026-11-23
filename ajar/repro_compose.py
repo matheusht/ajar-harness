@@ -24,7 +24,7 @@ import subprocess
 from typing import Any, Mapping, Sequence
 
 from ajar import EXIT_GATE_BLOCKED, EXIT_USER_ERROR
-from ajar.db import AjarError, log_event, new_id, utc_now_iso
+from ajar.db import AjarError, infer_subsystem, log_event, new_id, utc_now_iso
 from ajar.reactions import on_primitive_added
 from ajar.redact import scrub_text, scrubbed_subprocess_env
 from ajar.repro_helpers import (
@@ -67,7 +67,12 @@ from ajar.repro_source import (
     resolve_local_build_cache_dir,
     validate_no_static_source_cheat,
 )
-from ajar.store import immediate_tx, parse_tag_list
+from ajar.store import (
+    assert_run_mutable,
+    evaluate_chain_failure_streak,
+    immediate_tx,
+    parse_tag_list,
+)
 
 
 def promote_primitive_helper(
@@ -336,9 +341,32 @@ def run_chain_reproduction(
         mark_chain_doors_and_jewels_resolved,
     )
 
+    assert_run_mutable(conn, operation="chain_propose")
     clean_steps = [s.strip() for s in steps if s and s.strip()]
     if not clean_steps:
         raise AjarError("Chain --steps requires at least one primitive, anomaly, claim, or finding ID.", EXIT_USER_ERROR)
+
+    clean_door = (door_id or "").strip()
+    streak = evaluate_chain_failure_streak(conn, steps=clean_steps, door_id=clean_door)
+    snap_list = list(streak.get("available_snapshots") or [])
+    snap_hint = str(snap_list[0]) if snap_list else "<snp_id>"
+    if int(streak["unprobed_failures"]) >= 2:
+        pivot_hint = (
+            f"Run `ajar chain probe --from-snapshot {snap_hint}` or `ajar repro slice-probe` before next `ajar chain propose`."
+        )
+        raise AjarError(
+            "Chain telemetry-pivot gate: >= 2 consecutive chain proposals failed on these steps/door without new runtime telemetry. "
+            f"Run 'ajar chain probe --from-snapshot {snap_hint}', 'ajar repro slice-probe', or 'ajar claim instrument' "
+            "to inspect intermediate state before retrying 'ajar chain propose'.",
+            EXIT_GATE_BLOCKED,
+            {
+                "chain_probe_required": True,
+                "unprobed_failures": int(streak["unprobed_failures"]),
+                "steps": list(clean_steps),
+                "door_id": clean_door,
+                "pivot_hint": pivot_hint,
+            },
+        )
 
     clean_backups: dict[str, list[str]] = {}
     for k, vals in (backup_steps or {}).items():
@@ -884,6 +912,14 @@ def run_chain_reproduction(
             f"({len(ablation_matrix)} step(s) verified, realism_tier={realism['realism_tier']})."
         )
 
+    new_unprobed_failures = 0 if verified else (int(streak["unprobed_failures"]) + 1)
+    chain_probe_req = (not verified) and (new_unprobed_failures >= 2)
+    pivot_hint_out = (
+        f"Run `ajar chain probe --from-snapshot {snap_hint}` or `ajar repro slice-probe` before next `ajar chain propose`."
+        if chain_probe_req
+        else ""
+    )
+
     cid = new_id("chn")
     now_iso = utc_now_iso()
     ev = {
@@ -899,7 +935,12 @@ def run_chain_reproduction(
         "poc_stderr": full_res["stderr"][:800],
         "ablation_matrix": ablation_matrix,
         "realism": realism,
+        "unprobed_failures": new_unprobed_failures,
+        "chain_probe_required": chain_probe_req,
     }
+    if pivot_hint_out:
+        ev["pivot_hint"] = pivot_hint_out
+
     with immediate_tx(conn):
         conn.execute(
             """
@@ -925,7 +966,7 @@ def run_chain_reproduction(
                 str(realism["realism_tier"]),
                 json.dumps(realism, sort_keys=True),
                 str(realism["jewel_id"]),
-                door_id.strip(),
+                clean_door,
                 now_iso,
             ),
         )
@@ -949,13 +990,45 @@ def run_chain_reproduction(
                     "UPDATE anomalies SET status = 'consumed_by_chain', consumed_by_id = ?, updated_at = ? WHERE anomaly_id = ?",
                     (cid, now_iso, sid),
                 )
+            if clean_door:
+                consume_hooks_for_locus(conn, source_entity_id=clean_door, hook_code="H4_TYPED_STATE_BRIDGE")
             resolved_doors = mark_chain_doors_and_jewels_resolved(
                 conn,
                 chain_id=cid,
                 step_ids=active_steps,
-                door_id=door_id.strip(),
+                door_id=clean_door,
                 jewel_id=str(realism["jewel_id"]),
                 realism_tier=str(realism["realism_tier"]),
+            )
+        elif chain_probe_req:
+            from ajar.epistemic_hooks import register_epistemic_hook
+
+            hook_locus = tail_locus
+            if clean_door:
+                d_row = conn.execute(
+                    "SELECT anchor_locus FROM parked_doors WHERE door_id = ?",
+                    (clean_door,),
+                ).fetchone()
+                if d_row is not None and str(d_row["anchor_locus"] or "").strip():
+                    hook_locus = str(d_row["anchor_locus"]).strip()
+            hook_sub = infer_subsystem(hook_locus) if hook_locus else "root"
+            register_epistemic_hook(
+                conn,
+                hook_code="H4_TYPED_STATE_BRIDGE",
+                trigger_cmd="chain.propose",
+                source_entity_id=clean_door or cid,
+                dedup_material=f"chain_2strike:{','.join(sorted(clean_steps))}:{clean_door}:{streak['last_probe_event_id']}",
+                subsystem=hook_sub,
+                target_locus=hook_locus,
+                max_leases=1,
+                directive_text=(
+                    f"2-strike chain pivot ({','.join(clean_steps[:3])}): run `ajar chain probe --from-snapshot {snap_hint}` "
+                    "to inspect intermediate state before retrying `ajar chain propose`."
+                ),
+                kill_rule=(
+                    "STOP blind `ajar chain propose` retries if Stage-1 post-state cannot reach Stage-2 preconditions; "
+                    "park or update the Open Door instead."
+                ),
             )
         log_event(
             conn,
@@ -965,14 +1038,18 @@ def run_chain_reproduction(
             {
                 "verified": verified,
                 "steps": active_steps,
+                "requested_steps": clean_steps,
+                "door_id": clean_door,
                 "backup_swaps_tried": backup_swaps_tried,
                 "ablated_steps": len(ablation_matrix),
                 "realism_tier": realism["realism_tier"],
                 "resolved_doors": resolved_doors,
+                "unprobed_failures": new_unprobed_failures,
+                "chain_probe_required": chain_probe_req,
                 "reason": reason[:200],
             },
         )
-    return {
+    out_dict: dict[str, Any] = {
         "chain_id": cid,
         "verified": verified,
         "active_steps": active_steps,
@@ -984,8 +1061,13 @@ def run_chain_reproduction(
         "slot_index": slot_idx,
         "build_cmd": scrub_text(eff_build_cmd),
         "ablation_matrix": ablation_matrix,
+        "unprobed_failures": new_unprobed_failures,
+        "chain_probe_required": chain_probe_req,
         "evidence": ev,
     }
+    if pivot_hint_out:
+        out_dict["pivot_hint"] = pivot_hint_out
+    return out_dict
 
 
 def run_snapshot_chain_probe(

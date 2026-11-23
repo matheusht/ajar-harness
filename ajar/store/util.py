@@ -24,7 +24,7 @@ from ajar.store.migrations import (
     _ensure_v34_schema,
     _ensure_v322_schema,
 )
-from ajar.store.tx import CURRENT_SCHEMA_VERSION
+from ajar.store.tx import CURRENT_SCHEMA_VERSION, immediate_tx
 
 PRIORITY_BASE_SALIENCE: dict[str, int] = {
     "critical": 80,
@@ -271,6 +271,535 @@ def compute_commitment_hash(target_sha256: str, goal: str, stopping_criterion: s
     return hashlib.sha256(canonical).hexdigest()
 
 
+_GENERIC_TOP_DIRS: frozenset[str] = frozenset(
+    {"src", "lib", "pkg", "crates", "packages", "internal", "cmd", "apps", "modules", "core"}
+)
+
+_PROBE_TELEMETRY_ACTIONS: tuple[str, ...] = (
+    "chain_snapshot_probed",
+    "claim_instrumented",
+    "slice_probed",
+    "anomaly_added",
+    "binding_certified",
+)
+
+
+def canonical_island_key(locus: str = "", subsystem: str = "") -> str:
+    """Map a file locus or subsystem label onto a deterministic subsystem island key (`isl:<name>`)."""
+    raw_path = (locus or "").split(":", 1)[0].strip().lstrip("./")
+    parts = [p for p in raw_path.split("/") if p]
+    if not parts:
+        sub_clean = (subsystem or "").strip().lstrip("./")
+        if not sub_clean or sub_clean == "root":
+            return "isl:root"
+        first = sub_clean.split("/")[0].split(".")[0]
+        stem = re.split(r"[-_]", first)[0]
+        return f"isl:{stem if len(stem) >= 4 else first}".lower()
+    if len(parts) == 1:
+        base = pathlib.PurePosixPath(parts[0]).stem.lower()
+        prefix = re.split(r"[-_]", base)[0]
+        return f"isl:{prefix if len(prefix) >= 4 else base}"
+    top = parts[0].lower()
+    if top in _GENERIC_TOP_DIRS:
+        if len(parts) >= 3:
+            return f"isl:{top}/{parts[1].lower()}"
+        base = pathlib.PurePosixPath(parts[1]).stem.lower()
+        prefix = re.split(r"[-_]", base)[0]
+        return f"isl:{top}/{prefix if len(prefix) >= 4 else base}"
+    return f"isl:{top}"
+
+
+def compute_island_illumination(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Compute `QD-Islands` subsystem illumination and explore-lease deme quotas across the repository."""
+    existing_tables = {
+        str(r[0]) for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    islands_set: set[str] = set()
+    island_files: dict[str, set[str]] = {}
+
+    def _reg(locus_val: str = "", sub_val: str = "") -> str:
+        isl = canonical_island_key(locus_val, sub_val)
+        islands_set.add(isl)
+        rel_f = (locus_val or "").split(":", 1)[0].strip().lstrip("./")
+        if rel_f:
+            island_files.setdefault(isl, set()).add(rel_f)
+        return isl
+
+    if "repomap_symbols" in existing_tables:
+        for r in conn.execute("SELECT DISTINCT rel_path FROM repomap_symbols").fetchall():
+            rpath = str(r["rel_path"] or "").strip()
+            if rpath:
+                _reg(rpath, "")
+
+    if "surfaces" in existing_tables:
+        for r in conn.execute("SELECT locus, subsystem FROM surfaces").fetchall():
+            loc_s = str(r["locus"] or "").strip()
+            sub_s = str(r["subsystem"] or "").strip()
+            if loc_s or sub_s:
+                _reg(loc_s, sub_s)
+
+    covered_files_by_isl: dict[str, set[str]] = {}
+    if "coverage_spans" in existing_tables:
+        for r in conn.execute("SELECT DISTINCT rel_path FROM coverage_spans").fetchall():
+            rpath = str(r["rel_path"] or "").strip().lstrip("./")
+            if rpath:
+                isl = _reg(rpath, "")
+                covered_files_by_isl.setdefault(isl, set()).add(rpath)
+
+    explore_leases_by_isl: dict[str, int] = {}
+    open_explore_by_isl: dict[str, int] = {}
+    dry_verified_by_isl: dict[str, int] = {}
+    closed_explore_ts_by_isl: dict[str, list[str]] = {}
+    if "tasks" in existing_tables:
+        for t in conn.execute(
+            "SELECT kind, status, locus, subsystem, dry_control_locus, updated_at FROM tasks"
+        ).fetchall():
+            tkind = str(t["kind"] or "")
+            tstatus = str(t["status"] or "")
+            tloc = str(t["locus"] or "").strip()
+            tsub = str(t["subsystem"] or "").strip()
+            if not (tloc or tsub):
+                continue
+            isl = _reg(tloc, tsub)
+            if tkind in ("investigate", "bridge", "escalate"):
+                if tstatus in ("leased", "done", "dry"):
+                    explore_leases_by_isl[isl] = explore_leases_by_isl.get(isl, 0) + 1
+                elif tstatus == "open":
+                    open_explore_by_isl[isl] = open_explore_by_isl.get(isl, 0) + 1
+                if tstatus in ("done", "dry"):
+                    closed_explore_ts_by_isl.setdefault(isl, []).append(str(t["updated_at"] or ""))
+            if tstatus == "dry" and str(t["dry_control_locus"] or "").strip():
+                dry_verified_by_isl[isl] = dry_verified_by_isl.get(isl, 0) + 1
+
+    active_prims_by_isl: dict[str, int] = {}
+    prim_isl_by_id: dict[str, str] = {}
+    if "primitives" in existing_tables:
+        for p in conn.execute("SELECT primitive_id, locus, subsystem, status FROM primitives").fetchall():
+            ploc = str(p["locus"] or "").strip()
+            psub = str(p["subsystem"] or "").strip()
+            if ploc or psub:
+                isl = _reg(ploc, psub)
+                prim_isl_by_id[str(p["primitive_id"] or "")] = isl
+                if str(p["status"] or "active") != "dry":
+                    active_prims_by_isl[isl] = active_prims_by_isl.get(isl, 0) + 1
+
+    findings_by_isl: dict[str, int] = {}
+    jewel_ts_by_isl: dict[str, str] = {}
+    fnd_isl_by_id: dict[str, str] = {}
+    if "findings" in existing_tables:
+        for f in conn.execute("SELECT finding_id, locus, realism_tier, created_at FROM findings").fetchall():
+            floc = str(f["locus"] or "").strip()
+            if floc:
+                isl = _reg(floc, "")
+                fnd_isl_by_id[str(f["finding_id"] or "")] = isl
+                findings_by_isl[isl] = findings_by_isl.get(isl, 0) + 1
+                if str(f["realism_tier"] or "") == "crown_jewel":
+                    fts = str(f["created_at"] or "")
+                    if fts >= jewel_ts_by_isl.get(isl, ""):
+                        jewel_ts_by_isl[isl] = fts
+
+    jewel_isl_by_id: dict[str, str] = {}
+    if "crown_jewels" in existing_tables:
+        for cj in conn.execute("SELECT jewel_id, locus, subsystem, status, updated_at FROM crown_jewels").fetchall():
+            cjloc = str(cj["locus"] or "").strip()
+            cjsub = str(cj["subsystem"] or "").strip()
+            if cjloc or cjsub:
+                isl = _reg(cjloc, cjsub)
+                jewel_isl_by_id[str(cj["jewel_id"] or "")] = isl
+                if str(cj["status"] or "") == "reached":
+                    cjts = str(cj["updated_at"] or "")
+                    if cjts >= jewel_ts_by_isl.get(isl, ""):
+                        jewel_ts_by_isl[isl] = cjts
+
+    if "chains" in existing_tables:
+        for ch in conn.execute(
+            "SELECT step_ids_json, jewel_id, created_at FROM chains WHERE verified = 1 AND realism_tier = 'crown_jewel'"
+        ).fetchall():
+            chts = str(ch["created_at"] or "")
+            jid = str(ch["jewel_id"] or "")
+            if jid and jid in jewel_isl_by_id:
+                jisl = jewel_isl_by_id[jid]
+                if chts >= jewel_ts_by_isl.get(jisl, ""):
+                    jewel_ts_by_isl[jisl] = chts
+            try:
+                sids = json.loads(str(ch["step_ids_json"] or "[]"))
+            except (ValueError, TypeError):
+                sids = []
+            if isinstance(sids, list):
+                for sid in sids:
+                    s_isl = prim_isl_by_id.get(str(sid)) or fnd_isl_by_id.get(str(sid))
+                    if s_isl and chts >= jewel_ts_by_isl.get(s_isl, ""):
+                        jewel_ts_by_isl[s_isl] = chts
+
+    ready_door_islands: set[str] = set()
+    if "parked_doors" in existing_tables:
+        for dr in conn.execute("SELECT anchor_locus, blocker_locus, subsystem, status FROM parked_doors").fetchall():
+            aloc = str(dr["anchor_locus"] or "").strip()
+            bloc = str(dr["blocker_locus"] or "").strip()
+            dsub = str(dr["subsystem"] or "").strip()
+            isl_a = _reg(aloc, dsub) if (aloc or dsub) else ""
+            isl_b = _reg(bloc, dsub) if bloc else ""
+            if str(dr["status"] or "") == "ready":
+                if isl_a:
+                    ready_door_islands.add(isl_a)
+                if isl_b:
+                    ready_door_islands.add(isl_b)
+
+    m_count = len(islands_set)
+    m_eff = max(1, m_count)
+    total_files = sum(len(fs) for fs in island_files.values())
+    total_explore = sum(explore_leases_by_isl.values())
+
+    raw_illum: dict[str, bool] = {}
+    for isl in sorted(islands_set):
+        cov_cnt = len(covered_files_by_isl.get(isl, set()))
+        ver_cnt = (
+            findings_by_isl.get(isl, 0)
+            + active_prims_by_isl.get(isl, 0)
+            + dry_verified_by_isl.get(isl, 0)
+        )
+        l_i = explore_leases_by_isl.get(isl, 0)
+        raw_illum[isl] = bool(cov_cnt >= 1 or ver_cnt >= 1 or l_i >= 1)
+
+    illum_cnt = sum(1 for v in raw_illum.values() if v)
+    global_illumination = (float(illum_cnt) / float(m_count)) if m_count > 0 else 0.0
+    summary_fair_cap = (
+        1.0
+        if m_count <= 1
+        else 0.65
+        if m_count == 2
+        else max(2.0 / float(m_count), (1.0 / float(m_count)) + 0.15)
+    )
+
+    islands_out: dict[str, dict[str, Any]] = {}
+    for isl in sorted(islands_set):
+        file_cnt = len(island_files.get(isl, set()))
+        w0_i = (float(file_cnt) / float(total_files)) if total_files > 0 else (1.0 / float(m_eff))
+        if m_count <= 1:
+            fair_cap_i = 1.0
+        elif m_count == 2:
+            fair_cap_i = min(0.75, max(0.65, w0_i + 0.15))
+        else:
+            fair_cap_i = min(0.85, max(2.0 / float(m_count), w0_i + 0.15))
+
+        l_i = explore_leases_by_isl.get(isl, 0)
+        cov_cnt = len(covered_files_by_isl.get(isl, set()))
+        ver_cnt = (
+            findings_by_isl.get(isl, 0)
+            + active_prims_by_isl.get(isl, 0)
+            + dry_verified_by_isl.get(isl, 0)
+        )
+        is_illum = raw_illum[isl]
+        has_ready = isl in ready_door_islands
+        j_ts = jewel_ts_by_isl.get(isl, "")
+        closed_ts = sorted(closed_explore_ts_by_isl.get(isl, []), reverse=True)
+        has_recent_jewel = bool(j_ts and (len(closed_ts) < 2 or j_ts >= closed_ts[1]))
+        share_i = (float(l_i) / float(total_explore)) if total_explore > 0 else 0.0
+
+        if m_count <= 1 or total_explore == 0:
+            under_explored = False
+            over_mined = False
+            sal_adj = 0
+        else:
+            under_explored = bool(l_i == 0 and (not is_illum) and global_illumination < 0.75)
+            over_mined = bool(
+                total_explore >= 2
+                and l_i >= 2
+                and share_i > fair_cap_i
+                and (not has_ready)
+                and (not has_recent_jewel)
+            )
+            sal_adj = 12 if under_explored else (-25 if over_mined else 0)
+
+        islands_out[isl] = {
+            "island": isl,
+            "file_count": file_cnt,
+            "prior_weight": round(w0_i, 4),
+            "fair_share_cap": round(fair_cap_i, 4),
+            "explore_leases": l_i,
+            "open_explore_tasks": open_explore_by_isl.get(isl, 0),
+            "explore_share": round(share_i, 4),
+            "covered_files": cov_cnt,
+            "verified_artifacts": ver_cnt,
+            "illuminated": is_illum,
+            "has_ready_door": has_ready,
+            "has_recent_jewel_progress": has_recent_jewel,
+            "under_explored": under_explored,
+            "over_mined": over_mined,
+            "salience_adjustment": sal_adj,
+        }
+
+    return {
+        "island_count": m_count,
+        "illuminated_count": illum_cnt,
+        "global_illumination": round(global_illumination, 4),
+        "total_explore_leases": total_explore,
+        "fair_share_cap": round(summary_fair_cap, 4),
+        "islands": islands_out,
+    }
+
+
+def compute_epistemic_potential(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Compute strictly grounded Lyapunov epistemic potential `Phi(t) >= 0.0` over run.db."""
+    existing_tables = {
+        str(r[0]) for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+
+    covered_loc = 0
+    if "coverage_spans" in existing_tables:
+        seen_spans: set[tuple[str, int, int]] = set()
+        per_task_loc: dict[str, int] = {}
+        for r in conn.execute(
+            "SELECT COALESCE(task_id, '') AS tid, rel_path, start_line, end_line FROM coverage_spans ORDER BY rowid ASC"
+        ).fetchall():
+            rpath = str(r["rel_path"] or "").strip().lstrip("./")
+            s_ln = int(r["start_line"] or 0)
+            e_ln = int(r["end_line"] or 0)
+            if not rpath or s_ln < 1 or e_ln < s_ln:
+                continue
+            skey = (rpath, s_ln, e_ln)
+            if skey in seen_spans:
+                continue
+            seen_spans.add(skey)
+            span_loc = e_ln - s_ln + 1
+            tid = str(r["tid"] or "")
+            used = per_task_loc.get(tid, 0)
+            credit = max(0, min(span_loc, 2000 - used))
+            per_task_loc[tid] = used + credit
+        covered_loc = sum(per_task_loc.values())
+
+    bindings = 0
+    if "certified_bindings" in existing_tables:
+        bindings = int(
+            conn.execute(
+                "SELECT COUNT(DISTINCT locus) AS c FROM certified_bindings WHERE valid = 1 AND COALESCE(TRIM(file_sha256), '') != ''"
+            ).fetchone()["c"]
+        )
+
+    dry_loci: set[str] = set()
+    if "tasks" in existing_tables:
+        for r in conn.execute(
+            "SELECT DISTINCT TRIM(dry_control_locus) AS loc FROM tasks WHERE status = 'dry' AND COALESCE(TRIM(dry_control_locus), '') != ''"
+        ).fetchall():
+            if r["loc"]:
+                dry_loci.add(str(r["loc"]))
+    if "primitives" in existing_tables:
+        for r in conn.execute(
+            "SELECT DISTINCT TRIM(dry_locus) AS loc FROM primitives WHERE status = 'dry' AND COALESCE(TRIM(dry_locus), '') != ''"
+        ).fetchall():
+            if r["loc"]:
+                dry_loci.add(str(r["loc"]))
+    dry_closures = len(dry_loci)
+
+    active_primitives = 0
+    if "primitives" in existing_tables:
+        active_primitives = int(
+            conn.execute(
+                "SELECT COUNT(*) AS c FROM primitives WHERE status IN ('active', 'chained') AND COALESCE(TRIM(evidence_cmd), '') != ''"
+            ).fetchone()["c"]
+        )
+
+    settled_claims = 0
+    if "claims" in existing_tables:
+        settled_claims = int(
+            conn.execute(
+                "SELECT COUNT(*) AS c FROM claims WHERE status IN ('falsified', 'reproduced', 'config_gated')"
+            ).fetchone()["c"]
+        )
+
+    woken_doors = 0
+    if "parked_doors" in existing_tables:
+        woken_doors = int(
+            conn.execute(
+                "SELECT COUNT(*) AS c FROM parked_doors WHERE status IN ('ready', 'chained')"
+            ).fetchone()["c"]
+        )
+
+    findings_cnt = 0
+    if "findings" in existing_tables:
+        findings_cnt += int(conn.execute("SELECT COUNT(*) AS c FROM findings").fetchone()["c"])
+    if "chains" in existing_tables:
+        findings_cnt += int(conn.execute("SELECT COUNT(*) AS c FROM chains WHERE verified = 1").fetchone()["c"])
+
+    reached_jewels = 0
+    if "crown_jewels" in existing_tables:
+        reached_jewels = int(
+            conn.execute("SELECT COUNT(*) AS c FROM crown_jewels WHERE status = 'reached'").fetchone()["c"]
+        )
+
+    phi = round(
+        (float(covered_loc) / 1000.0)
+        + (2.0 * float(bindings))
+        + (4.0 * float(dry_closures))
+        + (6.0 * float(active_primitives))
+        + (8.0 * float(settled_claims))
+        + (12.0 * float(woken_doors))
+        + (25.0 * float(findings_cnt))
+        + (60.0 * float(reached_jewels)),
+        4,
+    )
+    return {
+        "epistemic_potential": phi,
+        "components": {
+            "covered_loc": covered_loc,
+            "bindings": bindings,
+            "dry_closures": dry_closures,
+            "active_primitives": active_primitives,
+            "settled_claims": settled_claims,
+            "woken_doors": woken_doors,
+            "findings": findings_cnt,
+            "reached_jewels": reached_jewels,
+        },
+    }
+
+
+def compute_epistemic_delta(
+    conn: sqlite3.Connection,
+    *,
+    reference_actions: Sequence[str] = ("pulse", "stop_hook_check"),
+) -> dict[str, Any]:
+    """Compare current Lyapunov potential `Phi(t)` against the most recent checkpoint event."""
+    cur = compute_epistemic_potential(conn)
+    phi_now = float(cur["epistemic_potential"])
+    prev_phi: float | None = None
+
+    has_events = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='events'"
+    ).fetchone()
+    clean_actions = [a.strip() for a in reference_actions if a and a.strip()]
+    if has_events and clean_actions:
+        placeholders = ",".join("?" for _ in clean_actions)
+        rows = conn.execute(
+            f"SELECT payload_json FROM events WHERE action IN ({placeholders}) ORDER BY event_id DESC LIMIT 20",
+            tuple(clean_actions),
+        ).fetchall()
+        for r in rows:
+            try:
+                payload = json.loads(str(r["payload_json"] or "{}"))
+            except (ValueError, TypeError):
+                payload = {}
+            if isinstance(payload, dict) and payload.get("epistemic_potential") is not None:
+                prev_phi = float(payload["epistemic_potential"])
+                break
+
+    return {
+        "epistemic_potential": phi_now,
+        "previous_potential": prev_phi,
+        "delta_phi": round(phi_now - (prev_phi if prev_phi is not None else 0.0), 4),
+        "has_prior_checkpoint": prev_phi is not None,
+        "components": cur["components"],
+    }
+
+
+def evaluate_chain_failure_streak(
+    conn: sqlite3.Connection,
+    *,
+    steps: Sequence[str],
+    door_id: str = "",
+) -> dict[str, Any]:
+    """Count consecutive unverified `chain propose` attempts on `steps`/`door_id` since the last runtime probe."""
+    step_key = tuple(sorted(s.strip() for s in steps if s and s.strip()))
+    clean_door = (door_id or "").strip()
+    existing_tables = {
+        str(r[0]) for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    snap_ids: list[str] = []
+    if "repro_snapshots" in existing_tables:
+        snap_ids = [
+            str(r["snapshot_id"])
+            for r in conn.execute("SELECT snapshot_id FROM repro_snapshots ORDER BY created_at DESC LIMIT 3").fetchall()
+            if r["snapshot_id"]
+        ]
+
+    if (not step_key and not clean_door) or "events" not in existing_tables:
+        return {
+            "unprobed_failures": 0,
+            "chain_probe_required": False,
+            "gate_blocked": False,
+            "last_probe_event_id": 0,
+            "available_snapshots": snap_ids,
+        }
+
+    probe_placeholders = ",".join("?" for _ in _PROBE_TELEMETRY_ACTIONS)
+    probe_row = conn.execute(
+        f"SELECT COALESCE(MAX(event_id), 0) AS m FROM events WHERE action IN ({probe_placeholders})",
+        _PROBE_TELEMETRY_ACTIONS,
+    ).fetchone()
+    last_probe_event_id = int(probe_row["m"] or 0) if probe_row is not None else 0
+
+    chain_meta: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {}
+    if "chains" in existing_tables:
+        for crow in conn.execute(
+            "SELECT chain_id, door_id, step_ids_json, evidence_json FROM chains"
+        ).fetchall():
+            cid = str(crow["chain_id"] or "")
+            cdoor = str(crow["door_id"] or "").strip()
+            try:
+                raw_s = json.loads(str(crow["step_ids_json"] or "[]"))
+                csteps = tuple(sorted(str(x).strip() for x in raw_s if str(x).strip())) if isinstance(raw_s, list) else ()
+            except (ValueError, TypeError):
+                csteps = ()
+            try:
+                ev_obj = json.loads(str(crow["evidence_json"] or "{}"))
+                req_s = ev_obj.get("requested_steps") if isinstance(ev_obj, dict) else None
+                rsteps = tuple(sorted(str(x).strip() for x in req_s if str(x).strip())) if isinstance(req_s, list) else ()
+            except (ValueError, TypeError):
+                rsteps = ()
+            chain_meta[cid] = (cdoor, csteps, rsteps)
+
+    count = 0
+    for ev in conn.execute(
+        "SELECT entity_id, payload_json FROM events WHERE action = 'chain_proposed' AND event_id > ? ORDER BY event_id ASC",
+        (last_probe_event_id,),
+    ).fetchall():
+        cid = str(ev["entity_id"] or "")
+        try:
+            payload = json.loads(str(ev["payload_json"] or "{}"))
+        except (ValueError, TypeError):
+            payload = {}
+        if not isinstance(payload, dict):
+            continue
+        ev_steps_raw = payload.get("steps") or []
+        ev_steps = (
+            tuple(sorted(str(x).strip() for x in ev_steps_raw if str(x).strip()))
+            if isinstance(ev_steps_raw, list)
+            else ()
+        )
+        req_steps_raw = payload.get("requested_steps") or []
+        req_steps = (
+            tuple(sorted(str(x).strip() for x in req_steps_raw if str(x).strip()))
+            if isinstance(req_steps_raw, list)
+            else ()
+        )
+        ev_door = str(payload.get("door_id") or "").strip()
+        meta_door, meta_steps, meta_req_steps = chain_meta.get(cid, ("", (), ()))
+        eff_door = ev_door or meta_door
+
+        step_match = bool(
+            step_key
+            and (
+                ev_steps == step_key
+                or req_steps == step_key
+                or meta_steps == step_key
+                or meta_req_steps == step_key
+            )
+        )
+        door_match = bool(clean_door and eff_door == clean_door)
+        if step_match or door_match:
+            if bool(payload.get("verified")):
+                count = 0
+            else:
+                count += 1
+
+    return {
+        "unprobed_failures": count,
+        "chain_probe_required": count >= 2,
+        "gate_blocked": count >= 2,
+        "last_probe_event_id": last_probe_event_id,
+        "available_snapshots": snap_ids,
+    }
+
+
 def compute_root_plateau_throttles(
     conn: sqlite3.Connection,
     *,
@@ -340,9 +869,15 @@ def compute_root_plateau_throttles(
     return throttles
 
 
-def compute_task_salience(conn: sqlite3.Connection, task_row: sqlite3.Row | dict[str, Any]) -> int:
+def compute_task_salience(
+    conn: sqlite3.Connection,
+    task_row: sqlite3.Row | dict[str, Any],
+    *,
+    _illumination: dict[str, Any] | None = None,
+    _throttles: dict[str, dict[str, Any]] | None = None,
+) -> int:
     keys = set(task_row.keys())
-    kind = str(task_row["kind"] if "kind" in keys else "")
+    kind = str(task_row["kind"] if "kind" in keys else "") or "investigate"
     door_id = str(task_row["door_id"] if "door_id" in keys else "")
     summary = str(task_row["summary"] if "summary" in keys else "")
     existing_salience = int(task_row["salience_score"] or 0) if "salience_score" in keys else 0
@@ -413,8 +948,8 @@ def compute_task_salience(conn: sqlite3.Connection, task_row: sqlite3.Row | dict
             SELECT AVG(ev_score) AS avg_ev, COUNT(*) AS cnt
             FROM lead_votes
             WHERE (target_id != '' AND target_id IN (?, ?))
-               OR (locus != '' AND locus = ?)
-               OR (target_kind = 'subsystem' AND subsystem != '' AND subsystem = ?)
+                OR (locus != '' AND locus = ?)
+                OR (target_kind = 'subsystem' AND subsystem != '' AND subsystem = ?)
             """,
             (surface_id, door_id, locus, subsystem),
         ).fetchone()
@@ -426,9 +961,25 @@ def compute_task_salience(conn: sqlite3.Connection, task_row: sqlite3.Row | dict
     if locus and kind in ("investigate", "escalate", "patch"):
         rfile = locus.split(":", 1)[0].strip().lstrip("./")
         if rfile:
-            throttles = compute_root_plateau_throttles(conn)
+            throttles = _throttles if _throttles is not None else compute_root_plateau_throttles(conn)
             if rfile in throttles and throttles[rfile]["throttled"]:
                 score -= int(throttles[rfile]["salience_penalty"])
+
+    # Apply `QD-Islands` Subsystem Deme Reservation Firewall (`+12` unvisited boost, `-25` over-mined penalty).
+    if (locus or subsystem) and kind in ("investigate", "escalate"):
+        illum = _illumination if _illumination is not None else compute_island_illumination(conn)
+        isl = canonical_island_key(locus, subsystem)
+        islands_map = illum.get("islands") or {}
+        if isl in islands_map:
+            isl_info = islands_map[isl]
+            score += int(isl_info["salience_adjustment"])
+            if bool(isl_info.get("over_mined")):
+                score = min(score, 55)
+        elif int(illum.get("total_explore_leases") or 0) > 0:
+            eff_m = int(illum.get("island_count") or 0) + 1
+            eff_glob = float(illum.get("illuminated_count") or 0) / float(max(1, eff_m))
+            if eff_m >= 2 and eff_glob < 0.75:
+                score += 12
 
     if base_floor > 0 and kind in ("reproduce", "falsify", "instrument", "bridge"):
         return max(base_floor, score)
@@ -437,9 +988,14 @@ def compute_task_salience(conn: sqlite3.Connection, task_row: sqlite3.Row | dict
 
 def recompute_all_open_salience(conn: sqlite3.Connection) -> int:
     rows = conn.execute("SELECT * FROM tasks WHERE status = 'open'").fetchall()
-    for row in rows:
-        new_score = compute_task_salience(conn, row)
-        conn.execute("UPDATE tasks SET salience_score = ? WHERE task_id = ?", (new_score, row["task_id"]))
+    if not rows:
+        return 0
+    illum = compute_island_illumination(conn)
+    throttles = compute_root_plateau_throttles(conn)
+    with immediate_tx(conn):
+        for row in rows:
+            new_score = compute_task_salience(conn, row, _illumination=illum, _throttles=throttles)
+            conn.execute("UPDATE tasks SET salience_score = ? WHERE task_id = ?", (new_score, row["task_id"]))
     return len(rows)
 
 

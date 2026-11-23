@@ -25,7 +25,9 @@ from ajar.db import (
     AjarError,
     add_steer,
     add_threat_assumption,
+    compute_epistemic_delta,
     compute_harness_code_sha256,
+    compute_island_illumination,
     compute_root_plateau_throttles,
     list_rows,
     list_steers,
@@ -351,6 +353,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         run = dict(conn.execute("SELECT * FROM runs LIMIT 1").fetchone())
         tpath = pathlib.Path(run["target_path"])
         gates = check_all_gates(conn, target_dir=tpath, auto_enqueue_chain=False)
+        ep = compute_epistemic_delta(conn, reference_actions=("pulse", "stop_hook_check"))
+        illum = compute_island_illumination(conn)
         tm_row = conn.execute("SELECT revision FROM threat_models LIMIT 1").fetchone()
         payload = {
             "run": run,
@@ -392,6 +396,10 @@ def cmd_status(args: argparse.Namespace) -> int:
                     """
                 ).fetchone()["c"]
             ),
+            "epistemic_potential": ep["epistemic_potential"],
+            "delta_phi": ep["delta_phi"],
+            "epistemic_components": ep["components"],
+            "island_illumination": illum,
             "gates_passed": gates["passed"],
             "blockers": gates["blockers"],
             "economics": gates["economics"],
@@ -949,7 +957,16 @@ def cmd_lead(args: argparse.Namespace) -> int:
             _emit(res, True)
             return EXIT_OK
         throttles = compute_root_plateau_throttles(conn)
-        _emit({"run_id": rid, "root_plateau_throttles": list(throttles.values())}, True)
+        illum = compute_island_illumination(conn)
+        _emit(
+            {
+                "run_id": rid,
+                "root_plateau_throttles": list(throttles.values()),
+                "island_illumination": illum,
+                "over_mined_islands": [k for k, v in illum["islands"].items() if v.get("over_mined")],
+            },
+            True,
+        )
         return EXIT_OK
     finally:
         conn.close()

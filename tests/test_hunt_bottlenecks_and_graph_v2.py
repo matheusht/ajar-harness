@@ -13,8 +13,16 @@ import tempfile
 import unittest
 from unittest import mock
 
+from ajar import EXIT_GATE_BLOCKED
+from ajar.chain_planner import (
+    add_crown_jewel,
+    detect_percolated_multi_hop_paths,
+    evaluate_precondition_realism,
+    park_open_door,
+)
 from ajar.db import open_run_db
 from ajar.diff_sync import sync_pr_differential_state
+from ajar.domain.models import AjarError
 from ajar.redact import scrubbed_subprocess_env
 from ajar.repomap import REPOMAP_EDGE_CAP, _extract_regex_symbols, build_repomap
 from ajar.repro_compose import (
@@ -30,7 +38,14 @@ from ajar.repro_source import (
     resolve_shared_compiler_cache_env,
     run_source_reproduction,
 )
-from ajar.services import add_surface, propose_claim, record_reproduction_outcome, survive_claim
+from ajar.services import (
+    add_surface,
+    add_task,
+    propose_claim,
+    record_reproduction_outcome,
+    survive_claim,
+)
+from ajar.swarm import build_swarm_packet, complete_swarm_dispatch
 from ajar.workspace import init_run_workspace
 
 
@@ -435,7 +450,7 @@ class TestSlotPoolAndBuildReuseB3(unittest.TestCase):
                     "RUSTC_WRAPPER": "sccache",
                     "SCCACHE_DIR": str(base / "custom-sccache"),
                     "CCACHE_DIR": str(base / "custom-ccache"),
-                    "OPENAI_API_KEY": "sk-proj-secret1234567890abcdef",
+                    "OPENAI_API_KEY": "sk-" + "proj-dummy1234567890abcdef",
                 }
             )
             self.assertEqual(env["RUSTC_WRAPPER"], "sccache")
@@ -721,6 +736,246 @@ class TestChainAndDiffSyncBuildCmdB2(unittest.TestCase):
                     self.assertEqual(len(sync2["closed_findings"]), 1)
                 finally:
                     c2.close()
+
+
+class TestPlannerAndSwarmB4(unittest.TestCase):
+    def _record_confirmed_finding(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        surface_id: str,
+        title: str,
+        locus: str,
+        provides_tags: list[str],
+    ) -> str:
+        clm = propose_claim(
+            conn,
+            worker_id="w-prop",
+            title=title,
+            locus=locus,
+            mechanism=f"{title} violates boundary invariant at {locus}",
+            falsification_prediction="Guard rejects crafted input",
+            falsification_test="Run PoC against locus",
+            surface_id=surface_id,
+            severity="high",
+        )
+        cid = str(clm["claim_id"])
+        survive_claim(conn, claim_id=cid, worker_id="w-fals", notes="Verified reachable")
+        out = record_reproduction_outcome(
+            conn,
+            claim_id=cid,
+            worker_id="w-repro",
+            poc_cmd="./app trigger",
+            control_cmd="./app safe",
+            provides_tags=provides_tags,
+            repro_result={
+                "passed": True,
+                "observation_hash": f"obs-{cid}",
+                "micropatch_diff": f"--- a/{locus.split(':', 1)[0]}\n+++ b/{locus.split(':', 1)[0]}\n",
+                "arm1_clean_poc": {"arm_passed": True},
+                "arm2_clean_control": {"arm_passed": True},
+                "arm3_patch_poc": {"arm_passed": True},
+                "arm4_patch_control": {"arm_passed": True},
+            },
+        )
+        return str(out["finding_id"])
+
+    def test_percolation_allows_finding_to_finding_edges_and_prevents_cycles(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            ajar_home = base / "ajar_home"
+            target = base / "repo"
+            _git_init_repo(
+                target,
+                {
+                    "src/entry.c": "int entry_fn(void) { return 0; }\n",
+                    "src/sink.c": "int sink_exec(void) { return 0; }\n",
+                },
+            )
+            with mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}):
+                init_run_workspace(
+                    target=str(target),
+                    target_mode="source",
+                    workspace_mode="in_place",
+                    run_id="run-b4-perc",
+                    ajar_home=ajar_home,
+                )
+                conn = open_run_db("run-b4-perc", ajar_home=ajar_home)
+                try:
+                    s1 = add_surface(conn, name="entry", kind="cli", locus="src/entry.c:1", priority="high")
+                    s2 = add_surface(
+                        conn,
+                        name="privileged-sink",
+                        kind="cli",
+                        locus="src/sink.c:1",
+                        priority="critical",
+                        requires_tags=["cap:stage1_token"],
+                    )
+                    jwl = add_crown_jewel(
+                        conn,
+                        name="Terminal exec",
+                        locus="src/sink.c:1",
+                        impact_class="rce",
+                        symbols=["sink:rce"],
+                    )
+
+                    f1 = self._record_confirmed_finding(
+                        conn,
+                        surface_id=str(s1["surface_id"]),
+                        title="Stage 1 token forge",
+                        locus="src/entry.c:1",
+                        provides_tags=["cap:stage1_token"],
+                    )
+                    f2 = self._record_confirmed_finding(
+                        conn,
+                        surface_id=str(s2["surface_id"]),
+                        title="Stage 2 sink trigger",
+                        locus="src/sink.c:1",
+                        provides_tags=["sink:rce"],
+                    )
+
+                    perc = detect_percolated_multi_hop_paths(conn, enqueue_tasks=False)
+                    self.assertEqual(len(perc["percolated_paths"]), 1)
+                    self.assertEqual(perc["percolated_paths"][0]["step_ids"], [f1, f2])
+                    self.assertEqual(perc["percolated_paths"][0]["jewel_id"], str(jwl["jewel_id"]))
+
+                    # Also verify cycle safety when a ready door wires a reverse edge f2 -> f1!
+                    park_open_door(
+                        conn,
+                        anchor_locus="src/entry.c:1",
+                        missing_link_summary="Cycle test reverse door",
+                        jewel_id=str(jwl["jewel_id"]),
+                        held_ids=[f2],
+                        wanted_tags=["cap:stage1_token"],
+                        spawn_hunters=False,
+                    )
+                    perc_cyclic = detect_percolated_multi_hop_paths(conn, enqueue_tasks=False)
+                    self.assertEqual(len(perc_cyclic["percolated_paths"]), 1)
+                    self.assertEqual(len(set(perc_cyclic["percolated_paths"][0]["step_ids"])), 2)
+                finally:
+                    conn.close()
+
+    def test_swarm_packet_excludes_active_dispatched_items_across_parallel_dispatches(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            ajar_home = base / "ajar_home"
+            target = base / "repo"
+            _git_init_repo(target, {"src/app.py": "def run():\n    return 0\n"})
+            with mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}):
+                init_run_workspace(
+                    target=str(target),
+                    target_mode="source",
+                    workspace_mode="in_place",
+                    run_id="run-b4-swarm",
+                    ajar_home=ajar_home,
+                )
+                conn = open_run_db("run-b4-swarm", ajar_home=ajar_home)
+                try:
+                    surf = add_surface(conn, name="api", kind="http", locus="src/app.py:1", priority="high")
+                    sid = str(surf["surface_id"])
+                    cids: list[str] = []
+                    for i in range(4):
+                        c = propose_claim(
+                            conn,
+                            worker_id="w-inv",
+                            title=f"Boundary bug {i}",
+                            locus=f"src/app.py:{i + 1}",
+                            mechanism=f"Missing check #{i} allows bypass",
+                            falsification_prediction="Guard rejects request",
+                            falsification_test="Call endpoint",
+                            surface_id=sid,
+                        )
+                        cids.append(str(c["claim_id"]))
+
+                    t_inv = add_task(
+                        conn,
+                        kind="investigate",
+                        title="Audit remaining cone",
+                        surface_id=sid,
+                        locus="src/app.py:1",
+                    )
+
+                    # Two parallel falsify dispatches of limit=2 must receive disjoint item sets!
+                    pkt1 = build_swarm_packet(conn, stage="falsify", limit=2, worker_id="w-f1")
+                    pkt2 = build_swarm_packet(conn, stage="falsify", limit=2, worker_id="w-f2")
+                    self.assertEqual(len(pkt1["item_ids"]), 2)
+                    self.assertEqual(len(pkt2["item_ids"]), 2)
+                    self.assertTrue(set(pkt1["item_ids"]).isdisjoint(set(pkt2["item_ids"])))
+                    self.assertEqual(set(pkt1["item_ids"]) | set(pkt2["item_ids"]), set(cids))
+
+                    # Third parallel falsify dispatch must fail cleanly (0 remaining undispatched items).
+                    with self.assertRaises(AjarError):
+                        build_swarm_packet(conn, stage="falsify", limit=2, worker_id="w-f3")
+
+                    # Cross-stage `portfolio` also excludes actively dispatched claims and picks the undispatched task!
+                    pkt_port = build_swarm_packet(conn, stage="portfolio", limit=4, worker_id="w-port")
+                    self.assertEqual(pkt_port["item_ids"], [str(t_inv["task_id"])])
+
+                    # Completing dispatch 1 releases its items so they can be dispatched again if still open.
+                    complete_swarm_dispatch(conn, target=str(pkt1["dispatch_id"]), notes="done")
+                    pkt_re = build_swarm_packet(conn, stage="falsify", limit=2, worker_id="w-f4")
+                    self.assertEqual(set(pkt_re["item_ids"]), set(pkt1["item_ids"]))
+                finally:
+                    conn.close()
+
+    def test_precondition_realism_defaults_to_one_step_ignoring_shell_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            ajar_home = base / "ajar_home"
+            target = base / "repo"
+            _git_init_repo(target, {"src/sink.c": "int sink(void) { return 0; }\n"})
+            with mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}):
+                init_run_workspace(
+                    target=str(target),
+                    target_mode="source",
+                    workspace_mode="in_place",
+                    run_id="run-b4-realism",
+                    ajar_home=ajar_home,
+                )
+                conn = open_run_db("run-b4-realism", ajar_home=ajar_home)
+                try:
+                    jwl = add_crown_jewel(
+                        conn,
+                        name="Single-step RCE",
+                        locus="src/sink.c:1",
+                        impact_class="rce",
+                        max_interaction_steps=1,
+                    )
+                    # Multiple shell fixture/verification helpers joined by `&&` and `;` must NOT inflate step count!
+                    res_default = evaluate_precondition_realism(
+                        conn,
+                        poc_cmd="python3 gen_fixture.py && ./target_bin --input fixture.dat && test -f pwned; grep -q OK pwned",
+                        control_cmd="./target_bin --input benign.dat",
+                        severity="critical",
+                        target_locus="src/sink.c:1",
+                        explicit_jewel_id=str(jwl["jewel_id"]),
+                    )
+                    self.assertEqual(res_default["interaction_steps"], 1)
+                    self.assertEqual(res_default["realism_tier"], "crown_jewel")
+
+                    # Explicit `--declared-steps 3` still records 3 steps and downgrades to `stepping_stone`.
+                    res_explicit = evaluate_precondition_realism(
+                        conn,
+                        poc_cmd="./target_bin --input fixture.dat",
+                        control_cmd="./target_bin --input benign.dat",
+                        severity="critical",
+                        declared_steps=3,
+                        target_locus="src/sink.c:1",
+                        explicit_jewel_id=str(jwl["jewel_id"]),
+                    )
+                    self.assertEqual(res_explicit["interaction_steps"], 3)
+                    self.assertEqual(res_explicit["realism_tier"], "stepping_stone")
+
+                    # Delusional self-override flags remain blocked.
+                    with self.assertRaises(AjarError) as ctx:
+                        evaluate_precondition_realism(
+                            conn,
+                            poc_cmd="git -c core.sshCommand=sh status",
+                            control_cmd="git status",
+                        )
+                    self.assertEqual(ctx.exception.exit_code, EXIT_GATE_BLOCKED)
+                finally:
+                    conn.close()
 
 
 if __name__ == "__main__":

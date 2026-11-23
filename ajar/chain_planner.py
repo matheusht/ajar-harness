@@ -1017,16 +1017,9 @@ def evaluate_precondition_realism(
             EXIT_GATE_BLOCKED,
         )
 
-    # Estimate interaction steps when not explicitly provided (count `;` / `&&` non-build invocations as upper bound hint).
-    if declared_steps is not None:
-        eff_steps = max(1, int(declared_steps))
-    else:
-        segments = [
-            seg.strip()
-            for seg in re.split(r"(?:&&|;|\|\|)", poc_cmd or "")
-            if seg.strip() and not re.match(r"^(?:cd|mkdir|rm|cp|mv|cat|printf|echo|export|make|cargo\s+build|cc|gcc|clang|true)\b", seg.strip())
-        ]
-        eff_steps = max(1, len(segments)) if segments else 1
+    # Default to 1 victim interaction step unless `--declared-steps` is explicitly specified;
+    # shell `&&` / `;` fixture-setup or assertion helpers in `poc_cmd` are not victim steps.
+    eff_steps = max(1, int(declared_steps)) if declared_steps is not None else 1
 
     nondefault_cfg = bool((config_gate or "").strip())
     visible_err = bool(VISIBLE_ERROR_NOISE_RE.search(stderr or ""))
@@ -1200,19 +1193,28 @@ def detect_percolated_multi_hop_paths(
             "jewel_id": "",
         }
 
-    for f in conn.execute("SELECT * FROM findings ORDER BY created_at ASC").fetchall():
+    for f in conn.execute(
+        """
+        SELECT f.*, COALESCE(s.requires_tags_json, '[]') AS surface_requires_tags_json
+        FROM findings f
+        LEFT JOIN claims c ON f.claim_id = c.claim_id
+        LEFT JOIN surfaces s ON c.surface_id = s.surface_id
+        ORDER BY f.created_at ASC
+        """
+    ).fetchall():
         fid = str(f["finding_id"])
         prov = set(parse_tag_list(f["provides_tags_json"] if "provides_tags_json" in f.keys() else "[]"))
+        req = set(parse_tag_list(f["surface_requires_tags_json"] if "surface_requires_tags_json" in f.keys() else "[]"))
         nodes[fid] = {
             "id": fid,
             "kind": "finding",
             "locus": str(f["locus"]),
             "subsystem": infer_subsystem(str(f["locus"])),
             "provides": prov,
-            "requires": set(),
+            "requires": req,
             "guarded_by": "",
             "symbols": _extract_artifact_code_symbols(conn, locus=str(f["locus"]), text_blob=f"{f['title']} {f['root_cause']}"),
-            "is_source_root": True,
+            "is_source_root": len(req) == 0,
             "is_sink": False,
             "jewel_id": "",
         }
@@ -1267,7 +1269,7 @@ def detect_percolated_multi_hop_paths(
         u_file, u_line = _locus_file_and_line(u["locus"])
         for v in node_list:
             vid = v["id"]
-            if uid == vid or v["kind"] == "finding":
+            if uid == vid:
                 continue
             connected = False
             if u["provides"] and v["requires"] and (u["provides"] & v["requires"]):
@@ -1304,23 +1306,36 @@ def detect_percolated_multi_hop_paths(
                     out_adj[tail].append(jid)
                     in_adj[jid].append(tail)
 
-    # Forward BFS from all `source_roots` (`<= max_hops`).
+    # Forward BFS from all `source_roots` (`<= max_hops`), preserving multi-hop
+    # simple paths even when an intermediate node is also a `source_root` (e.g., `finding -> finding`).
     fwd_paths: dict[str, list[str]] = {}
-    q_fwd: deque[str] = deque()
+    sink_multi_paths: dict[str, list[str]] = {}
+    q_fwd: deque[tuple[str, list[str]]] = deque()
     for nid, nd in nodes.items():
         if nd["is_source_root"]:
             fwd_paths[nid] = [nid]
-            q_fwd.append(nid)
+            q_fwd.append((nid, [nid]))
     while q_fwd:
-        cur = q_fwd.popleft()
-        cur_path = fwd_paths[cur]
-        if len(cur_path) >= max_hops:
+        cur, cur_path = q_fwd.popleft()
+        if len(cur_path) >= max_hops + 1:
             continue
         for nxt in out_adj.get(cur, ()):
-            if nxt not in fwd_paths and nxt not in cur_path:
-                fwd_paths[nxt] = [*cur_path, nxt]
-                if not nodes[nxt]["is_sink"]:
-                    q_fwd.append(nxt)
+            if nxt in cur_path:
+                continue
+            new_path = [*cur_path, nxt]
+            if nodes[nxt]["is_sink"]:
+                if nxt not in fwd_paths:
+                    fwd_paths[nxt] = new_path
+                if len(cur_path) >= 2 and nxt not in sink_multi_paths:
+                    sink_multi_paths[nxt] = new_path
+                    fwd_paths[nxt] = new_path
+                continue
+            if len(cur_path) >= max_hops:
+                continue
+            prev_path = fwd_paths.get(nxt)
+            if prev_path is None or (len(prev_path) == 1 and len(new_path) >= 2):
+                fwd_paths[nxt] = new_path
+                q_fwd.append((nxt, new_path))
 
     # Backward BFS from all `is_sink` nodes (`<= max_hops`).
     bwd_paths: dict[str, list[str]] = {}
@@ -1342,9 +1357,11 @@ def detect_percolated_multi_hop_paths(
     percolated: list[dict[str, Any]] = []
     seen_step_tuples: set[tuple[str, ...]] = set()
     for sink_id, nd in nodes.items():
-        if not nd["is_sink"] or sink_id not in fwd_paths:
+        if not nd["is_sink"]:
             continue
-        full_chain = fwd_paths[sink_id]
+        full_chain = sink_multi_paths.get(sink_id) or fwd_paths.get(sink_id)
+        if not full_chain:
+            continue
         step_ids = [x for x in full_chain if not nodes[x]["is_sink"]]
         # Require at least 2 capability/finding/gadget steps with >= 1 invariant-breaking source/capability.
         if len(step_ids) >= 2 and tuple(step_ids) not in seen_step_tuples:

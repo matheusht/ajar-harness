@@ -60,10 +60,12 @@ from ajar.runner import run_autonomous_schedule
 from ajar.services import (
     advance_phase,
     build_commit_preimage,
+    build_worker_dispatch_brief,
     cast_lead_vote,
     close_run_early,
     export_run_economics,
     finish_run,
+    plan_swarm_wave,
     rank_leads,
     record_human_touch,
     record_spend_entry,
@@ -843,6 +845,29 @@ def cmd_swarm(args: argparse.Namespace) -> int:
     rid = resolve_run_id(args.run)
     conn = open_run_db(rid)
     try:
+        if args.swarm_cmd == "plan":
+            res = plan_swarm_wave(
+                conn,
+                max_workers=int(args.workers),
+                enqueue_missing=not bool(args.no_enqueue),
+                stall_window=int(args.stall_window),
+            )
+            _emit(res, True)
+            return EXIT_OK
+
+        if args.swarm_cmd == "brief":
+            res = build_worker_dispatch_brief(
+                conn,
+                task_id=str(args.task_id),
+                worker_id=str(args.worker if args.worker is not None else "w-1"),
+            )
+            if bool(getattr(args, "raw", False)) and not bool(getattr(args, "json", False)):
+                rendered = str(res["rendered_brief"])
+                print(rendered, end="" if rendered.endswith("\n") else "\n")
+            else:
+                _emit(res, True)
+            return EXIT_OK
+
         if args.swarm_cmd == "packet":
             raw_items = [s.strip() for s in (args.items or "").split(",") if s.strip()]
             res = build_swarm_packet(

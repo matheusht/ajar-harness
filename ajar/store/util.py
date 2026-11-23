@@ -355,6 +355,9 @@ def compute_task_salience(conn: sqlite3.Connection, task_row: sqlite3.Row | dict
     ):
         return max(96, existing_salience or 96)
 
+    if kind == "bridge" and ("[unicorn-bridge]" in summary or existing_salience >= 90):
+        return max(90, existing_salience or 90)
+
     priority = str(task_row["priority"] or "high") if "priority" in keys else "high"
     subsystem = str(task_row["subsystem"] or "") if "subsystem" in keys else ""
     locus = str(task_row["locus"] or "") if "locus" in keys else ""
@@ -362,6 +365,8 @@ def compute_task_salience(conn: sqlite3.Connection, task_row: sqlite3.Row | dict
     reopened_boost = int(task_row["reopened_boost"] or 0) if "reopened_boost" in keys else 0
 
     base_floor = KIND_SALIENCE_FLOORS.get(kind, 0)
+    if kind == "investigate" and "[stall-breaker]" in summary:
+        base_floor = max(base_floor, 74)
     score = max(PRIORITY_BASE_SALIENCE.get(priority, 60), base_floor) + reopened_boost
 
     # Subtract -3 per consecutive recent `dry` sibling in the same subsystem (forces subsystem pivot).

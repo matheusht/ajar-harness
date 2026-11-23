@@ -107,7 +107,12 @@ Do not map external HTTP/RPC routes alone. Enqueue `investigate` tasks across al
      --locus "<file:line>" \
      --priority high
    ```
-4. Export the deterministic `Platform` component and attack-flow graph when inspecting coverage:
+4. Plan a disjoint parallel Swarm wave (auto-breaking zero-yield discovery stalls on unvisited slices and auto-bridging 1-link Middle-Unicorn gaps) and emit compact (`<= 40`-line) Layer-0 worker briefs:
+   ```bash
+   ajar swarm plan [--workers <N>] [--no-enqueue] [--stall-window <K>]
+   ajar swarm brief <task_id> [--worker <worker_id>] [--raw]
+   ```
+5. Export the deterministic `Platform` component and attack-flow graph when inspecting coverage:
    ```bash
    ajar export-graph --output graph.json
    ```

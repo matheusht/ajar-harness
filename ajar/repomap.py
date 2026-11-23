@@ -831,3 +831,134 @@ def build_repomap(
         "symbols": included_symbols,
         "rendered": rendered,
     }
+
+
+def list_unvisited_slices(
+    conn: sqlite3.Connection,
+    *,
+    target_dir: pathlib.Path | None = None,
+    slice_cap: int = 15000,
+    limit: int = 25,
+    populate_if_empty: bool = False,
+) -> list[dict[str, Any]]:
+    """Return PageRank-ordered unvisited repository call slices (`coverage_spans` + closed `tasks` excluded)."""
+    tables = {
+        str(r[0])
+        for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    resolved_target = target_dir
+    target_mode = "source"
+    if resolved_target is None and "runs" in tables:
+        rrow = conn.execute("SELECT target_path, target_mode FROM runs LIMIT 1").fetchone()
+        if rrow is not None:
+            target_mode = str(rrow["target_mode"] or "source")
+            raw_tp = str(rrow["target_path"] or "").strip()
+            if raw_tp and target_mode == "source":
+                resolved_target = pathlib.Path(raw_tp)
+
+    sym_count = (
+        int(conn.execute("SELECT COUNT(*) AS c FROM repomap_symbols").fetchone()["c"])
+        if "repomap_symbols" in tables
+        else 0
+    )
+    if (
+        populate_if_empty
+        and sym_count == 0
+        and target_mode == "source"
+        and resolved_target is not None
+        and resolved_target.exists()
+    ):
+        build_repomap(conn, resolved_target, slice_cap=slice_cap, unvisited_only=True)
+        tables.update({"repomap_symbols", "repomap_edges"})
+
+    visited_files: set[str] = set()
+    if "coverage_spans" in tables:
+        for r in conn.execute("SELECT DISTINCT rel_path FROM coverage_spans").fetchall():
+            rp = str(r[0] or "").strip().lstrip("./")
+            if rp:
+                visited_files.add(rp)
+    if "tasks" in tables:
+        for r in conn.execute("SELECT locus FROM tasks WHERE status IN ('done', 'dry') AND locus != ''").fetchall():
+            rp = str(r[0] or "").split(":", 1)[0].strip().lstrip("./")
+            if rp:
+                visited_files.add(rp)
+
+    file_ranks: dict[str, float] = {}
+    file_locs: dict[str, int] = {}
+    symbols_by_file: dict[str, list[dict[str, Any]]] = {}
+    out_edges: dict[str, dict[str, float]] = {}
+
+    if "repomap_symbols" in tables:
+        for r in conn.execute(
+            "SELECT rel_path, name, kind, line_no, pagerank, signature FROM repomap_symbols ORDER BY rel_path ASC, line_no ASC"
+        ).fetchall():
+            rel = str(r["rel_path"] or "").strip().lstrip("./")
+            if not rel:
+                continue
+            pr = float(r["pagerank"] or 0.0)
+            if pr > file_ranks.get(rel, -1.0):
+                file_ranks[rel] = pr
+            lno = int(r["line_no"] or 1)
+            if lno > file_locs.get(rel, 0):
+                file_locs[rel] = lno
+            symbols_by_file.setdefault(rel, []).append(
+                {
+                    "rel_path": rel,
+                    "name": str(r["name"]),
+                    "kind": str(r["kind"]),
+                    "line_no": lno,
+                    "signature": str(r["signature"] or ""),
+                }
+            )
+    if "repomap_edges" in tables:
+        for r in conn.execute("SELECT src_file, dst_file, weight FROM repomap_edges").fetchall():
+            sf = str(r["src_file"] or "").strip().lstrip("./")
+            df = str(r["dst_file"] or "").strip().lstrip("./")
+            if sf and df and sf != df:
+                out_edges.setdefault(sf, {})[df] = float(r["weight"] or 1.0)
+
+    if target_mode == "source" and resolved_target is not None and resolved_target.exists():
+        root = resolved_target.resolve()
+        base_root = root.parent if root.is_file() else root
+        for fpath in iter_source_files(root):
+            try:
+                raw = fpath.read_bytes()
+            except OSError:
+                continue
+            if b"\x00" in raw[:4096]:
+                continue
+            rel = str(fpath.relative_to(base_root))
+            file_locs[rel] = max(file_locs.get(rel, 0), max(1, len(raw.splitlines())))
+            file_ranks.setdefault(rel, 0.0)
+
+    unvisited_ranked = sorted(
+        (f for f in file_locs if f not in visited_files),
+        key=lambda u: (-file_ranks.get(u, 0.0), u),
+    )
+    if not unvisited_ranked:
+        return []
+
+    unvisited_set = set(unvisited_ranked)
+    unvisited_edges: dict[str, dict[str, float]] = {
+        u: {v: w for v, w in out_edges.get(u, {}).items() if v in unvisited_set}
+        for u in unvisited_ranked
+    }
+    raw_slices = _partition_call_slices(
+        unvisited_ranked,
+        file_locs,
+        unvisited_edges,
+        symbols_by_file,
+        slice_cap=slice_cap,
+    )
+    enriched: list[dict[str, Any]] = []
+    for slc in raw_slices[: max(1, int(limit))]:
+        seed_file = str(slc["seed_locus"]).split(":", 1)[0]
+        enriched.append(
+            {
+                **slc,
+                "file": seed_file,
+                "pagerank": round(float(file_ranks.get(seed_file, 0.0)), 6),
+            }
+        )
+    return enriched
+

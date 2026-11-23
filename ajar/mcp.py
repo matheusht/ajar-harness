@@ -31,11 +31,13 @@ from ajar.repomap import build_repomap
 from ajar.services import (
     add_anomaly,
     add_surface,
+    build_worker_dispatch_brief,
     cast_lead_vote,
     close_task_done,
     close_task_dry,
     falsify_claim,
     finish_run,
+    plan_swarm_wave,
     propose_claim,
     rank_leads,
     rescope_claim_service,
@@ -291,6 +293,30 @@ MCP_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "ajar_swarm_plan",
+        "description": "Plan a disjoint parallel Swarm wave (`<= max_workers`), breaking discovery stalls on unvisited slices and auto-bridging Middle-Unicorn gaps.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "max_workers": {"type": "integer", "default": 6},
+                "enqueue_missing": {"type": "boolean", "default": True},
+                "stall_window": {"type": "integer", "default": 6},
+            },
+        },
+    },
+    {
+        "name": "ajar_swarm_brief",
+        "description": "Compile a compact Layer-0 Worker Dispatch Brief (`<= 40` lines) with phase lock, minimal catalog neighbors, and `falsifier != proposer` enforcement.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string"},
+                "worker_id": {"type": "string", "default": "w-1"},
+            },
+            "required": ["task_id"],
+        },
+    },
+    {
         "name": "ajar_export_graph",
         "description": "Export deterministic `ajar-platform-graph/2` (or `v1`) component and attack-flow whiteboard JSON.",
         "inputSchema": {
@@ -496,6 +522,20 @@ def dispatch_mcp_tool(
                 sink=str(args["sink"]),
                 max_hops=int(args.get("max_hops", 3)),
                 limit=int(args.get("limit", 20)),
+            )
+        if tool_name == "ajar_swarm_plan":
+            return plan_swarm_wave(
+                conn,
+                max_workers=int(args.get("max_workers", args.get("workers", 6))),
+                enqueue_missing=bool(args.get("enqueue_missing", True)),
+                stall_window=int(args.get("stall_window", 6)),
+            )
+        if tool_name == "ajar_swarm_brief":
+            wid = str(args.get("worker_id") if "worker_id" in args else args.get("worker", "w-1"))
+            return build_worker_dispatch_brief(
+                conn,
+                task_id=str(args["task_id"]),
+                worker_id=wid,
             )
         if tool_name == "ajar_export_graph":
             return export_attack_flow_graph(

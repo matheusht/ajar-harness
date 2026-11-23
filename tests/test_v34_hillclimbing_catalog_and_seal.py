@@ -17,7 +17,8 @@ from unittest import mock
 from ajar import EXIT_GATE_BLOCKED, EXIT_OK
 from ajar.cli import main as cli_main
 from ajar.db import open_run_db
-from ajar.mcp import dispatch_mcp_tool
+from ajar.domain import AjarError
+from ajar.mcp import MCP_TOOLS, dispatch_mcp_tool
 from ajar.store import immediate_tx
 
 
@@ -891,6 +892,501 @@ class TestV34HillClimbingCatalogAndSeal(unittest.TestCase):
         self.assertLessEqual(v34_wasted_churn, trials * 2)
         self.assertGreater(v33_wasted_churn, v34_wasted_churn * 2)
 
+    def test_swarm_plan_disjoint_wave_selection_and_hunt_phase_patch_lock(self) -> None:
+        _run_cli(
+            [
+                "init",
+                str(self.target),
+                "--run-id",
+                "run-v34-wave",
+                "--phase",
+                "hunt",
+                "--json",
+            ],
+            self.ajar_home,
+        )
+        # Propose a claim by `w-prop` so `swarm plan` schedules/annotates `falsify` with `must_differ_from_worker`
+        _, c_prop = _run_cli(
+            [
+                "claim",
+                "propose",
+                "--run",
+                "run-v34-wave",
+                "--worker",
+                "w-prop",
+                "--title",
+                "Entry bundle hook bypass",
+                "--locus",
+                "src/entry.py:4",
+                "--mechanism",
+                "apply_bundle forwards unvalidated mode into load_workspace_hooks",
+                "--falsification-prediction",
+                "Caller sanitizes mode prior to apply_bundle",
+                "--falsification-test",
+                "python3 src/entry.py benign",
+            ],
+            self.ajar_home,
+        )
+        cid = str(c_prop["claim_id"])
+
+        # Add colliding tasks on `src/entry.py`, distinct task on `src/loader.py`, a `patch` task (must be excluded in `hunt`),
+        # two `bridge` tasks sharing the same `door_id` (only 1 allowed), and two `chain` tasks on `src/sink.py` (`chain` exempt).
+        _, t_inv_collide = _run_cli(
+            [
+                "task",
+                "add",
+                "--run",
+                "run-v34-wave",
+                "--kind",
+                "investigate",
+                "--title",
+                "Overlapping investigate on src/entry.py",
+                "--locus",
+                "src/entry.py:9",
+                "--priority",
+                "high",
+            ],
+            self.ajar_home,
+        )
+        _, t_inv_loader = _run_cli(
+            [
+                "task",
+                "add",
+                "--run",
+                "run-v34-wave",
+                "--kind",
+                "investigate",
+                "--title",
+                "Disjoint investigate on src/loader.py",
+                "--locus",
+                "src/loader.py:2",
+                "--priority",
+                "high",
+            ],
+            self.ajar_home,
+        )
+        _, t_patch = _run_cli(
+            [
+                "task",
+                "add",
+                "--run",
+                "run-v34-wave",
+                "--kind",
+                "patch",
+                "--title",
+                "Premature patch during hunt phase",
+                "--locus",
+                "src/unvisited_peer.py:2",
+                "--priority",
+                "critical",
+            ],
+            self.ajar_home,
+        )
+        _, door_out = _run_cli(
+            [
+                "door",
+                "park",
+                "--run",
+                "run-v34-wave",
+                "--anchor-locus",
+                "src/sink.py:3",
+                "--blocker-locus",
+                "src/unvisited_peer.py:2",
+                "--missing",
+                "Upstream caller passing untrusted payload",
+                "--no-spawn-hunters",
+            ],
+            self.ajar_home,
+        )
+        did = str(door_out["door_id"])
+
+        conn = open_run_db("run-v34-wave", ajar_home=self.ajar_home)
+        try:
+            with immediate_tx(conn):
+                for idx, bloc in enumerate(("src/unvisited_peer.py:2", "src/sink.py:2"), start=1):
+                    conn.execute(
+                        """
+                        INSERT INTO tasks(
+                            task_id, kind, direction, title, subsystem, locus, priority,
+                            status, salience_score, door_id, summary, created_at, updated_at
+                        ) VALUES (?, 'bridge', 'inside_out', ?, 'src', ?, 'high', 'open', 80, ?, 'Door bridge', '2026-11-23T00:00:00Z', '2026-11-23T00:00:00Z')
+                        """,
+                        (f"task-door-b{idx}", f"Door bridge {idx}", bloc, did),
+                    )
+                for idx in (1, 2):
+                    conn.execute(
+                        """
+                        INSERT INTO tasks(
+                            task_id, kind, direction, title, subsystem, locus, priority,
+                            status, salience_score, summary, created_at, updated_at
+                        ) VALUES (?, 'chain', 'outside_in', ?, 'src', 'src/sink.py:2', 'critical', 'open', 97, 'Percolated multi-hop path', '2026-11-23T00:00:00Z', '2026-11-23T00:00:00Z')
+                        """,
+                        (f"task-chain-{idx}", f"Compose chain {idx}"),
+                    )
+        finally:
+            conn.close()
+
+        rc_pl, plan = _run_cli(["swarm", "plan", "--workers", "6", "--run", "run-v34-wave"], self.ajar_home)
+        self.assertEqual(rc_pl, EXIT_OK, plan)
+        self.assertEqual(plan["campaign_phase"], "hunt")
+        self.assertIn(t_patch["task_id"], list(plan["excluded_phase_tasks"]))  # type: ignore[arg-type]
+
+        wave = list(plan["wave"])  # type: ignore[arg-type]
+        wave_ids = [str(w["task_id"]) for w in wave]
+        self.assertNotIn(str(t_patch["task_id"]), wave_ids)
+        # Both `chain` tasks on `src/sink.py` are allowed in the same wave (`kind == 'chain'` exemption)
+        self.assertIn("task-chain-1", wave_ids)
+        self.assertIn("task-chain-2", wave_ids)
+        # `falsify` on `src/entry.py` wins over `t_inv_collide` on `src/entry.py`
+        self.assertNotIn(str(t_inv_collide["task_id"]), wave_ids)
+        self.assertIn(str(t_inv_loader["task_id"]), wave_ids)
+
+        non_chain = [w for w in wave if w["kind"] != "chain"]
+        non_chain_files = [w["primary_file"] for w in non_chain if w["primary_file"]]
+        self.assertEqual(len(non_chain_files), len(set(non_chain_files)))
+        non_chain_doors = [w["door_id"] for w in non_chain if w["door_id"]]
+        self.assertEqual(len(non_chain_doors), len(set(non_chain_doors)))
+
+        falsify_items = [w for w in wave if w["kind"] == "falsify"]
+        self.assertEqual(len(falsify_items), 1)
+        self.assertEqual(falsify_items[0]["claim_id"], cid)
+        self.assertEqual(falsify_items[0]["proposer_worker_id"], "w-prop")
+        self.assertEqual(falsify_items[0]["must_differ_from_worker"], "w-prop")
+
+    def test_discovery_stall_circuit_breaker_injects_unvisited_slices(self) -> None:
+        _run_cli(
+            [
+                "init",
+                str(self.target),
+                "--run-id",
+                "run-v34-stall",
+                "--stopping",
+                "crown-jewel",
+                "--phase",
+                "hunt",
+                "--json",
+            ],
+            self.ajar_home,
+        )
+        _, jw = _run_cli(
+            [
+                "door",
+                "jewel-add",
+                "--run",
+                "run-v34-stall",
+                "--name",
+                "Exec Sink",
+                "--locus",
+                "src/sink.py:2",
+                "--impact-class",
+                "rce",
+                "--symbols",
+                "execute_hook",
+            ],
+            self.ajar_home,
+        )
+        self.assertTrue(str(jw["jewel_id"]))
+        _run_cli(["map", "--run", "run-v34-stall", "--json"], self.ajar_home)
+
+        # Close 4 tasks dry on `src/entry.py` -> zero new claims/primitives while `loader.py` & `unvisited_peer.py` remain unvisited!
+        for idx in range(4):
+            _, t_add = _run_cli(
+                [
+                    "task",
+                    "add",
+                    "--run",
+                    "run-v34-stall",
+                    "--kind",
+                    "investigate",
+                    "--title",
+                    f"Dry entry pass {idx}",
+                    "--locus",
+                    "src/entry.py:3",
+                ],
+                self.ajar_home,
+            )
+            rc_d, _ = _run_cli(
+                [
+                    "task",
+                    "dry",
+                    str(t_add["task_id"]),
+                    "--worker",
+                    "w-1",
+                    "--locus",
+                    "src/entry.py:4",
+                    "--control",
+                    "Benign branch returns 0 immediately before reaching loader",
+                    "--run",
+                    "run-v34-stall",
+                ],
+                self.ajar_home,
+            )
+            self.assertEqual(rc_d, EXIT_OK)
+
+        # `--no-enqueue` detects `discovery_stalled=True` without inserting tasks
+        rc_ro, ro_plan = _run_cli(
+            ["swarm", "plan", "--stall-window", "4", "--no-enqueue", "--run", "run-v34-stall"],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_ro, EXIT_OK, ro_plan)
+        self.assertTrue(ro_plan["discovery_stalled"])
+        self.assertEqual(ro_plan["spawned_stall_tasks"], [])
+        self.assertEqual(ro_plan["wave_size"], 0)
+
+        # Enqueueing mode auto-injects 2 fresh `investigate` tasks targeting unvisited backward-sink slices!
+        rc_enq, enq_plan = _run_cli(
+            ["swarm", "plan", "--stall-window", "4", "--workers", "4", "--run", "run-v34-stall"],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_enq, EXIT_OK, enq_plan)
+        self.assertTrue(enq_plan["discovery_stalled"])
+        spawned_stall = list(enq_plan["spawned_stall_tasks"])  # type: ignore[arg-type]
+        self.assertEqual(len(spawned_stall), 2)
+        wave_files = {str(w["primary_file"]) for w in enq_plan["wave"]}  # type: ignore[attr-defined]
+        self.assertNotIn("src/entry.py", wave_files)
+        self.assertTrue(wave_files.issubset({"src/loader.py", "src/unvisited_peer.py", "src/sink.py"}))
+
+        # Idempotent re-invocation via MCP `ajar_swarm_plan` does not spam duplicate stall tasks
+        mcp_plan = dispatch_mcp_tool(
+            "run-v34-stall",
+            "ajar_swarm_plan",
+            {"max_workers": 4, "stall_window": 4},
+            ajar_home=self.ajar_home,
+        )
+        self.assertEqual(mcp_plan["spawned_stall_tasks"], [])
+        self.assertEqual(mcp_plan["wave_size"], 2)
+
+    def test_middle_unicorn_auto_bridge_enqueues_high_salience_bridge_tasks(self) -> None:
+        _run_cli(
+            [
+                "init",
+                str(self.target),
+                "--run-id",
+                "run-v34-unicorn",
+                "--stopping",
+                "crown-jewel",
+                "--phase",
+                "hunt",
+                "--json",
+            ],
+            self.ajar_home,
+        )
+        _run_cli(
+            [
+                "door",
+                "jewel-add",
+                "--run",
+                "run-v34-unicorn",
+                "--name",
+                "Hook Exec Sink",
+                "--locus",
+                "src/sink.py:2",
+                "--impact-class",
+                "rce",
+                "--symbols",
+                "execute_hook,exec:hook",
+            ],
+            self.ajar_home,
+        )
+        # Forward source root emits `fs:bundle_stage`; backward trust_gadget into jewel requires `fs:hook_write` -> 1-link Unicorn Gap!
+        _run_cli(
+            [
+                "primitive",
+                "add",
+                "--run",
+                "run-v34-unicorn",
+                "--locus",
+                "src/entry.py:4",
+                "--kind",
+                "staging_write",
+                "--role",
+                "capability",
+                "--preconditions",
+                "untrusted bundle",
+                "--postconditions",
+                "stages bundle file",
+                "--provides-tags",
+                "fs:bundle_stage",
+                "--evidence-cmd",
+                "true",
+            ],
+            self.ajar_home,
+        )
+        _run_cli(
+            [
+                "primitive",
+                "add",
+                "--run",
+                "run-v34-unicorn",
+                "--locus",
+                "src/loader.py:2",
+                "--kind",
+                "hook_loader",
+                "--role",
+                "trust_gadget",
+                "--trusted-invariant",
+                "hook path is validated",
+                "--symbols",
+                "execute_hook",
+                "--preconditions",
+                "fs:hook_write",
+                "--postconditions",
+                "calls execute_hook",
+                "--requires-tags",
+                "fs:hook_write",
+                "--provides-tags",
+                "exec:hook",
+                "--evidence-cmd",
+                "true",
+            ],
+            self.ajar_home,
+        )
+
+        rc_pl, plan = _run_cli(["swarm", "plan", "--workers", "4", "--run", "run-v34-unicorn"], self.ajar_home)
+        self.assertEqual(rc_pl, EXIT_OK, plan)
+        self.assertGreaterEqual(int(plan["unicorn_gap_count"]), 1)  # type: ignore[arg-type]
+        spawned_bridges = list(plan["spawned_unicorn_bridge_tasks"])  # type: ignore[arg-type]
+        self.assertEqual(len(spawned_bridges), 1)
+
+        bridge_wave = [w for w in plan["wave"] if w["task_id"] in spawned_bridges]  # type: ignore[attr-defined]
+        self.assertEqual(len(bridge_wave), 1)
+        self.assertEqual(bridge_wave[0]["kind"], "bridge")
+        self.assertEqual(int(bridge_wave[0]["salience_score"]), 90)
+
+        # Calling `swarm plan` again does not duplicate the open unicorn `bridge` task
+        _, plan_again = _run_cli(["swarm", "plan", "--workers", "4", "--run", "run-v34-unicorn"], self.ajar_home)
+        self.assertEqual(plan_again["spawned_unicorn_bridge_tasks"], [])
+
+    def test_worker_dispatch_brief_compact_budget_falsifier_block_and_mcp_parity(self) -> None:
+        tool_names = {t["name"] for t in MCP_TOOLS}
+        self.assertIn("ajar_swarm_plan", tool_names)
+        self.assertIn("ajar_swarm_brief", tool_names)
+
+        _run_cli(
+            [
+                "init",
+                str(self.target),
+                "--run-id",
+                "run-v34-brief",
+                "--phase",
+                "hunt",
+                "--json",
+            ],
+            self.ajar_home,
+        )
+        _run_cli(
+            [
+                "steer",
+                "add",
+                "--run",
+                "run-v34-brief",
+                "--scope",
+                "global",
+                "--rule",
+                "Only unprivileged bundle inputs are in scope; local admin flags are out of scope.",
+            ],
+            self.ajar_home,
+        )
+        # Populate 4 catalog items so `catalog_neighbors` verifies its `<= 3` cap
+        for idx in range(4):
+            _run_cli(
+                [
+                    "primitive",
+                    "add",
+                    "--run",
+                    "run-v34-brief",
+                    "--locus",
+                    f"src/loader.py:{idx + 1}",
+                    "--kind",
+                    f"gadget_{idx}",
+                    "--role",
+                    "trust_gadget",
+                    "--preconditions",
+                    "input",
+                    "--postconditions",
+                    "state",
+                    "--provides-tags",
+                    f"cap:g{idx}",
+                    "--evidence-cmd",
+                    "true",
+                ],
+                self.ajar_home,
+            )
+
+        _, clm = _run_cli(
+            [
+                "claim",
+                "propose",
+                "--run",
+                "run-v34-brief",
+                "--worker",
+                "w-proposer",
+                "--title",
+                "apply_bundle reaches execute_hook without path guard",
+                "--locus",
+                "src/entry.py:4",
+                "--mechanism",
+                "apply_bundle passes untrusted payload straight into load_workspace_hooks",
+                "--falsification-prediction",
+                "Upstream check rejects non-benign payload",
+                "--falsification-test",
+                "python3 src/entry.py benign",
+            ],
+            self.ajar_home,
+        )
+        self.assertTrue(str(clm["claim_id"]))
+
+        _, plan = _run_cli(["swarm", "plan", "--run", "run-v34-brief"], self.ajar_home)
+        fal_tasks = [w for w in plan["wave"] if w["kind"] == "falsify"]  # type: ignore[attr-defined]
+        self.assertEqual(len(fal_tasks), 1)
+        fal_tid = str(fal_tasks[0]["task_id"])
+
+        # 1. `falsifier == proposer` MUST hard-block with EXIT_GATE_BLOCKED on CLI and AjarError on MCP!
+        for bad_w in ("w-proposer", " w-proposer "):
+            rc_blk, _ = _run_cli(
+                ["swarm", "brief", fal_tid, "--worker", bad_w, "--run", "run-v34-brief"],
+                self.ajar_home,
+            )
+            self.assertEqual(rc_blk, EXIT_GATE_BLOCKED)
+            with self.assertRaises(AjarError) as ctx:
+                dispatch_mcp_tool(
+                    "run-v34-brief",
+                    "ajar_swarm_brief",
+                    {"task_id": fal_tid, "worker_id": bad_w},
+                    ajar_home=self.ajar_home,
+                )
+            self.assertEqual(ctx.exception.exit_code, EXIT_GATE_BLOCKED)
+
+        # 2. Independent worker (`w-skeptic`) succeeds on both CLI (JSON + `--raw`) and MCP with `< 40` lines!
+        rc_ok, brief_cli = _run_cli(
+            ["swarm", "brief", fal_tid, "--worker", "w-skeptic", "--run", "run-v34-brief"],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_ok, EXIT_OK, brief_cli)
+        brief_mcp = dispatch_mcp_tool(
+            "run-v34-brief",
+            "ajar_swarm_brief",
+            {"task_id": fal_tid, "worker_id": "w-skeptic"},
+            ajar_home=self.ajar_home,
+        )
+        self.assertEqual(brief_cli, brief_mcp)
+        self.assertEqual(brief_cli["skill_path"], "skills/ajar-falsify/SKILL.md")
+        self.assertEqual(brief_cli["campaign_phase"], "hunt")
+        self.assertIn("PHASE LOCK (hunt):", str(brief_cli["phase_guardrail"]))
+        self.assertLessEqual(len(list(brief_cli["catalog_neighbors"])), 3)  # type: ignore[arg-type]
+        self.assertTrue(str(brief_cli["kill_rule"]))
+
+        rendered = str(brief_cli["rendered_brief"])
+        self.assertLess(len(rendered.splitlines()), 40)
+
+        rc_raw, raw_out = _run_cli(
+            ["swarm", "brief", fal_tid, "--worker", "w-skeptic", "--raw", "--run", "run-v34-brief"],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_raw, EXIT_OK, raw_out)
+        self.assertEqual(str(raw_out["raw"]).strip(), rendered.strip())
+
 
 if __name__ == "__main__":
     unittest.main()
+

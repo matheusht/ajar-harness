@@ -824,12 +824,42 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--json", action="store_true", default=True)
     p_run.set_defaults(func=cmd_run)
 
-    # swarm (Stage-split stripped packet dispatcher + wire-profile fallback ladder)
+    # swarm (Layer-0 wave planner, minimal worker dispatch briefs, stripped packets, & fallback ladder)
     p_swm = sub.add_parser(
         "swarm",
-        help="Generate stripped Swarm Worker packets and step down `--wire-profile` fallback tiers.",
+        help="Plan disjoint Swarm waves, compile Layer-0 worker dispatch briefs, and manage `--wire-profile` packets.",
     )
     swm_sub = p_swm.add_subparsers(dest="swarm_cmd", required=True)
+
+    psw_pl = swm_sub.add_parser(
+        "plan",
+        help="Plan a disjoint parallel Swarm wave, trigger the discovery-stall breaker, and auto-bridge Middle-Unicorn gaps.",
+    )
+    psw_pl.add_argument("--workers", type=int, default=6, help="Maximum disjoint workers in the wave (default: 6).")
+    psw_pl.add_argument(
+        "--no-enqueue",
+        action="store_true",
+        help="Inspect wave selection, stall status, and unicorn gaps without auto-enqueuing missing tasks.",
+    )
+    psw_pl.add_argument(
+        "--stall-window",
+        type=int,
+        default=6,
+        help="Number of terminal (`done`/`dry`) zero-yield tasks before triggering the stall circuit breaker (default: 6).",
+    )
+    psw_pl.add_argument("--json", action="store_true", default=True)
+    psw_pl.add_argument("--run")
+
+    psw_br = swm_sub.add_parser(
+        "brief",
+        help="Compile a compact Layer-0 Worker Dispatch Brief (`<= 40` lines) with phase lock and `falsifier != proposer` gate.",
+    )
+    psw_br.add_argument("task_id", help="Task ID (`task-...`) to compile the dispatch brief for.")
+    psw_br.add_argument("--worker", default="w-1", help="Target worker ID (enforces `worker != proposer` on `falsify` tasks).")
+    psw_br.add_argument("--raw", action="store_true", help="Print rendered Markdown brief (`<= 40` lines) instead of JSON.")
+    psw_br.add_argument("--json", action="store_true", help="Emit structured JSON brief payload.")
+    psw_br.add_argument("--run")
+
     psw_p = swm_sub.add_parser("packet", help="Emit a stripped Just-Enough-Context worker assignment packet.")
     psw_p.add_argument("--stage", choices=VALID_SWARM_STAGES, required=True)
     psw_p.add_argument(

@@ -9,13 +9,15 @@ Use this skill to execute leased `investigate` or `instrument` tasks, persist ve
 
 ## 1. Lease and Hydrate Prefix-Stable Context
 
-1. Lease the highest-salience open task and recover expired worker leases:
+1. Lease the highest-salience open task (or select a disjoint parallel wave via the Layer-0 Swarm planner):
    ```bash
+   ajar swarm plan [--workers <N>] [--no-enqueue] [--stall-window <K>]
    ajar task lease --worker <worker_id> --kind investigate --recover
    ```
-2. Load the prefix-stable `< 4 KB` certified context frame:
+2. Load the prefix-stable `< 4 KB` certified context frame or compile a minimal (`<= 40`-line) Layer-0 Worker Dispatch Brief:
    ```bash
    ajar context --task <task_id>
+   ajar swarm brief <task_id> --worker <worker_id> [--raw]
    ```
 3. Follow the task's `skill_mode`, `direction`, `Active Workspace Steers`, and `Active Epistemic Hooks`:
    - **Workspace Steers:** Obey all `Active Workspace Steers` listed in the `Certified Run Prefix`. Never pursue out-of-scope paths barred by a Steer.

@@ -23,9 +23,10 @@ from ajar.chain_planner import (
     park_open_door,
 )
 from ajar.cli import main as cli_main
-from ajar.db import open_run_db
+from ajar.db import add_steer, add_threat_assumption, open_run_db, upsert_threat_model
 from ajar.diff_sync import sync_pr_differential_state
 from ajar.domain.models import AjarError
+from ajar.graph import SCOPE_NOTICE, export_attack_flow_graph
 from ajar.redact import scrubbed_subprocess_env
 from ajar.repomap import REPOMAP_EDGE_CAP, _extract_regex_symbols, build_repomap
 from ajar.repro_compose import (
@@ -43,8 +44,11 @@ from ajar.repro_source import (
     run_source_reproduction,
 )
 from ajar.services import (
+    add_anomaly,
+    add_primitive,
     add_surface,
     add_task,
+    close_task_dry,
     propose_claim,
     record_reproduction_outcome,
     survive_claim,
@@ -1127,6 +1131,388 @@ class TestFailureTelemetryB5(unittest.TestCase):
                 self.assertEqual(ft_pop["total_receipts"], 4)
                 self.assertEqual(ft_pop["timeout_count"], 2)
                 self.assertEqual(ft_pop["swarm_dispatches"]["fallback_total"], 2)
+
+
+class TestPlatformGraphV2(unittest.TestCase):
+    def _run_cli(self, argv: list[str]) -> tuple[int, dict[str, object]]:
+        out_buf = io.StringIO()
+        err_buf = io.StringIO()
+        with redirect_stdout(out_buf), redirect_stderr(err_buf):
+            rc = cli_main(argv)
+        raw = out_buf.getvalue().strip() or err_buf.getvalue().strip()
+        return rc, json.loads(raw)
+
+    def test_graph_v2_zero_dangling_edges_visibility_projections_snippets_and_v1_compat(self) -> None:
+        fake_tok = "ghp_" + ("1234567890" * 3) + "abcdef"
+        fake_cookie = "Cook" + "ie: session=secretvalue987654"
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            ajar_home = base / "ajar_home"
+            target = base / "demo-target"
+            _git_init_repo(
+                target,
+                {
+                    "src/entry.py": (
+                        "from src.guard import validate_request\n"
+                        "from src.sink import execute_payload\n\n"
+                        "def handle_request(req):\n"
+                        "    if validate_request(req):\n"
+                        "        return execute_payload(req)\n"
+                        "    return 0\n"
+                    ),
+                    "src/guard.py": (
+                        "def validate_request(req):\n"
+                        "    # Boundary guard checked on ingress\n"
+                        "    return bool(req and not req.startswith('..'))\n"
+                    ),
+                    "src/sink.py": (
+                        f"# fixture token comment {fake_tok}\n"
+                        "def execute_payload(req):\n"
+                        "    return len(req)\n"
+                    ),
+                },
+            )
+            fake_patch_path = base / "local_secret_fix.diff"
+            fake_patch_path.write_text("--- a/src/entry.py\n+++ b/src/entry.py\n", encoding="utf-8")
+
+            with mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}):
+                init_run_workspace(
+                    target=str(target),
+                    target_mode="source",
+                    workspace_mode="in_place",
+                    run_id="run-g2",
+                    ajar_home=ajar_home,
+                )
+                conn = open_run_db("run-g2", ajar_home=ajar_home)
+                try:
+                    build_repomap(conn, target)
+                    s1 = add_surface(conn, name="http-entry", kind="http", locus="src/entry.py:4", priority="critical")
+                    s2 = add_surface(conn, name="guard-check", kind="http", locus="src/guard.py:1", priority="high")
+                    sid1 = str(s1["surface_id"])
+                    sid2 = str(s2["surface_id"])
+
+                    # Dry verified guard on s2
+                    tdry = add_task(conn, kind="investigate", title="Audit guard", surface_id=sid2, locus="src/guard.py:1")
+                    conn.execute(
+                        "UPDATE tasks SET status = 'leased', worker_id = 'w-dry' WHERE task_id = ?",
+                        (str(tdry["task_id"]),),
+                    )
+                    close_task_dry(
+                        conn,
+                        task_id=str(tdry["task_id"]),
+                        worker_id="w-dry",
+                        locus="src/guard.py:3",
+                        control_reason="Prefix check blocks relative path traversal at src/guard.py:3.",
+                        target_dir=target,
+                    )
+
+                    # Guarded primitive (would dangle in v1!) + anomaly + steer + threat model
+                    prim = add_primitive(
+                        conn,
+                        locus="src/sink.py:2",
+                        kind="sink_reach",
+                        role="trust_gadget",
+                        preconditions="requires cap:bypass_guard",
+                        postconditions="reaches execute_payload",
+                        evidence_cmd=f"curl -H '{fake_cookie}' http://127.0.0.1/",
+                        surface_id=sid1,
+                        guarded_by_locus="src/guard.py:3",
+                        guard_assumption="validate_request blocks traversal",
+                        requires_tags=["cap:bypass_guard"],
+                    )
+                    pid = str(prim["primitive_id"])
+                    add_anomaly(
+                        conn,
+                        locus="src/entry.py:5",
+                        observation=f"Unexpected path accepted with {fake_tok}",
+                        surface_id=sid1,
+                    )
+                    add_steer(conn, rule_text=f"Ignore paths outside {target}/src", scope="global")
+                    upsert_threat_model(
+                        conn,
+                        principals=["unauthenticated_http"],
+                        assets=["code_execution"],
+                        summary="HTTP ingress boundary",
+                    )
+                    add_threat_assumption(
+                        conn,
+                        subsystem="src",
+                        assumption_text="validate_request cannot be bypassed",
+                        dependent_surface_id=sid1,
+                    )
+
+                    # Crown Jewel + Open Door
+                    jwl = add_crown_jewel(
+                        conn,
+                        name="Payload execution sink",
+                        locus="src/sink.py:2",
+                        impact_class="rce",
+                        symbols=["execute_payload"],
+                    )
+                    jid = str(jwl["jewel_id"])
+                    door = park_open_door(
+                        conn,
+                        anchor_locus="src/sink.py:2",
+                        blocker_locus="src/guard.py:3",
+                        missing_link_summary="Need bypass of validate_request",
+                        jewel_id=jid,
+                        held_ids=[pid],
+                        wanted_tags=["cap:bypass_guard"],
+                        spawn_hunters=False,
+                    )
+                    did = str(door["door_id"])
+
+                    # Confirmed finding (proposer != falsifier) + 9-arm patch verification + verified chain
+                    clm = propose_claim(
+                        conn,
+                        worker_id="w-prop",
+                        title="Guard bypass in handle_request",
+                        locus="src/entry.py:5",
+                        mechanism="handle_request accepts crafted prefix bypassing src/guard.py:3",
+                        falsification_prediction="validate_request rejects encoded prefix",
+                        falsification_test="Run handle_request('%2e%2e')",
+                        surface_id=sid1,
+                        severity="critical",
+                    )
+                    cid = str(clm["claim_id"])
+                    survive_claim(conn, claim_id=cid, worker_id="w-fals", notes="Confirmed bypassable")
+                    fnd_out = record_reproduction_outcome(
+                        conn,
+                        claim_id=cid,
+                        worker_id="w-repro",
+                        poc_cmd=f"python3 {target}/src/entry.py --token {fake_tok}",
+                        control_cmd=f"python3 {target}/src/entry.py --safe",
+                        build_cmd="true",
+                        micropatch_path=str(fake_patch_path),
+                        provides_tags=["cap:bypass_guard"],
+                        repro_result={
+                            "passed": True,
+                            "observation_hash": "obs-g2",
+                            "micropatch_diff": "--- a/src/entry.py\n+++ b/src/entry.py\n@@ -5 +5 @@\n-    if validate_request(req):\n+    if False:\n",
+                            "arm1_clean_poc": {"arm_passed": True, "exit_code": 1, "defect_hits": 1, "trials": 1, "stdout": f"leak {fake_tok}"},
+                            "arm2_clean_control": {"arm_passed": True, "exit_code": 0, "defect_hits": 0, "trials": 1},
+                            "arm3_patch_poc": {"arm_passed": True, "exit_code": 0, "defect_hits": 0, "trials": 1},
+                            "arm4_patch_control": {"arm_passed": True, "exit_code": 0, "defect_hits": 0, "trials": 1},
+                        },
+                    )
+                    fid = str(fnd_out["finding_id"])
+
+                    # Insert a passing 9-arm patch verification row
+                    conn.execute(
+                        """
+                        INSERT INTO patch_verifications(
+                            verification_id, finding_id, claim_id, patch_path, patch_diff,
+                            suite_cmd, variant_cmds_json, caller_audit, sibling_audit,
+                            arms_json, baseline_suite_json, arm7_caller_cmd, arm8_sibling_cmd,
+                            arm9_revert_poc_json, passed, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, '2026-11-22T00:00:00Z')
+                        """,
+                        (
+                            "pvf-g2-1",
+                            fid,
+                            cid,
+                            str(fake_patch_path),
+                            "--- a/src/entry.py\n+++ b/src/entry.py\n",
+                            "pytest -q",
+                            json.dumps(["v1", "v2", "v3"]),
+                            "All callers handle false return cleanly without crash.",
+                            "No sibling ingress routes bypass validate_request.",
+                            json.dumps(
+                                {
+                                    "arm1_clean_poc": {"arm_passed": True},
+                                    "arm5_full_suite": {"arm_passed": True},
+                                    "arm6_bypass_variants": {"arm_passed": True},
+                                    "arm7_caller_audit": {"arm_passed": True},
+                                    "arm8_sibling_audit": {"arm_passed": True},
+                                    "arm9_revert_poc": {"arm_passed": True},
+                                }
+                            ),
+                            json.dumps({"passed": True}),
+                            "",
+                            "",
+                            json.dumps({"arm_passed": True, "exit_code": 1}),
+                        ),
+                    )
+                    conn.execute("UPDATE claims SET remediation_state = 'verified_local' WHERE claim_id = ?", (cid,))
+
+                    # Insert a verified 2-step chain [fid, pid] + a second chain referencing a claim ID directly
+                    clm2 = propose_claim(
+                        conn,
+                        worker_id="w-prop",
+                        title="Unreproduced companion claim",
+                        locus="src/guard.py:2",
+                        mechanism="Secondary guard observation",
+                        falsification_prediction="Guard validates normalized path before execute_payload",
+                        falsification_test="Check guard.py",
+                        surface_id=sid2,
+                    )
+                    cid2 = str(clm2["claim_id"])
+                    conn.execute(
+                        """
+                        INSERT INTO chains(
+                            chain_id, title, severity, step_ids_json, e2e_poc_cmd, control_cmd,
+                            verified, evidence_json, slot_index, oracle_json, ablation_matrix_json,
+                            realism_tier, realism_json, jewel_id, door_id, created_at
+                        ) VALUES (?, ?, 'critical', ?, ?, ?, 1, ?, 0, '{}', ?, 'crown_jewel', ?, ?, ?, '2026-11-22T00:00:00Z')
+                        """,
+                        (
+                            "chn-g2-1",
+                            "Bypass guard into execute_payload Crown Jewel",
+                            json.dumps([fid, pid]),
+                            f"python3 {target}/src/entry.py --chain {fake_tok}",
+                            "python3 src/entry.py --safe",
+                            json.dumps({"reason": "Verified 2-step chain", "build_cmd": "true"}),
+                            json.dumps(
+                                [
+                                    {"step_id": fid, "ablated_via": "step_micropatch", "causally_required": True, "defect_still_fired": False},
+                                    {"step_id": pid, "ablated_via": "stage_context_env", "causally_required": True, "defect_still_fired": False},
+                                ]
+                            ),
+                            json.dumps({"realism_tier": "crown_jewel", "interaction_steps": 1}),
+                            jid,
+                            did,
+                        ),
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO chains(
+                            chain_id, title, severity, step_ids_json, e2e_poc_cmd, control_cmd,
+                            verified, evidence_json, slot_index, oracle_json, ablation_matrix_json,
+                            realism_tier, realism_json, jewel_id, door_id, created_at
+                        ) VALUES ('chn-g2-2', 'Claim step ref chain', 'high', ?, 'true', 'true', 0, '{}', 0, '{}', '[]', 'stepping_stone', '{}', '', '', '2026-11-22T00:01:00Z')
+                        """,
+                        (json.dumps([cid2, pid]),),
+                    )
+
+                    # 1. Default v2 (`internal_full`) with `--include-snippets --repo-slug acme/demo-target`
+                    g_int = export_attack_flow_graph(
+                        conn,
+                        schema="v2",
+                        visibility="internal_full",
+                        include_snippets=True,
+                        repo_slug="acme/demo-target",
+                    )
+                    self.assertEqual(g_int["schema"], "ajar-platform-graph/2")
+                    self.assertEqual(g_int["visibility"], "internal_full")
+                    self.assertEqual(g_int["run"]["repo_slug"], "acme/demo-target")
+                    self.assertEqual(g_int["run"]["target_path"], str(target))
+                    self.assertTrue(g_int["run"]["head_sha"])
+                    self.assertEqual(g_int["summary"]["dangling_edges"], 0)
+
+                    # Zero dangling edges invariant!
+                    node_ids = {n["id"] for n in g_int["nodes"]}
+                    for edge in g_int["edges"]:
+                        self.assertIn(edge["src"], node_ids, f"Dangling src: {edge}")
+                        self.assertIn(edge["dst"], node_ids, f"Dangling dst: {edge}")
+                        self.assertNotEqual(edge["edge_type"], "symbol_call")
+                        self.assertFalse(str(edge["src"]).startswith("file:"))
+                        self.assertFalse(str(edge["dst"]).startswith("file:"))
+
+                    # Concrete `guard_locus`, `crown_jewel`, `open_door` nodes & `chain_transition` edges
+                    self.assertTrue(any(n["id"] == "locus:src/guard.py:3" and n["node_type"] == "guard_locus" for n in g_int["nodes"]))
+                    self.assertTrue(any(n["id"] == jid and n["node_type"] == "crown_jewel" for n in g_int["nodes"]))
+                    self.assertTrue(any(n["id"] == did and n["node_type"] == "open_door" for n in g_int["nodes"]))
+                    self.assertTrue(
+                        any(
+                            e["edge_type"] == "chain_transition"
+                            and e["src"] == fid
+                            and e["dst"] == pid
+                            and e["step_order"] == 1
+                            and e["chain_id"] == "chn-g2-1"
+                            for e in g_int["edges"]
+                        )
+                    )
+                    self.assertGreaterEqual(len(g_int["code_graph"]["repomap_edges"]), 1)
+
+                    # Rich projections: findings_detail (4-arm + 9-arm + proposer != falsifier + realism_tier), chains_detail, snippets, verification_summary
+                    self.assertEqual(len(g_int["findings_detail"]), 1)
+                    fd = g_int["findings_detail"][0]
+                    self.assertEqual(fd["finding_id"], fid)
+                    self.assertTrue(fd["reproduction_4arm"]["all_4_arms_passed"])
+                    self.assertTrue(fd["falsifier_separation"]["independent_falsifier_verified"])
+                    self.assertIsNotNone(fd["fix_9arm"])
+                    self.assertTrue(fd["fix_9arm"]["passed"])
+                    self.assertTrue(fd["fix_9arm"]["arm9_revert_passed"])
+                    self.assertEqual(fd["fix_9arm"]["variant_count"], 3)
+
+                    ch1 = next(c for c in g_int["chains_detail"] if c["chain_id"] == "chn-g2-1")
+                    self.assertEqual([s["step_id"] for s in ch1["ordered_steps"]], [fid, pid])
+                    self.assertEqual([s["step_order"] for s in ch1["ordered_steps"]], [1, 2])
+                    self.assertTrue(ch1["ablation_proof"]["all_steps_causally_required"])
+
+                    # Code snippets bounded & scrubbed (no secret token!)
+                    self.assertGreaterEqual(len(g_int["code_snippets"]), 1)
+                    self.assertTrue(all(not sn["rel_path"].startswith("/") for sn in g_int["code_snippets"]))
+                    raw_int = json.dumps(g_int)
+                    self.assertNotIn(fake_tok, raw_int)
+                    self.assertNotIn("secretvalue987654", raw_int)
+
+                    # Verification summary
+                    vs = g_int["verification_summary"]
+                    self.assertEqual(vs["scope_notice"], SCOPE_NOTICE)
+                    for gate_key in (
+                        "G1_surface_coverage",
+                        "G2_claim_resolution",
+                        "G3_causal_reproduction",
+                        "G4_zero_skill_and_dry_rigor",
+                        "G5_anomalies_and_chains",
+                    ):
+                        self.assertIn(gate_key, vs["gates"])
+                    self.assertEqual(vs["funnel"]["confirmed_findings"], 1)
+                    self.assertEqual(vs["funnel"]["patch_verifications_passed"], 1)
+                finally:
+                    conn.close()
+
+                # 2. CLI `--visibility customer_private` and `public_disclosure`: ZERO absolute local paths & ZERO secrets!
+                for vis in ("customer_private", "public_disclosure"):
+                    rc_v, g_v = self._run_cli(
+                        [
+                            "export-graph",
+                            "--run",
+                            "run-g2",
+                            "--visibility",
+                            vis,
+                            "--repo-slug",
+                            "acme/demo-target",
+                            "--include-snippets",
+                        ]
+                    )
+                    self.assertEqual(rc_v, 0)
+                    self.assertEqual(g_v["schema"], "ajar-platform-graph/2")
+                    self.assertEqual(g_v["visibility"], vis)
+                    run_meta = g_v["run"]
+                    assert isinstance(run_meta, dict)
+                    self.assertNotIn("target_path", run_meta)
+                    self.assertNotIn("workspace_path", run_meta)
+                    self.assertEqual(run_meta["repo_slug"], "acme/demo-target")
+                    raw_v = json.dumps(g_v)
+                    self.assertNotIn(str(target), raw_v)
+                    self.assertNotIn(str(target.resolve()), raw_v)
+                    self.assertNotIn(str(ajar_home), raw_v)
+                    self.assertNotIn(str(fake_patch_path), raw_v)
+                    self.assertNotIn(fake_tok, raw_v)
+                    self.assertNotIn("secretvalue987654", raw_v)
+                    if vis == "public_disclosure":
+                        self.assertEqual(g_v["active_steers"], [])
+                        self.assertEqual(g_v["epistemic_hooks"], [])
+                        f_pub = g_v["findings_detail"][0]  # type: ignore[index]
+                        self.assertNotIn("poc_cmd", f_pub["reproduction_4arm"])
+                        self.assertTrue(f_pub["falsifier_separation"]["independent_falsifier_verified"])
+                        self.assertNotIn("proposer_worker_id", f_pub["falsifier_separation"])
+                        self.assertNotIn("total_spend_usd", g_v["verification_summary"]["economics"])  # type: ignore[index]
+
+                # 3. Snippets omitted by default when `--include-snippets` is not passed
+                rc_nosnip, g_nosnip = self._run_cli(["export-graph", "--run", "run-g2"])
+                self.assertEqual(rc_nosnip, 0)
+                self.assertEqual(g_nosnip["code_snippets"], [])
+
+                # 4. `--schema v1` stays 100% backward compatible and scrubbed
+                rc_v1, g_v1 = self._run_cli(["export-graph", "--schema", "v1", "--run", "run-g2"])
+                self.assertEqual(rc_v1, 0)
+                self.assertEqual(g_v1["schema"], "ajar-platform-graph/1")
+                self.assertEqual(g_v1["run_id"], "run-g2")
+                self.assertTrue(any(e["edge_type"] == "symbol_call" for e in g_v1["edges"]))  # type: ignore[index]
+                self.assertNotIn(fake_tok, json.dumps(g_v1))
 
 
 if __name__ == "__main__":

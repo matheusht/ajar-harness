@@ -58,6 +58,10 @@ from ajar.cli.ops import (
     cmd_threat_model,
     cmd_touch,
 )
+from ajar.graph import (
+    VALID_GRAPH_SCHEMAS,
+    VALID_GRAPH_VISIBILITIES,
+)
 from ajar.mcp import serve_mcp_stdio
 from ajar.swarm import (
     ENV_BLOCKER_KINDS,
@@ -672,6 +676,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     # export-graph (Platform whiteboard feed)
     p_eg = sub.add_parser("export-graph", help="Export deterministic Platform component & attack-flow JSON graph.")
+    p_eg.add_argument(
+        "--schema",
+        choices=VALID_GRAPH_SCHEMAS,
+        default="v2",
+        help="Graph schema version (`v2` = `ajar-platform-graph/2`, `v1` = legacy `ajar-platform-graph/1`).",
+    )
+    p_eg.add_argument(
+        "--visibility",
+        choices=VALID_GRAPH_VISIBILITIES,
+        default="internal_full",
+        help="Output visibility tier (`internal_full`, `customer_private`, `public_disclosure`).",
+    )
+    p_eg.add_argument(
+        "--include-snippets",
+        action="store_true",
+        help="Include bounded scrubbed source snippets for finding, chain, and guard loci.",
+    )
+    p_eg.add_argument(
+        "--repo-slug",
+        default="",
+        help="Repository slug (`owner/repo`) emitted in `run.repo_slug` (auto-inferred when omitted).",
+    )
     p_eg.add_argument("--output", help="Optional output file path.")
     p_eg.add_argument("--run")
     p_eg.set_defaults(func=cmd_export_graph)

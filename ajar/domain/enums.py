@@ -270,3 +270,14 @@ class TouchKind(StrEnum):
 class SpendPhase(StrEnum):
     EXPLORE = "explore"
     VERIFY = "verify"
+
+
+class LeadTargetKind(StrEnum):
+    SURFACE = "surface"
+    DOOR = "door"
+    SLICE = "slice"
+    CHAIN = "chain"
+    SUBSYSTEM = "subsystem"
+    CLAIM = "claim"
+    PRIMITIVE = "primitive"
+    FINDING = "finding"

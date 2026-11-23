@@ -482,10 +482,27 @@ def check_all_gates(
     ready_doors = conn.execute(
         "SELECT door_id, anchor_locus FROM parked_doors WHERE status = 'ready'"
     ).fetchall()
-    if ready_doors and not (stopping == "crown-jewel" and has_crown_jewel_win):
+    if ready_doors:
         sample = ", ".join(f"{r['door_id']}@{r['anchor_locus']}" for r in ready_doors[:4])
         g5_issues.append(
             f"{len(ready_doors)} woken Open Door(s) (`ready`) await chain verification (`ajar chain propose`): {sample}."
+        )
+
+    nonterminal_high_chains = conn.execute(
+        """
+        SELECT task_id, status, salience_score
+        FROM tasks
+        WHERE kind = 'chain' AND salience_score >= 95 AND status NOT IN ('done', 'dry')
+        ORDER BY salience_score DESC, created_at ASC
+        """
+    ).fetchall()
+    if nonterminal_high_chains:
+        sample = ", ".join(
+            f"{r['task_id']}[{r['status']}:{r['salience_score']}]"
+            for r in nonterminal_high_chains[:5]
+        )
+        g5_issues.append(
+            f"{len(nonterminal_high_chains)} high-salience chain task(s) remain nonterminal: {sample}."
         )
 
     prim_count = conn.execute("SELECT COUNT(*) AS c FROM primitives WHERE status != 'dry'").fetchone()["c"]

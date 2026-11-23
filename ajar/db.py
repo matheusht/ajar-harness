@@ -45,6 +45,9 @@ from ajar.store.migrations import (
     _ensure_v33_schema as _ensure_v33_schema,
 )
 from ajar.store.migrations import (
+    _ensure_v34_schema as _ensure_v34_schema,
+)
+from ajar.store.migrations import (
     _ensure_v322_schema as _ensure_v322_schema,
 )
 from ajar.store.tx import CURRENT_SCHEMA_VERSION as CURRENT_SCHEMA_VERSION
@@ -57,6 +60,15 @@ from ajar.store.util import (
 )
 from ajar.store.util import (
     compute_commitment_hash as compute_commitment_hash,
+)
+from ajar.store.util import (
+    compute_harness_code_sha256 as compute_harness_code_sha256,
+)
+from ajar.store.util import (
+    compute_lead_ev_formula as compute_lead_ev_formula,
+)
+from ajar.store.util import (
+    compute_root_plateau_throttles as compute_root_plateau_throttles,
 )
 from ajar.store.util import (
     compute_task_salience as compute_task_salience,

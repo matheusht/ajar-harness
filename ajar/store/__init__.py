@@ -7,13 +7,18 @@ from ajar.store.migrations import (
     _ensure_v31_schema,
     _ensure_v32_schema,
     _ensure_v33_schema,
+    _ensure_v34_schema,
     _ensure_v322_schema,
 )
 from ajar.store.tx import CURRENT_SCHEMA_VERSION, assert_run_mutable, immediate_tx
 from ajar.store.util import (
+    KIND_SALIENCE_FLOORS,
     PRIORITY_BASE_SALIENCE,
     _assert_no_symlink_components,
     compute_commitment_hash,
+    compute_harness_code_sha256,
+    compute_lead_ev_formula,
+    compute_root_plateau_throttles,
     compute_task_salience,
     get_ajar_home,
     infer_subsystem,
@@ -31,6 +36,7 @@ from ajar.store.util import (
 
 __all__ = [
     "CURRENT_SCHEMA_VERSION",
+    "KIND_SALIENCE_FLOORS",
     "PRIORITY_BASE_SALIENCE",
     "SCHEMA_SQL",
     "_assert_no_symlink_components",
@@ -38,8 +44,12 @@ __all__ = [
     "_ensure_v32_schema",
     "_ensure_v322_schema",
     "_ensure_v33_schema",
+    "_ensure_v34_schema",
     "assert_run_mutable",
     "compute_commitment_hash",
+    "compute_harness_code_sha256",
+    "compute_lead_ev_formula",
+    "compute_root_plateau_throttles",
     "compute_task_salience",
     "get_ajar_home",
     "immediate_tx",

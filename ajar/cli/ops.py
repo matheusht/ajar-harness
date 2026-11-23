@@ -21,6 +21,7 @@ from ajar.db import (
     AjarError,
     add_steer,
     add_threat_assumption,
+    compute_root_plateau_throttles,
     list_rows,
     list_steers,
     log_event,
@@ -54,8 +55,10 @@ from ajar.runner import run_autonomous_schedule
 from ajar.services import (
     advance_phase,
     build_commit_preimage,
+    cast_lead_vote,
     export_run_economics,
     finish_run,
+    rank_leads,
     record_human_touch,
     record_spend_entry,
     write_restricted_json,
@@ -487,6 +490,7 @@ def cmd_map(args: argparse.Namespace) -> int:
             focus_symbols=args.focus_symbol or (),
             budget_tokens=args.budget_tokens,
             slice_cap=args.slice_cap,
+            unvisited_only=bool(getattr(args, "unvisited", False)),
         )
     finally:
         conn.close()
@@ -615,6 +619,7 @@ def cmd_phase(args: argparse.Namespace) -> int:
             to_phase=str(args.to),
             notes=str(args.notes or ""),
             actor="operator",
+            force=bool(getattr(args, "force", False)),
         )
         _emit(res, True)
         return EXIT_OK
@@ -864,3 +869,39 @@ def cmd_reopen(args: argparse.Namespace) -> int:
     )
     _emit(res, True)
     return EXIT_OK
+
+
+def cmd_lead(args: argparse.Namespace) -> int:
+    rid = resolve_run_id(args.run)
+    conn = open_run_db(rid)
+    try:
+        if args.lead_cmd == "vote":
+            res = cast_lead_vote(
+                conn,
+                worker_id=args.worker,
+                target_kind=args.target_kind,
+                target_id=args.target_id or "",
+                locus=args.locus or "",
+                subsystem=args.subsystem or "",
+                impact_score=int(args.impact),
+                plausibility_score=int(args.plausibility),
+                chainability_score=int(args.chainability),
+                effort_cost=int(args.effort),
+                rationale=args.rationale or "",
+            )
+            _emit(res, True)
+            return EXIT_OK
+        if args.lead_cmd == "rank":
+            res = rank_leads(
+                conn,
+                target_kind=args.target_kind or "",
+                limit=int(args.limit),
+            )
+            _emit(res, True)
+            return EXIT_OK
+        throttles = compute_root_plateau_throttles(conn)
+        _emit({"run_id": rid, "root_plateau_throttles": list(throttles.values())}, True)
+        return EXIT_OK
+    finally:
+        conn.close()
+

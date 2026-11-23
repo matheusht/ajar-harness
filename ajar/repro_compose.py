@@ -56,6 +56,7 @@ from ajar.repro_source import (
     _bump_files_mtime,
     _clean_slot_preserving_objects,
     _CleanBuildSnapshot,
+    _detect_build_or_env_failure,
     _evaluate_defect_fired,
     _neutralize_python_pth_escapes,
     _prepare_slot_worktree,
@@ -679,12 +680,21 @@ def run_chain_reproduction(
                     still_fired = _evaluate_defect_fired(
                         abl_res["exit_code"], abl_res["stdout"], abl_res["stderr"], abl_res["timed_out"], oracle
                     )
-                    step_necessary = (not still_fired) and (not abl_res["timed_out"])
+                    abl_infra_err = _detect_build_or_env_failure(
+                        abl_res["exit_code"], abl_res["stdout"], abl_res["stderr"]
+                    )
+                    step_necessary = (
+                        (not still_fired)
+                        and (not abl_res["timed_out"])
+                        and (not abl_infra_err)
+                        and (abl_res["exit_code"] not in (-9, 137))
+                    )
                     ablation_matrix.append(
                         {
                             "step_id": step_id,
                             "ablated_via": "step_micropatch" if step_id in patch_map else "stage_context_env",
                             "defect_still_fired": still_fired,
+                            "infra_error": abl_infra_err,
                             "exit_code": abl_res["exit_code"],
                             "causally_required": step_necessary,
                         }
@@ -704,10 +714,21 @@ def run_chain_reproduction(
 
                     if not step_necessary:
                         ablation_passed = False
-                        ablation_failure_reason = (
-                            f"Step ablation failed: chain still triggered defect when {step_id} was neutralized. "
-                            f"Remove redundant padding step {step_id} from --steps."
-                        )
+                        if abl_infra_err:
+                            ablation_failure_reason = (
+                                f"Step ablation failed closed for {step_id}: neutralized run crashed with {abl_infra_err} "
+                                f"(exit={abl_res['exit_code']}), which cannot count as causal necessity."
+                            )
+                        elif abl_res["timed_out"] or abl_res["exit_code"] in (-9, 137):
+                            ablation_failure_reason = (
+                                f"Step ablation failed closed for {step_id}: neutralized run timed out or hit SIGKILL/OOM "
+                                f"(exit={abl_res['exit_code']})."
+                            )
+                        else:
+                            ablation_failure_reason = (
+                                f"Step ablation failed: chain still triggered defect when {step_id} was neutralized. "
+                                f"Remove redundant padding step {step_id} from --steps."
+                            )
                         break
                     causally_ablated_count += 1
 

@@ -707,7 +707,18 @@ def _run_simulation_seed(
                         except InvalidTransitionError:
                             _bump("illegal_probes_rejected")
                     else:
-                        advance_phase(conn, run_id=run_id, to_phase=target_phase)
+                        try:
+                            advance_phase(conn, run_id=run_id, to_phase=target_phase)
+                        except AjarError:
+                            _bump("premature_phase_advance_blocked")
+                            if rng.random() < 0.5:
+                                advance_phase(
+                                    conn,
+                                    run_id=run_id,
+                                    to_phase=target_phase,
+                                    force=True,
+                                    notes="DST explicit operator override",
+                                )
 
                 elif op == "spend_over_cap":
                     # Host Mode advisory check: record spend > 100% of cogs_cap_usd via CLI,

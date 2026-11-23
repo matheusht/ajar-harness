@@ -52,7 +52,7 @@ DELUSIONAL_EXEC_OVERRIDE_RE = re.compile(
 )
 
 VISIBLE_ERROR_NOISE_RE = re.compile(
-    r"(?:^|\n)\s*(?:fatal:|Traceback \(most recent call last\):|thread '[^']+' panicked at|Segmentation fault)",
+    r"(?:^|\n)\s*(?:fatal:|error:|Traceback \(most recent call last\):|thread '[^']+' panicked at|Segmentation fault)",
     re.IGNORECASE,
 )
 
@@ -1238,25 +1238,25 @@ def detect_percolated_multi_hop_paths(
             "jewel_id": jid,
         }
 
-    # Also treat guarded primitives / requires-tag surfaces as terminal sinks when no crown_jewels exist yet.
-    if not jewels:
-        for s in conn.execute("SELECT * FROM surfaces ORDER BY created_at ASC").fetchall():
-            rtags = set(parse_tag_list(s["requires_tags_json"] if "requires_tags_json" in s.keys() else "[]"))
-            if rtags:
-                sid = str(s["surface_id"])
-                nodes[sid] = {
-                    "id": sid,
-                    "kind": "surface_sink",
-                    "locus": str(s["locus"]),
-                    "subsystem": str(s["subsystem"]),
-                    "provides": set(),
-                    "requires": rtags,
-                    "guarded_by": "",
-                    "symbols": set(),
-                    "is_source_root": False,
-                    "is_sink": True,
-                    "jewel_id": "",
-                }
+    # Keep requires-tag surfaces active alongside `crown_jewels` (skipping exact locus duplicates).
+    jewel_loci = {str(cj["locus"]) for cj in jewels}
+    for s in conn.execute("SELECT * FROM surfaces ORDER BY created_at ASC").fetchall():
+        rtags = set(parse_tag_list(s["requires_tags_json"] if "requires_tags_json" in s.keys() else "[]"))
+        if rtags and str(s["locus"]) not in jewel_loci:
+            sid = str(s["surface_id"])
+            nodes[sid] = {
+                "id": sid,
+                "kind": "surface_sink",
+                "locus": str(s["locus"]),
+                "subsystem": str(s["subsystem"]),
+                "provides": set(),
+                "requires": rtags,
+                "guarded_by": "",
+                "symbols": set(),
+                "is_source_root": False,
+                "is_sink": True,
+                "jewel_id": "",
+            }
 
     out_adj: dict[str, list[str]] = {nid: [] for nid in nodes}
     in_adj: dict[str, list[str]] = {nid: [] for nid in nodes}
@@ -1337,13 +1337,16 @@ def detect_percolated_multi_hop_paths(
                 fwd_paths[nxt] = new_path
                 q_fwd.append((nxt, new_path))
 
-    # Backward BFS from all `is_sink` nodes (`<= max_hops`).
+    # Backward BFS from all `is_sink` nodes (`<= max_hops`), preferring `crown_jewel` sinks first.
     bwd_paths: dict[str, list[str]] = {}
     q_bwd: deque[str] = deque()
-    for nid, nd in nodes.items():
-        if nd["is_sink"]:
-            bwd_paths[nid] = [nid]
-            q_bwd.append(nid)
+    sink_order = sorted(
+        (nid for nid, nd in nodes.items() if nd["is_sink"]),
+        key=lambda nid: (0 if nodes[nid]["kind"] == "crown_jewel" else 1, nid),
+    )
+    for nid in sink_order:
+        bwd_paths[nid] = [nid]
+        q_bwd.append(nid)
     while q_bwd:
         cur = q_bwd.popleft()
         cur_suffix = bwd_paths[cur]
@@ -1356,9 +1359,8 @@ def detect_percolated_multi_hop_paths(
 
     percolated: list[dict[str, Any]] = []
     seen_step_tuples: set[tuple[str, ...]] = set()
-    for sink_id, nd in nodes.items():
-        if not nd["is_sink"]:
-            continue
+    for sink_id in sink_order:
+        nd = nodes[sink_id]
         full_chain = sink_multi_paths.get(sink_id) or fwd_paths.get(sink_id)
         if not full_chain:
             continue
@@ -1376,8 +1378,7 @@ def detect_percolated_multi_hop_paths(
                 }
             )
 
-    # Identify 1-link "Unicorn Gaps": deepest forward tips `u` not yet reaching a sink vs
-    # deepest backward suffix entries `v` whose unmet `requires` or `guarded_by` is 1 link away!
+    # Identify 1-link "Unicorn Gaps": rank shortest-gap paths reaching a Crown Jewel FIRST (highest EV).
     unicorn_gaps: list[dict[str, Any]] = []
     fwd_tips = [
         nid
@@ -1394,8 +1395,8 @@ def detect_percolated_multi_hop_paths(
         for nid, suffix in bwd_paths.items()
         if nid not in fwd_paths and (nodes[nid]["requires"] or nodes[nid]["guarded_by"])
     ]
-    for tip_id in fwd_tips[:6]:
-        for entry_id in bwd_entries[:6]:
+    for tip_id in fwd_tips[:8]:
+        for entry_id in bwd_entries[:8]:
             if tip_id == entry_id:
                 continue
             prefix = fwd_paths[tip_id]
@@ -1403,6 +1404,8 @@ def detect_percolated_multi_hop_paths(
             if len(prefix) + len(suffix) > max_hops + 1:
                 continue
             unmet = sorted(nodes[entry_id]["requires"] - nodes[tip_id]["provides"])
+            tail_sink = suffix[-1] if suffix else ""
+            reaches_jewel = bool(tail_sink in nodes and nodes[tail_sink]["kind"] == "crown_jewel")
             unicorn_gaps.append(
                 {
                     "forward_prefix": prefix,
@@ -1414,13 +1417,16 @@ def detect_percolated_multi_hop_paths(
                     "backward_guard": nodes[entry_id]["guarded_by"],
                     "unmet_requires": unmet,
                     "backward_suffix": suffix,
+                    "reaches_crown_jewel": reaches_jewel,
                     "total_chain_hops_if_bridged": len(prefix) + 1 + len([x for x in suffix if not nodes[x]["is_sink"]]),
                 }
             )
     unicorn_gaps.sort(
         key=lambda g: (
-            -int(g["total_chain_hops_if_bridged"]),
-            -len(g["backward_suffix"]),
+            0 if bool(g.get("reaches_crown_jewel")) else 1,
+            len(g["unmet_requires"]),
+            int(g["total_chain_hops_if_bridged"]),
+            -len(g["forward_provides"]),
             str(g["backward_entry_id"]),
         )
     )

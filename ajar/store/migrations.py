@@ -1,4 +1,4 @@
-"""SQLite schema DDL and idempotent versioned migrations for Ajar (`v3.0 -> v3.3`)."""
+"""SQLite schema DDL and idempotent versioned migrations for Ajar (`v3.0 -> v3.4`)."""
 
 from __future__ import annotations
 
@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS runs (
     base_sha TEXT NOT NULL DEFAULT '',
     head_sha TEXT NOT NULL DEFAULT '',
     parent_run_id TEXT NOT NULL DEFAULT '',
+    harness_sha256 TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     finished_at TEXT
 );
@@ -264,6 +265,7 @@ CREATE TABLE IF NOT EXISTS claims (
     remediation_state TEXT NOT NULL DEFAULT 'unpatched'
         CHECK(remediation_state IN ('unpatched', 'micropatched', 'verified_local', 'maintainer_patched')),
     duplicate_of_claim_id TEXT,
+    same_root_claim_id TEXT,
     env_blocker TEXT NOT NULL DEFAULT '',
     blocker_reason TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
@@ -308,6 +310,7 @@ CREATE TABLE IF NOT EXISTS chains (
     severity TEXT NOT NULL DEFAULT 'critical'
         CHECK(severity IN ('critical', 'high', 'medium', 'low')),
     step_ids_json TEXT NOT NULL,
+    backup_steps_json TEXT NOT NULL DEFAULT '{}',
     e2e_poc_cmd TEXT NOT NULL,
     control_cmd TEXT NOT NULL,
     verified INTEGER NOT NULL DEFAULT 0,
@@ -530,6 +533,38 @@ CREATE TABLE IF NOT EXISTS swarm_dispatches (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS lead_votes (
+    vote_id TEXT PRIMARY KEY,
+    worker_id TEXT NOT NULL,
+    target_kind TEXT NOT NULL
+        CHECK(target_kind IN ('surface', 'door', 'slice', 'chain', 'subsystem', 'claim', 'primitive', 'finding')),
+    target_id TEXT NOT NULL DEFAULT '',
+    locus TEXT NOT NULL DEFAULT '',
+    subsystem TEXT NOT NULL DEFAULT '',
+    impact_score INTEGER NOT NULL DEFAULT 5
+        CHECK(impact_score BETWEEN 1 AND 10),
+    plausibility_score INTEGER NOT NULL DEFAULT 5
+        CHECK(plausibility_score BETWEEN 1 AND 10),
+    chainability_score INTEGER NOT NULL DEFAULT 5
+        CHECK(chainability_score BETWEEN 1 AND 10),
+    effort_cost INTEGER NOT NULL DEFAULT 5
+        CHECK(effort_cost BETWEEN 1 AND 10),
+    ev_score REAL NOT NULL DEFAULT 50.0,
+    rationale TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS finding_corrections (
+    correction_id TEXT PRIMARY KEY,
+    finding_id TEXT NOT NULL,
+    claim_id TEXT NOT NULL DEFAULT '',
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    reason TEXT NOT NULL DEFAULT '',
+    actor TEXT NOT NULL DEFAULT 'operator',
+    created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_tasks_status_salience ON tasks(status, salience_score DESC);
 CREATE INDEX IF NOT EXISTS idx_tasks_door_id ON tasks(door_id, status);
 CREATE INDEX IF NOT EXISTS idx_doors_status ON parked_doors(status, subsystem);
@@ -539,6 +574,7 @@ CREATE INDEX IF NOT EXISTS idx_hooks_status_sub ON epistemic_hooks(status, subsy
 CREATE INDEX IF NOT EXISTS idx_cov_rel_path ON coverage_spans(rel_path, start_line, end_line);
 CREATE INDEX IF NOT EXISTS idx_tm_assumptions_status ON threat_assumptions(status, subsystem);
 CREATE INDEX IF NOT EXISTS idx_swarm_dispatches_stage ON swarm_dispatches(stage, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_lead_votes_ev ON lead_votes(ev_score DESC, target_kind, target_id);
 """
 
 
@@ -1195,3 +1231,66 @@ def _ensure_v33_schema(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute("PRAGMA legacy_alter_table=OFF")
+
+
+def _ensure_v34_schema(conn: sqlite3.Connection) -> None:
+    """Idempotently migrate v3.3.x SQLite databases to include v3.4 columns and tables."""
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    if not tables:
+        return
+
+    conn.execute("PRAGMA legacy_alter_table=ON")
+    if "runs" in tables:
+        rcols = {r[1] for r in conn.execute("PRAGMA table_info(runs)").fetchall()}
+        if "harness_sha256" not in rcols:
+            conn.execute("ALTER TABLE runs ADD COLUMN harness_sha256 TEXT NOT NULL DEFAULT ''")
+
+    if "claims" in tables:
+        ccols = {r[1] for r in conn.execute("PRAGMA table_info(claims)").fetchall()}
+        if "same_root_claim_id" not in ccols:
+            conn.execute("ALTER TABLE claims ADD COLUMN same_root_claim_id TEXT")
+
+    if "chains" in tables:
+        chcols = {r[1] for r in conn.execute("PRAGMA table_info(chains)").fetchall()}
+        if "backup_steps_json" not in chcols:
+            conn.execute("ALTER TABLE chains ADD COLUMN backup_steps_json TEXT NOT NULL DEFAULT '{}'")
+
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS lead_votes (
+            vote_id TEXT PRIMARY KEY,
+            worker_id TEXT NOT NULL,
+            target_kind TEXT NOT NULL
+                CHECK(target_kind IN ('surface', 'door', 'slice', 'chain', 'subsystem', 'claim', 'primitive', 'finding')),
+            target_id TEXT NOT NULL DEFAULT '',
+            locus TEXT NOT NULL DEFAULT '',
+            subsystem TEXT NOT NULL DEFAULT '',
+            impact_score INTEGER NOT NULL DEFAULT 5
+                CHECK(impact_score BETWEEN 1 AND 10),
+            plausibility_score INTEGER NOT NULL DEFAULT 5
+                CHECK(plausibility_score BETWEEN 1 AND 10),
+            chainability_score INTEGER NOT NULL DEFAULT 5
+                CHECK(chainability_score BETWEEN 1 AND 10),
+            effort_cost INTEGER NOT NULL DEFAULT 5
+                CHECK(effort_cost BETWEEN 1 AND 10),
+            ev_score REAL NOT NULL DEFAULT 50.0,
+            rationale TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS finding_corrections (
+            correction_id TEXT PRIMARY KEY,
+            finding_id TEXT NOT NULL,
+            claim_id TEXT NOT NULL DEFAULT '',
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            reason TEXT NOT NULL DEFAULT '',
+            actor TEXT NOT NULL DEFAULT 'operator',
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_lead_votes_ev ON lead_votes(ev_score DESC, target_kind, target_id);
+        """
+    )
+    conn.execute("PRAGMA legacy_alter_table=OFF")
+

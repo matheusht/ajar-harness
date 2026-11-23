@@ -21,6 +21,7 @@ from ajar.store.migrations import (
     _ensure_v31_schema,
     _ensure_v32_schema,
     _ensure_v33_schema,
+    _ensure_v34_schema,
     _ensure_v322_schema,
 )
 from ajar.store.tx import CURRENT_SCHEMA_VERSION
@@ -31,6 +32,48 @@ PRIORITY_BASE_SALIENCE: dict[str, int] = {
     "medium": 40,
     "low": 20,
 }
+
+KIND_SALIENCE_FLOORS: dict[str, int] = {
+    "reproduce": 95,
+    "falsify": 92,
+    "chain": 86,
+    "instrument": 85,
+    "escalate": 82,
+    "bridge": 78,
+}
+
+
+def compute_harness_code_sha256(ajar_pkg_dir: pathlib.Path | None = None) -> str:
+    """Compute a deterministic SHA-256 digest over all `ajar/**/*.py` engine files."""
+    pkg = ajar_pkg_dir or pathlib.Path(__file__).resolve().parents[1]
+    h = hashlib.sha256()
+    for py_path in sorted(pkg.rglob("*.py")):
+        if py_path.is_symlink() or "__pycache__" in py_path.parts:
+            continue
+        rel = py_path.relative_to(pkg).as_posix()
+        h.update(rel.encode("utf-8") + b"\x00")
+        h.update(py_path.read_bytes() + b"\x00")
+    return h.hexdigest()
+
+
+def compute_lead_ev_formula(
+    *,
+    impact_score: float,
+    plausibility_score: float,
+    chainability_score: float,
+    effort_cost: float,
+    voter_count: int = 1,
+) -> float:
+    """Compute bounded Expected-Value lead score (`0..100`) from multi-agent `1..10` votes."""
+    weighted_gain = (
+        (0.35 * float(impact_score))
+        + (0.35 * float(chainability_score))
+        + (0.30 * float(plausibility_score))
+    )
+    cost_divisor = 1.0 + (0.08 * max(0.0, float(effort_cost) - 1.0))
+    quorum_bonus = 4.0 * float(min(max(0, int(voter_count) - 1), 3))
+    raw = (10.0 * (weighted_gain / cost_divisor)) + quorum_bonus
+    return round(max(1.0, min(100.0, raw)), 2)
 
 
 def parse_tag_list(raw: str | Sequence[str] | None) -> list[str]:
@@ -178,6 +221,7 @@ def open_run_db(
             _ensure_v32_schema(conn)
             _ensure_v322_schema(conn)
             _ensure_v33_schema(conn)
+            _ensure_v34_schema(conn)
             conn.execute(f"PRAGMA user_version={CURRENT_SCHEMA_VERSION};")
     return conn
 
@@ -227,18 +271,98 @@ def compute_commitment_hash(target_sha256: str, goal: str, stopping_criterion: s
     return hashlib.sha256(canonical).hexdigest()
 
 
+def compute_root_plateau_throttles(
+    conn: sqlite3.Connection,
+    *,
+    max_post_repro_attempts: int = 2,
+) -> dict[str, dict[str, Any]]:
+    """Identify already-reproduced root files spinning in diminishing-returns corroboration/patch loops."""
+    has_findings = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='findings'"
+    ).fetchone()
+    if not has_findings:
+        return {}
+
+    root_first_ts: dict[str, str] = {}
+    root_findings: dict[str, list[str]] = {}
+    root_has_jewel: set[str] = set()
+    for f in conn.execute("SELECT finding_id, locus, realism_tier, created_at FROM findings ORDER BY created_at ASC").fetchall():
+        rfile = str(f["locus"] or "").split(":", 1)[0].strip().lstrip("./")
+        if not rfile:
+            continue
+        ts = str(f["created_at"] or "")
+        if rfile not in root_first_ts or (ts and ts < root_first_ts[rfile]):
+            root_first_ts[rfile] = ts
+        root_findings.setdefault(rfile, []).append(str(f["finding_id"]))
+        if str(f["realism_tier"] or "") == "crown_jewel":
+            root_has_jewel.add(rfile)
+
+    if not root_first_ts:
+        return {}
+
+    ready_files: set[str] = set()
+    has_doors = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='parked_doors'"
+    ).fetchone()
+    if has_doors:
+        for dr in conn.execute("SELECT anchor_locus FROM parked_doors WHERE status = 'ready'").fetchall():
+            dfile = str(dr["anchor_locus"] or "").split(":", 1)[0].strip().lstrip("./")
+            if dfile:
+                ready_files.add(dfile)
+
+    throttles: dict[str, dict[str, Any]] = {}
+    for rfile, first_ts in sorted(root_first_ts.items()):
+        post_tasks = int(
+            conn.execute(
+                """
+                SELECT COUNT(*) AS c FROM tasks
+                WHERE status IN ('done', 'dry')
+                  AND (locus = ? OR locus LIKE ? || ':%')
+                  AND updated_at > ?
+                """,
+                (rfile, rfile, first_ts),
+            ).fetchone()["c"]
+        )
+        throttled = (
+            post_tasks >= max_post_repro_attempts
+            and rfile not in root_has_jewel
+            and rfile not in ready_files
+        )
+        throttles[rfile] = {
+            "root_file": rfile,
+            "finding_ids": root_findings.get(rfile, []),
+            "first_reproduced_at": first_ts,
+            "post_repro_closed_tasks": post_tasks,
+            "max_post_repro_attempts": max_post_repro_attempts,
+            "throttled": throttled,
+            "salience_penalty": 35 if throttled else 0,
+        }
+    return throttles
+
+
 def compute_task_salience(conn: sqlite3.Connection, task_row: sqlite3.Row | dict[str, Any]) -> int:
-    kind = str(task_row["kind"] if "kind" in task_row.keys() else "")
-    door_id = str(task_row["door_id"] if "door_id" in task_row.keys() else "")
-    if kind == "chain" and door_id:
-        return max(96, int(task_row["salience_score"] or 96))
+    keys = set(task_row.keys())
+    kind = str(task_row["kind"] if "kind" in keys else "")
+    door_id = str(task_row["door_id"] if "door_id" in keys else "")
+    summary = str(task_row["summary"] if "summary" in keys else "")
+    existing_salience = int(task_row["salience_score"] or 0) if "salience_score" in keys else 0
 
-    priority = str(task_row["priority"] or "high")
-    subsystem = str(task_row["subsystem"] or "")
-    locus = str(task_row["locus"] or "")
-    reopened_boost = int(task_row["reopened_boost"] or 0)
+    if kind == "chain" and (
+        door_id
+        or "Percolated multi-hop path" in summary
+        or "[chain-calibration:" in summary
+        or existing_salience >= 96
+    ):
+        return max(96, existing_salience or 96)
 
-    score = PRIORITY_BASE_SALIENCE.get(priority, 60) + reopened_boost
+    priority = str(task_row["priority"] or "high") if "priority" in keys else "high"
+    subsystem = str(task_row["subsystem"] or "") if "subsystem" in keys else ""
+    locus = str(task_row["locus"] or "") if "locus" in keys else ""
+    surface_id = str(task_row["surface_id"] or "") if "surface_id" in keys else ""
+    reopened_boost = int(task_row["reopened_boost"] or 0) if "reopened_boost" in keys else 0
+
+    base_floor = KIND_SALIENCE_FLOORS.get(kind, 0)
+    score = max(PRIORITY_BASE_SALIENCE.get(priority, 60), base_floor) + reopened_boost
 
     # Subtract -3 per consecutive recent `dry` sibling in the same subsystem (forces subsystem pivot).
     if subsystem:
@@ -274,6 +398,35 @@ def compute_task_salience(conn: sqlite3.Connection, task_row: sqlite3.Row | dict
         if unchained_prim > 0:
             score += 8
 
+    # Apply multi-agent Expected-Value (`lead_votes`) boost (`-15..+15`).
+    has_votes = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='lead_votes'"
+    ).fetchone()
+    if has_votes:
+        vote_row = conn.execute(
+            """
+            SELECT AVG(ev_score) AS avg_ev, COUNT(*) AS cnt
+            FROM lead_votes
+            WHERE (target_id != '' AND target_id IN (?, ?))
+               OR (locus != '' AND locus = ?)
+               OR (target_kind = 'subsystem' AND subsystem != '' AND subsystem = ?)
+            """,
+            (surface_id, door_id, locus, subsystem),
+        ).fetchone()
+        if vote_row is not None and int(vote_row["cnt"] or 0) > 0:
+            avg_ev = float(vote_row["avg_ev"] or 50.0)
+            score += int(round((avg_ev - 50.0) * 0.30))
+
+    # Apply Per-Root Diminishing-Returns Plateau Breaker (`-35` on non-chain churn on already-reproduced files).
+    if locus and kind in ("investigate", "escalate", "patch"):
+        rfile = locus.split(":", 1)[0].strip().lstrip("./")
+        if rfile:
+            throttles = compute_root_plateau_throttles(conn)
+            if rfile in throttles and throttles[rfile]["throttled"]:
+                score -= int(throttles[rfile]["salience_penalty"])
+
+    if base_floor > 0 and kind in ("reproduce", "falsify", "instrument", "bridge"):
+        return max(base_floor, score)
     return max(1, score)
 
 

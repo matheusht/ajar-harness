@@ -606,6 +606,7 @@ def build_repomap(
     budget_tokens: int = 1500,
     slice_cap: int = 15000,
     max_edges: int = REPOMAP_EDGE_CAP,
+    unvisited_only: bool = False,
 ) -> dict[str, Any]:
     """Extract symbols, compute Personalized PageRank + cohesive subsystem call cones (`<= slice_cap` LoC), and render under `budget_tokens`."""
     conn.executescript(
@@ -738,15 +739,48 @@ def build_repomap(
                 persisted_edges,
             )
 
+    visited_files: set[str] = set()
+    has_cov = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='coverage_spans'"
+    ).fetchone()
+    if has_cov:
+        for r in conn.execute("SELECT DISTINCT rel_path FROM coverage_spans").fetchall():
+            rp = str(r[0] or "").strip().lstrip("./")
+            if rp in file_locs:
+                visited_files.add(rp)
+    has_tasks = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='tasks'"
+    ).fetchone()
+    if has_tasks:
+        for r in conn.execute("SELECT locus FROM tasks WHERE status IN ('done', 'dry') AND locus != ''").fetchall():
+            rp = str(r[0] or "").split(":", 1)[0].strip().lstrip("./")
+            if rp in file_locs:
+                visited_files.add(rp)
+
+    total_loc = sum(file_locs.values())
+    visited_loc = sum(file_locs[f] for f in visited_files)
+    scout_coverage_pct = round((100.0 * visited_loc / total_loc), 2) if total_loc > 0 else 0.0
+
     ranked_files = sorted(nodes, key=lambda u: (-file_ranks.get(u, 0.0), u))
-    call_slices = _partition_call_slices(
+    all_call_slices = _partition_call_slices(
         ranked_files, file_locs, out_edges, symbols_by_file, slice_cap=slice_cap
+    )
+    unvisited_slices = [
+        slc
+        for slc in all_call_slices
+        if any(f.split(":", 1)[0] not in visited_files for f in slc["files"])
+    ]
+    call_slices = unvisited_slices if unvisited_only else all_call_slices
+    render_files = (
+        [f for f in ranked_files if f not in visited_files]
+        if unvisited_only
+        else ranked_files
     )
 
     # Compact `< 1 KB` structural skeleton for 100K+ LoC repositories.
     top_subs = sorted(subsystems_loc.items(), key=lambda kv: (-kv[1], kv[0]))[:8]
     skel_lines = [
-        f"# Repo Skeleton ({len(nodes)} files, {sum(file_locs.values())} lines, {len(call_slices)} slice(s) <= {int(slice_cap)} LoC)",
+        f"# Repo Skeleton ({len(nodes)} files, {total_loc} lines, {len(call_slices)} slice(s) <= {int(slice_cap)} LoC, scout_coverage={scout_coverage_pct:.1f}%)",
         "Subsystems: " + ", ".join(f"{k}({v}L)" for k, v in top_subs),
     ]
     for slc in call_slices[:8]:
@@ -756,13 +790,14 @@ def build_repomap(
         skeleton_md = skeleton_md.encode("utf-8")[:960].decode("utf-8", errors="ignore")
 
     char_budget = max(256, int(budget_tokens) * 4)
+    mode_lbl = " [unvisited only]" if unvisited_only else ""
     lines: list[str] = [
-        f"# Repository Map ({len(nodes)} files, {len(all_symbols)} symbols, {len(call_slices)} slices <= {int(slice_cap)} LoC)"
+        f"# Repository Map{mode_lbl} ({len(render_files)}/{len(nodes)} files, {len(call_slices)} slices <= {int(slice_cap)} LoC, scout_coverage={scout_coverage_pct:.1f}%)"
     ]
     used_chars = len(lines[0]) + 1
 
     included_symbols: list[dict[str, Any]] = []
-    for rel in ranked_files:
+    for rel in render_files:
         header = f"\n## {rel} (rank={file_ranks.get(rel, 0.0):.4f}, lines={file_locs.get(rel, 0)})"
         if used_chars + len(header) + 1 > char_budget:
             break
@@ -780,12 +815,17 @@ def build_repomap(
     rendered = "\n".join(lines)
     return {
         "files_indexed": len(nodes),
+        "visited_files_count": len(visited_files),
+        "scout_coverage_pct": scout_coverage_pct,
+        "unvisited_only": bool(unvisited_only),
         "symbols_indexed": len(all_symbols),
         "edges_indexed": len(persisted_edges),
         "edges_total": len(edge_rows),
         "slice_cap": int(slice_cap),
         "slice_count": len(call_slices),
+        "unvisited_slice_count": len(unvisited_slices),
         "call_slices": call_slices,
+        "unvisited_slices": unvisited_slices,
         "skeleton_md": skeleton_md,
         "token_estimate": max(1, len(rendered) // 4),
         "symbols": included_symbols,

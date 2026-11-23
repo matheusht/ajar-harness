@@ -41,6 +41,7 @@ from ajar.cli.ops import (
     cmd_gate_check,
     cmd_hook,
     cmd_init,
+    cmd_lead,
     cmd_ledger,
     cmd_loop,
     cmd_map,
@@ -140,6 +141,7 @@ def build_parser() -> argparse.ArgumentParser:
     pph_a = phs_sub.add_parser("advance")
     pph_a.add_argument("--to", choices=phase_choices, required=True)
     pph_a.add_argument("--notes", default="")
+    pph_a.add_argument("--force", action="store_true", help="Operator override to advance phase while hunt/chain frontier remains active (requires `--notes`).")
     pph_a.add_argument("--run")
     p_phs.set_defaults(func=cmd_phase)
 
@@ -175,6 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_map.add_argument("--focus-symbol", action="append")
     p_map.add_argument("--budget-tokens", type=int, default=1500)
     p_map.add_argument("--slice-cap", type=int, default=15000, help="Soft target LoC per cohesive subsystem call cone.")
+    p_map.add_argument("--unvisited", action="store_true", help="Emit only call slices containing files not yet covered in `coverage_spans` or closed `tasks`.")
     p_map.add_argument("--run")
     p_map.add_argument("--json", action="store_true")
     p_map.set_defaults(func=cmd_map)
@@ -864,6 +867,35 @@ def build_parser() -> argparse.ArgumentParser:
     pldg_cp.add_argument("--public-out", help="Optional path to write the public commitment JSON record.")
     pldg_cp.add_argument("--preimage-out", help="Optional path to write the private reveal preimage JSON (mode 0600).")
     p_ldg.set_defaults(func=cmd_ledger)
+
+    # lead (Multi-Agent Expected-Value Lead Voting & Per-Root Plateau Breaker)
+    p_lead = sub.add_parser(
+        "lead",
+        help="Vote on high-EV chain/hunt leads across swarm scouts and inspect root plateau throttles.",
+    )
+    lead_sub = p_lead.add_subparsers(dest="lead_cmd", required=True)
+    lead_target_choices = ("surface", "door", "slice", "chain", "subsystem", "claim", "primitive", "finding")
+    pld_v = lead_sub.add_parser("vote", help="Cast or update a structured Expected-Value vote (`1..10` axes) on a lead.")
+    pld_v.add_argument("--worker", required=True)
+    pld_v.add_argument("--target-kind", choices=lead_target_choices, required=True)
+    pld_v.add_argument("--target-id", default="", help="Optional surface, door, slice, chain, claim, primitive, or finding ID.")
+    pld_v.add_argument("--locus", default="", help="Optional target locus (`file:lines`).")
+    pld_v.add_argument("--subsystem", default="", help="Optional target subsystem.")
+    pld_v.add_argument("--impact", type=int, default=7, help="Impact score `1..10` (Crown-Jewel proximity / severity).")
+    pld_v.add_argument("--plausibility", type=int, default=7, help="Plausibility score `1..10` (evidence of unguarded path).")
+    pld_v.add_argument("--chainability", type=int, default=7, help="Chainability score `1..10` (composable state/capability output).")
+    pld_v.add_argument("--effort", type=int, default=5, help="Estimated effort cost `1..10` (lower is cheaper).")
+    pld_v.add_argument("--rationale", default="", help="Concise structural rationale for this EV score.")
+    pld_v.add_argument("--run")
+
+    pld_r = lead_sub.add_parser("rank", help="Rank multi-agent voted leads by consensus Expected Value.")
+    pld_r.add_argument("--target-kind", choices=lead_target_choices, default="")
+    pld_r.add_argument("--limit", type=int, default=25)
+    pld_r.add_argument("--run")
+
+    pld_t = lead_sub.add_parser("throttles", help="Inspect per-root diminishing-returns plateau throttles.")
+    pld_t.add_argument("--run")
+    p_lead.set_defaults(func=cmd_lead)
 
     return p
 

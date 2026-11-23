@@ -30,11 +30,13 @@ from ajar.repomap import build_repomap
 from ajar.services import (
     add_anomaly,
     add_surface,
+    cast_lead_vote,
     close_task_done,
     close_task_dry,
     falsify_claim,
     finish_run,
     propose_claim,
+    rank_leads,
     rescope_claim_service,
     survive_claim,
 )
@@ -63,6 +65,7 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "focus_files": {"type": "array", "items": {"type": "string"}},
                 "focus_symbols": {"type": "array", "items": {"type": "string"}},
                 "budget_tokens": {"type": "integer", "default": 1500},
+                "unvisited_only": {"type": "boolean", "default": False},
             },
         },
     },
@@ -224,6 +227,40 @@ MCP_TOOLS: list[dict[str, Any]] = [
         "inputSchema": {"type": "object", "properties": {"active_only": {"type": "boolean", "default": True}}},
     },
     {
+        "name": "ajar_lead_vote",
+        "description": "Cast an Expected-Value (`ev_score`) lead vote to concentrate swarm salience on top chain/hunt targets.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "worker_id": {"type": "string"},
+                "target_kind": {
+                    "type": "string",
+                    "enum": ["surface", "door", "slice", "chain", "subsystem", "claim", "primitive", "finding"],
+                },
+                "target_id": {"type": "string"},
+                "locus": {"type": "string"},
+                "subsystem": {"type": "string"},
+                "impact_score": {"type": "integer", "default": 7},
+                "plausibility_score": {"type": "integer", "default": 7},
+                "chainability_score": {"type": "integer", "default": 7},
+                "effort_cost": {"type": "integer", "default": 5},
+                "rationale": {"type": "string"},
+            },
+            "required": ["worker_id", "target_kind"],
+        },
+    },
+    {
+        "name": "ajar_lead_rank",
+        "description": "Rank multi-agent voted leads by consensus Expected Value and inspect root plateau throttles.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target_kind": {"type": "string"},
+                "limit": {"type": "integer", "default": 20},
+            },
+        },
+    },
+    {
         "name": "ajar_export_graph",
         "description": "Export deterministic `ajar-platform-graph/2` (or `v1`) component and attack-flow whiteboard JSON.",
         "inputSchema": {
@@ -277,6 +314,7 @@ def dispatch_mcp_tool(
                 focus_files=args.get("focus_files") or (),
                 focus_symbols=args.get("focus_symbols") or (),
                 budget_tokens=int(args.get("budget_tokens", 1500)),
+                unvisited_only=bool(args.get("unvisited_only", False)),
             )
         if tool_name == "ajar_ref_query":
             return {
@@ -391,6 +429,26 @@ def dispatch_mcp_tool(
             )
         if tool_name == "ajar_steer_list":
             return {"steers": list_steers(conn, active_only=bool(args.get("active_only", True)))}
+        if tool_name == "ajar_lead_vote":
+            return cast_lead_vote(
+                conn,
+                worker_id=str(args.get("worker_id") or args.get("worker") or ""),
+                target_kind=str(args["target_kind"]),
+                target_id=str(args.get("target_id") or ""),
+                locus=str(args.get("locus") or ""),
+                subsystem=str(args.get("subsystem") or ""),
+                impact_score=int(args.get("impact_score", 7)),
+                plausibility_score=int(args.get("plausibility_score", 7)),
+                chainability_score=int(args.get("chainability_score", 7)),
+                effort_cost=int(args.get("effort_cost", 5)),
+                rationale=str(args.get("rationale") or ""),
+            )
+        if tool_name == "ajar_lead_rank":
+            return rank_leads(
+                conn,
+                target_kind=str(args.get("target_kind") or ""),
+                limit=int(args.get("limit", 20)),
+            )
         if tool_name == "ajar_export_graph":
             return export_attack_flow_graph(
                 conn,

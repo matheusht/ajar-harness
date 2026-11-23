@@ -56,7 +56,13 @@ from ajar.reactions import (
 )
 from ajar.redact import scrub_text
 from ajar.repro_source import validate_micropatch_diff
-from ajar.store import assert_run_mutable, immediate_tx, parse_tag_list
+from ajar.store import (
+    assert_run_mutable,
+    compute_lead_ev_formula,
+    compute_root_plateau_throttles,
+    immediate_tx,
+    parse_tag_list,
+)
 from ajar.swarm import validate_claim_block_request, validate_structural_claim_prose
 
 
@@ -674,10 +680,20 @@ def advance_phase(
     to_phase: str,
     notes: str = "",
     actor: str = "operator",
+    force: bool = False,
 ) -> dict[str, Any]:
+    from ajar.gates import check_all_gates
+
     new_phase = to_phase.strip()
     if new_phase not in ("hunt", "remediate", "full"):
         raise AjarError(f"Unsupported phase {new_phase!r}; choose hunt, remediate, or full.", EXIT_USER_ERROR)
+    clean_actor = actor.strip() or "operator"
+    clean_notes = scrub_text((notes or "").strip())
+    if force and len(clean_notes) < 8:
+        raise AjarError(
+            "Forcing phase advance (`--force`) requires `--notes` (>= 8 chars) explaining why remediation cannot wait.",
+            EXIT_USER_ERROR,
+        )
     with immediate_tx(conn):
         assert_run_mutable(conn, operation="phase_advance")
         run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
@@ -685,16 +701,61 @@ def advance_phase(
             raise AjarError("Run metadata missing in run.db.", EXIT_USER_ERROR)
         prev_phase = str(run["campaign_phase"] if "campaign_phase" in run.keys() else "hunt") or "hunt"
         assert_valid_phase_transition(prev_phase, new_phase, run_id=run_id)
+
+        if prev_phase == "hunt" and new_phase in ("remediate", "full") and not force:
+            all_gates = check_all_gates(conn, auto_enqueue_chain=False, reconcile=False)
+            g5 = all_gates["gates"]["G5_anomalies_and_chains"]
+            crit_hunt = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*) AS c FROM tasks
+                    WHERE status IN ('open', 'leased')
+                      AND priority = 'critical'
+                      AND kind IN ('investigate', 'bridge', 'falsify', 'reproduce', 'chain')
+                    """
+                ).fetchone()["c"]
+            )
+            if not g5["passed"] or crit_hunt > 0:
+                reasons: list[str] = []
+                if not g5["passed"]:
+                    reasons.append(f"G5 convergence incomplete ({g5.get('issues')})")
+                if crit_hunt > 0:
+                    reasons.append(f"{crit_hunt} critical hunt/chain/verify task(s) remain open or leased")
+                raise AjarError(
+                    "Cannot advance from `hunt` to `"
+                    + new_phase
+                    + "` while high-value hunt/chain frontier remains unfinished: "
+                    + "; ".join(reasons)
+                    + ". Finish convergence or pass `--force --notes <reason>` for explicit operator override.",
+                    EXIT_GATE_BLOCKED,
+                )
+
         conn.execute("UPDATE runs SET campaign_phase = ? WHERE run_id = ?", (new_phase, run_id))
         recompute_all_open_salience(conn)
+        if force and prev_phase == "hunt" and new_phase in ("remediate", "full"):
+            tid = new_id("tch")
+            conn.execute(
+                "INSERT INTO human_touches(touch_id, kind, actor, notes, created_at) VALUES (?, 'scope_authority', ?, ?, ?)",
+                (tid, clean_actor, f"[phase_advance --force {prev_phase}->{new_phase}] {clean_notes}", utc_now_iso()),
+            )
         log_event(
             conn,
-            actor.strip() or "operator",
+            clean_actor,
             "campaign_phase_advanced",
             run_id,
-            {"previous_phase": prev_phase, "campaign_phase": new_phase, "notes": scrub_text(notes or "")},
+            {
+                "previous_phase": prev_phase,
+                "campaign_phase": new_phase,
+                "forced": bool(force),
+                "notes": clean_notes,
+            },
         )
-    return {"run_id": run_id, "previous_phase": prev_phase, "campaign_phase": new_phase}
+    return {
+        "run_id": run_id,
+        "previous_phase": prev_phase,
+        "campaign_phase": new_phase,
+        "forced": bool(force),
+    }
 
 
 def finish_run(
@@ -1267,3 +1328,187 @@ def record_spend_entry(
             ),
         )
     return {"entry_id": eid, "surface_id": surf, "cost_usd": float(cost_usd)}
+
+
+def cast_lead_vote(
+    conn: sqlite3.Connection,
+    *,
+    worker_id: str,
+    target_kind: str,
+    target_id: str = "",
+    locus: str = "",
+    subsystem: str = "",
+    impact_score: int = 7,
+    plausibility_score: int = 7,
+    chainability_score: int = 7,
+    effort_cost: int = 5,
+    rationale: str = "",
+) -> dict[str, Any]:
+    wid = (worker_id or "").strip()
+    if not wid:
+        raise AjarError("lead vote requires a non-empty --worker.", EXIT_USER_ERROR)
+    tk = (target_kind or "").strip()
+    if tk not in ("surface", "door", "slice", "chain", "subsystem", "claim", "primitive", "finding"):
+        raise AjarError(
+            f"Unsupported --target-kind {tk!r}; choose surface, door, slice, chain, subsystem, claim, primitive, or finding.",
+            EXIT_USER_ERROR,
+        )
+    tid = (target_id or "").strip()
+    loc = (locus or "").strip()
+    sub = (subsystem or "").strip() or (infer_subsystem(loc) if loc else "")
+    if not (tid or loc or sub):
+        raise AjarError(
+            "lead vote requires at least one of --target-id, --locus, or --subsystem.",
+            EXIT_USER_ERROR,
+        )
+    for name, val in (
+        ("impact_score", impact_score),
+        ("plausibility_score", plausibility_score),
+        ("chainability_score", chainability_score),
+        ("effort_cost", effort_cost),
+    ):
+        if not (1 <= int(val) <= 10):
+            raise AjarError(f"{name} must be an integer between 1 and 10 (got {val}).", EXIT_USER_ERROR)
+
+    ev = compute_lead_ev_formula(
+        impact_score=int(impact_score),
+        plausibility_score=int(plausibility_score),
+        chainability_score=int(chainability_score),
+        effort_cost=int(effort_cost),
+    )
+    clean_rat = scrub_text((rationale or "").strip())
+    now_iso = utc_now_iso()
+
+    with immediate_tx(conn):
+        assert_run_mutable(conn, operation="lead_vote")
+        existing = conn.execute(
+            """
+            SELECT vote_id FROM lead_votes
+            WHERE worker_id = ? AND target_kind = ? AND target_id = ? AND locus = ? AND subsystem = ?
+            """,
+            (wid, tk, tid, loc, sub),
+        ).fetchone()
+        if existing is not None:
+            vid = str(existing["vote_id"])
+            conn.execute(
+                """
+                UPDATE lead_votes
+                SET impact_score = ?, plausibility_score = ?, chainability_score = ?,
+                    effort_cost = ?, ev_score = ?, rationale = ?, updated_at = ?
+                WHERE vote_id = ?
+                """,
+                (
+                    int(impact_score),
+                    int(plausibility_score),
+                    int(chainability_score),
+                    int(effort_cost),
+                    float(ev),
+                    clean_rat,
+                    now_iso,
+                    vid,
+                ),
+            )
+        else:
+            vid = new_id("vot")
+            conn.execute(
+                """
+                INSERT INTO lead_votes(
+                    vote_id, worker_id, target_kind, target_id, locus, subsystem,
+                    impact_score, plausibility_score, chainability_score, effort_cost,
+                    ev_score, rationale, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    vid,
+                    wid,
+                    tk,
+                    tid,
+                    loc,
+                    sub,
+                    int(impact_score),
+                    int(plausibility_score),
+                    int(chainability_score),
+                    int(effort_cost),
+                    float(ev),
+                    clean_rat,
+                    now_iso,
+                    now_iso,
+                ),
+            )
+        rescored = recompute_all_open_salience(conn)
+        log_event(
+            conn,
+            wid,
+            "lead_vote_cast",
+            vid,
+            {
+                "target_kind": tk,
+                "target_id": tid,
+                "locus": loc,
+                "subsystem": sub,
+                "ev_score": ev,
+                "tasks_rescored": rescored,
+            },
+        )
+    return {
+        "vote_id": vid,
+        "worker_id": wid,
+        "target_kind": tk,
+        "target_id": tid,
+        "locus": loc,
+        "subsystem": sub,
+        "ev_score": ev,
+        "tasks_rescored": rescored,
+    }
+
+
+def rank_leads(
+    conn: sqlite3.Connection,
+    *,
+    target_kind: str = "",
+    limit: int = 25,
+) -> dict[str, Any]:
+    tk = (target_kind or "").strip()
+    params: list[Any] = []
+    where = ""
+    if tk:
+        where = "WHERE target_kind = ?"
+        params.append(tk)
+    params.append(max(1, int(limit)))
+    rows = conn.execute(
+        f"""
+        SELECT
+            target_kind,
+            target_id,
+            locus,
+            subsystem,
+            COUNT(DISTINCT worker_id) AS voter_count,
+            ROUND(AVG(ev_score), 2) AS mean_ev,
+            ROUND(MAX(ev_score), 2) AS max_ev,
+            ROUND(AVG(impact_score), 2) AS mean_impact,
+            ROUND(AVG(plausibility_score), 2) AS mean_plausibility,
+            ROUND(AVG(chainability_score), 2) AS mean_chainability,
+            ROUND(AVG(effort_cost), 2) AS mean_effort_cost,
+            ROUND(AVG(ev_score) + MIN(12.0, (COUNT(DISTINCT worker_id) - 1) * 4.0), 2) AS consensus_ev
+        FROM lead_votes
+        {where}
+        GROUP BY target_kind, target_id, locus, subsystem
+        ORDER BY consensus_ev DESC, voter_count DESC, mean_ev DESC
+        LIMIT ?
+        """,
+        tuple(params),
+    ).fetchall()
+    throttles = compute_root_plateau_throttles(conn)
+    ranked: list[dict[str, Any]] = []
+    for idx, r in enumerate(rows, start=1):
+        d = dict(r)
+        d["rank"] = idx
+        rfile = str(d.get("locus") or "").split(":", 1)[0].strip().lstrip("./")
+        d["root_throttled"] = bool(throttles.get(rfile, {}).get("throttled", False)) if rfile else False
+        ranked.append(d)
+    return {
+        "ranked_leads": ranked,
+        "total_votes": int(conn.execute("SELECT COUNT(*) AS c FROM lead_votes").fetchone()["c"]),
+        "root_plateau_throttles": list(throttles.values()),
+    }
+

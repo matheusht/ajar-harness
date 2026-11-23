@@ -13,6 +13,7 @@ import sys
 from typing import Any, BinaryIO
 
 from ajar import EXIT_USER_ERROR, __version__
+from ajar.catalog import search_issue_catalog, trace_backward_sink_slices
 from ajar.db import (
     AjarError,
     lease_next_task,
@@ -163,6 +164,7 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "falsification_prediction": {"type": "string"},
                 "falsification_test": {"type": "string"},
                 "consume_anomaly_id": {"type": "string"},
+                "same_root_of": {"type": "string"},
             },
             "required": [
                 "worker_id",
@@ -258,6 +260,34 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "target_kind": {"type": "string"},
                 "limit": {"type": "integer", "default": 20},
             },
+        },
+    },
+    {
+        "name": "ajar_catalog_search",
+        "description": "Query the unified Issue & Gadget Catalog across findings, capabilities, trust gadgets, claims, anomalies, and doors.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "default": ""},
+                "tags": {"type": "string", "default": ""},
+                "subsystem": {"type": "string", "default": ""},
+                "role": {"type": "string", "default": ""},
+                "include_unverified": {"type": "boolean", "default": True},
+                "limit": {"type": "integer", "default": 25},
+            },
+        },
+    },
+    {
+        "name": "ajar_catalog_backslice",
+        "description": "Trace backward sink-to-source call slices (`callee <- caller`) from a Crown Jewel, Open Door, locus, or symbol.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "sink": {"type": "string"},
+                "max_hops": {"type": "integer", "default": 3},
+                "limit": {"type": "integer", "default": 20},
+            },
+            "required": ["sink"],
         },
     },
     {
@@ -392,6 +422,7 @@ def dispatch_mcp_tool(
                 surface_id=args.get("surface_id"),
                 severity=str(args.get("severity", "high")),
                 consume_anomaly_id=args.get("consume_anomaly_id"),
+                same_root_of=args.get("same_root_of"),
                 target_dir=tpath,
                 target_mode=str(run["target_mode"] if run else "source"),
             )
@@ -447,6 +478,23 @@ def dispatch_mcp_tool(
             return rank_leads(
                 conn,
                 target_kind=str(args.get("target_kind") or ""),
+                limit=int(args.get("limit", 20)),
+            )
+        if tool_name == "ajar_catalog_search":
+            return search_issue_catalog(
+                conn,
+                query=str(args.get("query") or ""),
+                tags=args.get("tags"),
+                subsystem=str(args.get("subsystem") or ""),
+                role=str(args.get("role") or ""),
+                include_unverified=bool(args.get("include_unverified", True)),
+                limit=int(args.get("limit", 25)),
+            )
+        if tool_name == "ajar_catalog_backslice":
+            return trace_backward_sink_slices(
+                conn,
+                sink=str(args["sink"]),
+                max_hops=int(args.get("max_hops", 3)),
                 limit=int(args.get("limit", 20)),
             )
         if tool_name == "ajar_export_graph":

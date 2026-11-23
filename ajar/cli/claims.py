@@ -41,6 +41,7 @@ from ajar.repro_binary_live import (
     run_live_reproduction,
 )
 from ajar.repro_compose import (
+    _parse_backup_steps,
     _parse_step_micropatches,
     run_chain_reproduction,
     run_claim_instrumentation,
@@ -52,7 +53,9 @@ from ajar.repro_source import (
 )
 from ajar.services import (
     block_claim,
+    calibrate_chain,
     falsify_claim,
+    mark_claim_duplicate,
     preflight_chain_proposal,
     propose_claim,
     record_chain_proposal,
@@ -86,8 +89,20 @@ def cmd_claim(args: argparse.Namespace) -> int:
                 severity=args.severity,
                 seeded_by_human=bool(args.seeded_by_human),
                 consume_anomaly_id=args.consume_anomaly,
+                same_root_of=getattr(args, "same_root_of", None),
                 target_dir=tpath,
                 target_mode=tmode,
+            )
+            _emit(res, True)
+            return EXIT_OK
+
+        if args.claim_cmd == "duplicate":
+            res = mark_claim_duplicate(
+                conn,
+                claim_id=args.claim_id,
+                duplicate_of_claim_id=args.of,
+                worker_id=args.worker,
+                reason=args.reason,
             )
             _emit(res, True)
             return EXIT_OK
@@ -397,6 +412,19 @@ def cmd_chain(args: argparse.Namespace) -> int:
             _emit(res, True)
             return EXIT_OK
 
+        if args.chain_cmd == "calibrate":
+            res = calibrate_chain(
+                conn,
+                chain_id=args.chain_id,
+                reason=args.reason,
+                realism_tier=args.realism_tier,
+                severity=args.severity,
+                declared_steps=getattr(args, "declared_steps", None),
+                worker_id=args.worker,
+            )
+            _emit(res, True)
+            return EXIT_OK
+
         if args.chain_cmd == "propose":
             run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
             tmode = str(run["target_mode"]) if run else "source"
@@ -405,6 +433,7 @@ def cmd_chain(args: argparse.Namespace) -> int:
 
             if run is not None and tmode == "source":
                 patch_map = _parse_step_micropatches(getattr(args, "step_micropatch", None))
+                backup_map = _parse_backup_steps(getattr(args, "backup_step", None))
                 res = run_chain_reproduction(
                     conn,
                     run_dir=rdir,
@@ -417,6 +446,7 @@ def cmd_chain(args: argparse.Namespace) -> int:
                     severity=args.severity,
                     oracle=oracle_dict,
                     step_micropatches=patch_map,
+                    backup_steps=backup_map,
                     ablate_steps=not bool(getattr(args, "no_ablate", False)),
                     door_id=str(getattr(args, "door", None) or ""),
                     jewel_id=str(getattr(args, "jewel", None) or ""),
@@ -538,6 +568,8 @@ def cmd_finding(args: argparse.Namespace) -> int:
                 reason=args.reason,
                 severity=args.severity,
                 title=args.title,
+                declared_steps=getattr(args, "declared_steps", None),
+                realism_tier=getattr(args, "realism_tier", None),
                 worker_id=args.worker,
             )
             _emit(res, True)

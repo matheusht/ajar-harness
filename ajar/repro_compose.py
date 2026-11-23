@@ -285,6 +285,30 @@ def _parse_step_micropatches(specs: Sequence[str] | None) -> dict[str, pathlib.P
     return mapping
 
 
+def _parse_backup_steps(raw_specs: Sequence[str] | None) -> dict[str, list[str]]:
+    if not raw_specs:
+        return {}
+    mapping: dict[str, list[str]] = {}
+    for spec in raw_specs:
+        if ":" not in spec:
+            raise AjarError(
+                f"Invalid --backup-step {spec!r}; expected `<primary_step_id>:<backup_step_id>`.",
+                EXIT_USER_ERROR,
+            )
+        prim_id, bak_id = spec.split(":", 1)
+        p_clean = prim_id.strip()
+        b_clean = bak_id.strip()
+        if not p_clean or not b_clean or p_clean == b_clean:
+            raise AjarError(
+                f"Invalid --backup-step {spec!r}; primary and backup step IDs must be distinct non-empty IDs.",
+                EXIT_USER_ERROR,
+            )
+        lst = mapping.setdefault(p_clean, [])
+        if b_clean not in lst:
+            lst.append(b_clean)
+    return mapping
+
+
 def run_chain_reproduction(
     conn: sqlite3.Connection,
     *,
@@ -298,6 +322,7 @@ def run_chain_reproduction(
     severity: str = "critical",
     oracle: dict[str, Any] | None = None,
     step_micropatches: Mapping[str, pathlib.Path] | None = None,
+    backup_steps: Mapping[str, Sequence[str]] | None = None,
     ablate_steps: bool = True,
     door_id: str = "",
     jewel_id: str = "",
@@ -305,7 +330,7 @@ def run_chain_reproduction(
     timeout_sec: int = 60,
     worker_id: str = "worker",
 ) -> dict[str, Any]:
-    """Execute end-to-end chain verification inside `repro/slot-<k>` with $N$-step causal ablation."""
+    """Execute end-to-end chain verification inside `repro/slot-<k>` with backup-slot swaps and $N$-step causal ablation."""
     from ajar.chain_planner import (
         evaluate_precondition_realism,
         mark_chain_doors_and_jewels_resolved,
@@ -314,6 +339,18 @@ def run_chain_reproduction(
     clean_steps = [s.strip() for s in steps if s and s.strip()]
     if not clean_steps:
         raise AjarError("Chain --steps requires at least one primitive, anomaly, claim, or finding ID.", EXIT_USER_ERROR)
+
+    clean_backups: dict[str, list[str]] = {}
+    for k, vals in (backup_steps or {}).items():
+        ks = k.strip()
+        if ks not in clean_steps:
+            raise AjarError(
+                f"--backup-step primary {ks!r} is not present in --steps ({clean_steps}).",
+                EXIT_USER_ERROR,
+            )
+        b_list = [v.strip() for v in vals if v and v.strip() and v.strip() != ks]
+        if b_list:
+            clean_backups[ks] = b_list
 
     # Pre-flight realism check (blocks self-override CLI/env flags in `< 1 ms`).
     evaluate_precondition_realism(
@@ -330,12 +367,14 @@ def run_chain_reproduction(
     finding_rows: dict[str, sqlite3.Row] = {}
     step_roles: dict[str, str] = {}
     chain_touched_files: list[str] = []
-    invariant_breaking_count = 0
     auto_patch_dir = run_dir / "repro" / "auto_step_patches"
     patch_map = dict(step_micropatches or {})
     inherited_build_cmds: list[str] = []
 
-    for sid in clean_steps:
+    all_referenced_ids = list(
+        dict.fromkeys([*clean_steps, *(bid for blist in clean_backups.values() for bid in blist)])
+    )
+    for sid in all_referenced_ids:
         prow = conn.execute("SELECT * FROM primitives WHERE primitive_id = ?", (sid,)).fetchone()
         if prow is not None:
             pstatus = str(prow["status"] if "status" in prow.keys() else "active")
@@ -347,8 +386,6 @@ def run_chain_reproduction(
             prim_rows[sid] = prow
             prole = str(prow["role"] if "role" in prow.keys() else "capability")
             step_roles[sid] = prole
-            if prole != "trust_gadget":
-                invariant_breaking_count += 1
             ploc = str(prow["locus"] or "").split(":", 1)[0].strip()
             if ploc and ploc not in chain_touched_files:
                 chain_touched_files.append(ploc)
@@ -365,7 +402,6 @@ def run_chain_reproduction(
         if frow is not None:
             finding_rows[sid] = frow
             step_roles[sid] = "finding"
-            invariant_breaking_count += 1
             floc = str(frow["locus"] or "").split(":", 1)[0].strip()
             if floc and floc not in chain_touched_files:
                 chain_touched_files.append(floc)
@@ -387,7 +423,6 @@ def run_chain_reproduction(
         crow = conn.execute("SELECT * FROM claims WHERE claim_id = ?", (sid,)).fetchone()
         if crow is not None:
             step_roles[sid] = "claim"
-            invariant_breaking_count += 1
             cloc = str(crow["locus"] or "").split(":", 1)[0].strip()
             if cloc and cloc not in chain_touched_files:
                 chain_touched_files.append(cloc)
@@ -396,7 +431,6 @@ def run_chain_reproduction(
         arow = conn.execute("SELECT * FROM anomalies WHERE anomaly_id = ?", (sid,)).fetchone()
         if arow is not None:
             step_roles[sid] = "anomaly"
-            invariant_breaking_count += 1
             aloc = str(arow["locus"] or "").split(":", 1)[0].strip()
             if aloc and aloc not in chain_touched_files:
                 chain_touched_files.append(aloc)
@@ -406,6 +440,8 @@ def run_chain_reproduction(
             f"Unknown chain step ID {sid!r}; pass verified `fnd-*`, `clm-*`, `prim-*`, or `anom-*` IDs.",
             EXIT_USER_ERROR,
         )
+
+    invariant_breaking_count = sum(1 for sid in clean_steps if step_roles.get(sid) != "trust_gadget")
 
     if build_cmd.strip():
         eff_build_cmd = build_cmd.strip()
@@ -448,6 +484,9 @@ def run_chain_reproduction(
     watermark_file = cache_dir / "watermark_ns"
 
     ablation_matrix: list[dict[str, Any]] = []
+    backup_swaps_tried: list[dict[str, Any]] = []
+    active_steps = list(clean_steps)
+    active_swap_env = ""
     full_res: dict[str, Any] = {"exit_code": -1, "stdout": "", "stderr": "", "timed_out": False, "defect_fired": False}
     ctrl_res: dict[str, Any] = {"exit_code": -1, "stdout": "", "stderr": "", "timed_out": False, "control_passed": False}
     full_fired = False
@@ -487,12 +526,69 @@ def run_chain_reproduction(
                 cache_dir=cache_dir,
                 timeout_sec=timeout_sec,
                 helpers_dir=helpers_dir,
-                extra_env={"AJAR_REPRO_MODE": "exploit_path", "AJAR_ABLATE_STEPS": ""},
+                extra_env={
+                    "AJAR_REPRO_MODE": "exploit_path",
+                    "AJAR_ABLATE_STEPS": "",
+                    "AJAR_ACTIVE_STEPS": ",".join(active_steps),
+                    "AJAR_STEP_SWAPS": "",
+                },
             )
             full_fired = _evaluate_defect_fired(
                 full_res["exit_code"], full_res["stdout"], full_res["stderr"], full_res["timed_out"], oracle
             )
             full_res["defect_fired"] = full_fired
+
+            # 1b. Modular Backup-Slot Fallback (`XBOW` stage swap resilience):
+            if not full_fired and clean_backups:
+                for prim_id, bak_candidates in clean_backups.items():
+                    if full_fired:
+                        break
+                    for bak_id in bak_candidates:
+                        if eff_build_cmd and _try_clean_arm_preserving_build(slot_dir, clean_build_snapshot):
+                            clean_build_valid = True
+                        else:
+                            subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
+                            _clean_slot_preserving_objects(slot_dir, check=True)
+                            clean_build_valid = False
+                        trial_steps = [bak_id if s == prim_id else s for s in clean_steps]
+                        if sum(1 for s in trial_steps if step_roles.get(s) != "trust_gadget") == 0:
+                            continue
+                        swap_spec = f"{prim_id}={bak_id}"
+                        trial_res = _run_shell_in_slot(
+                            poc_cmd,
+                            slot_dir=slot_dir,
+                            cache_dir=cache_dir,
+                            timeout_sec=timeout_sec,
+                            helpers_dir=helpers_dir,
+                            extra_env={
+                                "AJAR_REPRO_MODE": "exploit_path",
+                                "AJAR_ABLATE_STEPS": "",
+                                "AJAR_ACTIVE_STEPS": ",".join(trial_steps),
+                                "AJAR_STEP_SWAPS": swap_spec,
+                            },
+                        )
+                        trial_fired = _evaluate_defect_fired(
+                            trial_res["exit_code"],
+                            trial_res["stdout"],
+                            trial_res["stderr"],
+                            trial_res["timed_out"],
+                            oracle,
+                        )
+                        trial_res["defect_fired"] = trial_fired
+                        backup_swaps_tried.append(
+                            {
+                                "replaced_step": prim_id,
+                                "backup_step": bak_id,
+                                "defect_fired": trial_fired,
+                                "exit_code": trial_res["exit_code"],
+                            }
+                        )
+                        if trial_fired:
+                            active_steps = trial_steps
+                            active_swap_env = swap_spec
+                            full_res = trial_res
+                            full_fired = True
+                            break
 
             if eff_build_cmd and _try_clean_arm_preserving_build(slot_dir, clean_build_snapshot):
                 clean_build_valid = True
@@ -524,7 +620,12 @@ def run_chain_reproduction(
                 cache_dir=cache_dir,
                 timeout_sec=timeout_sec,
                 helpers_dir=helpers_dir,
-                extra_env={"AJAR_REPRO_MODE": "benign_control", "AJAR_ABLATE_STEPS": ""},
+                extra_env={
+                    "AJAR_REPRO_MODE": "benign_control",
+                    "AJAR_ABLATE_STEPS": "",
+                    "AJAR_ACTIVE_STEPS": ",".join(active_steps),
+                    "AJAR_STEP_SWAPS": active_swap_env,
+                },
             )
             ctrl_fired = _evaluate_defect_fired(
                 ctrl_res["exit_code"], ctrl_res["stdout"], ctrl_res["stderr"], ctrl_res["timed_out"], oracle
@@ -542,6 +643,7 @@ def run_chain_reproduction(
         # 3. Automated $N$-Step Marginal-Contribution Ablation:
         env_ablatable = (
             ("AJAR_ABLATE_STEPS" in poc_cmd)
+            or ("AJAR_ACTIVE_STEPS" in poc_cmd)
             or ("StageContext" in poc_cmd)
             or ("ajar_helpers" in poc_cmd)
         )
@@ -552,8 +654,8 @@ def run_chain_reproduction(
         )
 
         if not build_failure_reason and full_fired and ctrl_passed and ablate_steps:
-            non_gadget_steps = [s for s in clean_steps if step_roles.get(s) != "trust_gadget"]
-            if len(clean_steps) >= 2 and not uses_composable_ablation:
+            non_gadget_steps = [s for s in active_steps if step_roles.get(s) != "trust_gadget"]
+            if len(active_steps) >= 2 and not uses_composable_ablation:
                 ablation_passed = False
                 ablation_failure_reason = (
                     "Marginal-contribution gate: multi-step chains require step-ablatable capabilities "
@@ -562,7 +664,7 @@ def run_chain_reproduction(
                 )
             elif uses_composable_ablation:
                 causally_ablated_count = 0
-                for step_id in clean_steps:
+                for step_id in active_steps:
                     has_helper = bool(step_id in prim_rows and "helper_id" in prim_rows[step_id].keys() and prim_rows[step_id]["helper_id"])
                     can_ablate_this_step = (step_id in patch_map) or has_helper or env_ablatable
                     if not can_ablate_this_step:
@@ -675,7 +777,12 @@ def run_chain_reproduction(
                         cache_dir=cache_dir,
                         timeout_sec=timeout_sec,
                         helpers_dir=helpers_dir,
-                        extra_env={"AJAR_REPRO_MODE": "exploit_path", "AJAR_ABLATE_STEPS": step_id},
+                        extra_env={
+                            "AJAR_REPRO_MODE": "exploit_path",
+                            "AJAR_ABLATE_STEPS": step_id,
+                            "AJAR_ACTIVE_STEPS": ",".join(s for s in active_steps if s != step_id),
+                            "AJAR_STEP_SWAPS": active_swap_env,
+                        },
                     )
                     still_fired = _evaluate_defect_fired(
                         abl_res["exit_code"], abl_res["stdout"], abl_res["stderr"], abl_res["timed_out"], oracle
@@ -732,7 +839,7 @@ def run_chain_reproduction(
                         break
                     causally_ablated_count += 1
 
-                if ablation_passed and len(clean_steps) >= 2 and causally_ablated_count == 0:
+                if ablation_passed and len(active_steps) >= 2 and causally_ablated_count == 0:
                     ablation_passed = False
                     ablation_failure_reason = (
                         "Marginal-contribution gate: at least one upstream capability/finding step must be causally ablated."
@@ -757,7 +864,7 @@ def run_chain_reproduction(
         stdout=str(full_res.get("stdout", "")),
         stderr=str(full_res.get("stderr", "")),
         severity=severity,
-        step_ids=clean_steps,
+        step_ids=active_steps,
         declared_steps=declared_steps,
         target_locus=tail_locus,
         explicit_jewel_id=jewel_id,
@@ -783,6 +890,9 @@ def run_chain_reproduction(
         "slot_index": slot_idx,
         "build_cmd": scrub_text(eff_build_cmd),
         "reason": reason,
+        "requested_steps": clean_steps,
+        "active_steps": active_steps,
+        "backup_swaps_tried": backup_swaps_tried,
         "poc_exit": int(full_res["exit_code"]),
         "control_exit": int(ctrl_res["exit_code"]),
         "poc_stdout": full_res["stdout"][:1500],
@@ -794,16 +904,17 @@ def run_chain_reproduction(
         conn.execute(
             """
             INSERT INTO chains(
-                chain_id, title, severity, step_ids_json, e2e_poc_cmd, control_cmd,
+                chain_id, title, severity, step_ids_json, backup_steps_json, e2e_poc_cmd, control_cmd,
                 verified, evidence_json, slot_index, oracle_json, ablation_matrix_json,
                 realism_tier, realism_json, jewel_id, door_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 cid,
                 scrub_text(title),
                 severity,
-                json.dumps(clean_steps),
+                json.dumps(active_steps),
+                json.dumps(clean_backups, sort_keys=True),
                 scrub_text(poc_cmd),
                 scrub_text(control_cmd),
                 1 if verified else 0,
@@ -822,7 +933,7 @@ def run_chain_reproduction(
         if verified:
             from ajar.epistemic_hooks import consume_hooks_for_locus
 
-            for sid in clean_steps:
+            for sid in active_steps:
                 conn.execute(
                     "UPDATE primitives SET chained = 1, status = 'chained' WHERE primitive_id = ?",
                     (sid,),
@@ -841,7 +952,7 @@ def run_chain_reproduction(
             resolved_doors = mark_chain_doors_and_jewels_resolved(
                 conn,
                 chain_id=cid,
-                step_ids=clean_steps,
+                step_ids=active_steps,
                 door_id=door_id.strip(),
                 jewel_id=str(realism["jewel_id"]),
                 realism_tier=str(realism["realism_tier"]),
@@ -853,7 +964,8 @@ def run_chain_reproduction(
             cid,
             {
                 "verified": verified,
-                "steps": clean_steps,
+                "steps": active_steps,
+                "backup_swaps_tried": backup_swaps_tried,
                 "ablated_steps": len(ablation_matrix),
                 "realism_tier": realism["realism_tier"],
                 "resolved_doors": resolved_doors,
@@ -863,6 +975,8 @@ def run_chain_reproduction(
     return {
         "chain_id": cid,
         "verified": verified,
+        "active_steps": active_steps,
+        "backup_swaps_tried": backup_swaps_tried,
         "realism_tier": realism["realism_tier"],
         "jewel_id": realism["jewel_id"],
         "resolved_doors": resolved_doors,

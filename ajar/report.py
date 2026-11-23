@@ -28,7 +28,7 @@ def build_report_data(
         conn,
         """
         SELECT f.*, c.falsifier_worker_id, c.falsification_prediction,
-               c.customer_state, c.remediation_state
+               c.customer_state, c.remediation_state, c.same_root_claim_id, c.duplicate_of_claim_id
         FROM findings f
         JOIN claims c ON f.claim_id = c.claim_id
         ORDER BY CASE f.severity
@@ -36,6 +36,14 @@ def build_report_data(
             f.created_at ASC
         """,
     )
+    root_keys: set[str] = set()
+    for f in findings:
+        sr = str(f.get("same_root_claim_id") or "").strip()
+        dup = str(f.get("duplicate_of_claim_id") or "").strip()
+        loc_base = str(f.get("locus") or "").split(":", 1)[0].strip().lstrip("./")
+        root_keys.add(sr or dup or str(f.get("locus") or loc_base))
+    distinct_root_causes_count = len(root_keys)
+
     chains = list_rows(conn, "SELECT * FROM chains WHERE verified = 1 ORDER BY created_at ASC")
     surfaces = list_rows(conn, "SELECT * FROM surfaces ORDER BY priority ASC, created_at ASC")
     dry_controls = list_rows(
@@ -87,6 +95,7 @@ def build_report_data(
         "crown_jewels": list_rows(conn, "SELECT * FROM crown_jewels ORDER BY created_at ASC"),
         "open_doors": list_rows(conn, "SELECT * FROM parked_doors ORDER BY created_at ASC"),
         "findings": findings,
+        "distinct_root_causes_count": distinct_root_causes_count,
         "verified_chains": chains,
         "patch_verifications": patch_verifications,
         "epistemic_hooks": epistemic_hooks,

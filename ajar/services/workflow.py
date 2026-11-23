@@ -364,6 +364,7 @@ def propose_claim(
     severity: str = "high",
     seeded_by_human: bool = False,
     consume_anomaly_id: str | None = None,
+    same_root_of: str | None = None,
     target_dir: pathlib.Path | None = None,
     target_mode: str = "source",
 ) -> dict[str, Any]:
@@ -381,8 +382,13 @@ def propose_claim(
     cid = new_id("clm")
     now_iso = utc_now_iso()
     sub = infer_subsystem(locus)
+    clean_root = (same_root_of or "").strip() or None
     with immediate_tx(conn):
         assert_run_mutable(conn, operation="claim_propose")
+        if clean_root is not None:
+            parent_clm = conn.execute("SELECT claim_id FROM claims WHERE claim_id = ?", (clean_root,)).fetchone()
+            if parent_clm is None:
+                raise AjarError(f"Unknown --same-root-of claim_id: {clean_root}", EXIT_USER_ERROR)
         check_dead_end_repetition(
             conn,
             locus=locus,
@@ -394,8 +400,8 @@ def propose_claim(
             INSERT INTO claims(
                 claim_id, surface_id, proposer_worker_id, seeded_by_human, title, subsystem, locus,
                 mechanism, mechanism_key, severity, falsification_prediction, falsification_test,
-                status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'proposed', ?, ?)
+                status, same_root_claim_id, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'proposed', ?, ?, ?)
             """,
             (
                 cid,
@@ -410,6 +416,7 @@ def propose_claim(
                 severity,
                 scrub_text(falsification_prediction),
                 scrub_text(falsification_test),
+                clean_root,
                 now_iso,
                 now_iso,
             ),
@@ -428,11 +435,18 @@ def propose_claim(
             text_blob=f"{title} {mechanism}",
             target_dir=target_dir if target_mode == "source" else None,
         )
-        log_event(conn, wid, "claim_proposed", cid, {"locus": locus, "severity": severity})
+        log_event(
+            conn,
+            wid,
+            "claim_proposed",
+            cid,
+            {"locus": locus, "severity": severity, "same_root_claim_id": clean_root or ""},
+        )
     return {
         "claim_id": cid,
         "status": "proposed",
         "subsystem": sub,
+        "same_root_claim_id": clean_root,
         "hooks_triggered": [h["hook_code"] for h in hooks],
     }
 
@@ -1511,4 +1525,169 @@ def rank_leads(
         "total_votes": int(conn.execute("SELECT COUNT(*) AS c FROM lead_votes").fetchone()["c"]),
         "root_plateau_throttles": list(throttles.values()),
     }
+
+
+def mark_claim_duplicate(
+    conn: sqlite3.Connection,
+    *,
+    claim_id: str,
+    duplicate_of_claim_id: str,
+    worker_id: str,
+    reason: str,
+) -> dict[str, Any]:
+    wid = (worker_id or "").strip() or "worker"
+    parent_id = (duplicate_of_claim_id or "").strip()
+    clean_reason = scrub_text((reason or "").strip())
+    if not parent_id or parent_id == claim_id:
+        raise AjarError("--of must reference a distinct existing claim_id.", EXIT_USER_ERROR)
+    if len(clean_reason) < 8:
+        raise AjarError("claim duplicate --reason must be at least 8 characters.", EXIT_USER_ERROR)
+    now_iso = utc_now_iso()
+    with immediate_tx(conn):
+        assert_run_mutable(conn, operation="claim_duplicate")
+        clm = conn.execute("SELECT * FROM claims WHERE claim_id = ?", (claim_id,)).fetchone()
+        if clm is None:
+            raise AjarError(f"Unknown claim_id: {claim_id}", EXIT_USER_ERROR)
+        parent = conn.execute("SELECT claim_id FROM claims WHERE claim_id = ?", (parent_id,)).fetchone()
+        if parent is None:
+            raise AjarError(f"Unknown parent claim_id: {parent_id}", EXIT_USER_ERROR)
+        assert_valid_claim_transition(str(clm["status"]), "duplicate_root_cause", claim_id=claim_id)
+        axes = derive_claim_axes("duplicate_root_cause")
+        conn.execute(
+            """
+            UPDATE claims
+            SET status = 'duplicate_root_cause',
+                duplicate_of_claim_id = ?,
+                same_root_claim_id = ?,
+                research_state = ?,
+                evidence_state = ?,
+                falsify_notes = ?,
+                updated_at = ?
+            WHERE claim_id = ?
+            """,
+            (
+                parent_id,
+                parent_id,
+                axes.research_state.value,
+                axes.evidence_state.value,
+                clean_reason,
+                now_iso,
+                claim_id,
+            ),
+        )
+        conn.execute(
+            """
+            UPDATE tasks
+            SET status = 'done', worker_id = ?, summary = ?, lease_expires_at = NULL, updated_at = ?
+            WHERE parent_claim_id = ? AND status IN ('open', 'leased')
+            """,
+            (wid, f"Closed as duplicate_root_cause of {parent_id}: {clean_reason[:120]}", now_iso, claim_id),
+        )
+        consume_hooks_for_locus(conn, source_entity_id=claim_id)
+        log_event(
+            conn,
+            wid,
+            "claim_marked_duplicate",
+            claim_id,
+            {"duplicate_of_claim_id": parent_id, "reason": clean_reason[:200]},
+        )
+    return {
+        "claim_id": claim_id,
+        "status": "duplicate_root_cause",
+        "duplicate_of_claim_id": parent_id,
+    }
+
+
+def calibrate_chain(
+    conn: sqlite3.Connection,
+    *,
+    chain_id: str,
+    reason: str,
+    realism_tier: str | None = None,
+    severity: str | None = None,
+    declared_steps: int | None = None,
+    worker_id: str = "operator",
+) -> dict[str, Any]:
+    clean_reason = scrub_text((reason or "").strip())
+    if len(clean_reason) < 8:
+        raise AjarError("Chain calibration --reason must be at least 8 characters.", EXIT_USER_ERROR)
+    if realism_tier and realism_tier not in ("crown_jewel", "high_impact", "stepping_stone"):
+        raise AjarError(f"Unsupported --realism-tier: {realism_tier!r}", EXIT_USER_ERROR)
+    if severity and severity not in ("critical", "high", "medium", "low"):
+        raise AjarError(f"Unsupported --severity: {severity!r}", EXIT_USER_ERROR)
+    wid = (worker_id or "").strip() or "operator"
+    now_iso = utc_now_iso()
+
+    with immediate_tx(conn):
+        assert_run_mutable(conn, operation="chain_calibrate")
+        crow = conn.execute("SELECT * FROM chains WHERE chain_id = ?", (chain_id,)).fetchone()
+        if crow is None:
+            raise AjarError(f"Unknown chain_id: {chain_id}", EXIT_USER_ERROR)
+        new_sev = (severity or str(crow["severity"])).strip().lower()
+        cur_tier = str(crow["realism_tier"] if "realism_tier" in crow.keys() else "stepping_stone")
+        new_tier = realism_tier if realism_tier else ("stepping_stone" if new_sev in ("medium", "low") else cur_tier)
+        try:
+            r_obj = json.loads(str(crow["realism_json"] or "{}"))
+        except (ValueError, TypeError):
+            r_obj = {}
+        if declared_steps is not None:
+            r_obj["declared_steps"] = max(1, int(declared_steps))
+            r_obj["estimated_steps"] = max(1, int(declared_steps))
+        r_obj["realism_tier"] = new_tier
+        r_obj["calibration_notes"] = clean_reason
+
+        conn.execute(
+            """
+            UPDATE chains
+            SET severity = ?, realism_tier = ?, realism_json = ?
+            WHERE chain_id = ?
+            """,
+            (new_sev, new_tier, json.dumps(r_obj, sort_keys=True), chain_id),
+        )
+        j_id = str(crow["jewel_id"] or "").strip()
+        if j_id and cur_tier == "crown_jewel" and new_tier != "crown_jewel":
+            conn.execute(
+                """
+                UPDATE crown_jewels
+                SET status = 'locked', reached_by_id = '', updated_at = ?
+                WHERE jewel_id = ? AND reached_by_id = ?
+                """,
+                (now_iso, j_id, chain_id),
+            )
+        elif j_id and new_tier == "crown_jewel" and int(crow["verified"] or 0) == 1:
+            conn.execute(
+                """
+                UPDATE crown_jewels
+                SET status = 'reached', reached_by_id = ?, updated_at = ?
+                WHERE jewel_id = ?
+                """,
+                (chain_id, now_iso, j_id),
+            )
+        if wid == "operator":
+            conn.execute(
+                "INSERT INTO human_touches(touch_id, kind, actor, notes, created_at) VALUES (?, 'scope_authority', 'operator', ?, ?)",
+                (new_id("tch"), f"calibrate chain {chain_id} -> {new_sev}/{new_tier}: {clean_reason[:140]}", now_iso),
+            )
+        log_event(
+            conn,
+            wid,
+            "chain_calibrated",
+            chain_id,
+            {
+                "old_severity": crow["severity"],
+                "new_severity": new_sev,
+                "old_realism_tier": cur_tier,
+                "realism_tier": new_tier,
+                "declared_steps": declared_steps,
+                "reason": clean_reason[:200],
+            },
+        )
+    return {
+        "chain_id": chain_id,
+        "severity": new_sev,
+        "realism_tier": new_tier,
+        "declared_steps": r_obj.get("declared_steps"),
+        "reason": clean_reason,
+    }
+
 

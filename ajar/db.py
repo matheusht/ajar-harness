@@ -919,12 +919,16 @@ def calibrate_finding(
     reason: str,
     severity: str | None = None,
     title: str | None = None,
+    declared_steps: int | None = None,
+    realism_tier: str | None = None,
     worker_id: str = "operator",
 ) -> dict[str, Any]:
-    """Calibrate severity/title on a confirmed finding without ad-hoc SQL edits."""
+    """Calibrate severity/title/realism on a confirmed finding without ad-hoc SQL edits."""
     clean_reason = scrub_text((reason or "").strip())
     if len(clean_reason) < 8:
         raise AjarError("Finding calibration --reason must be at least 8 characters.", EXIT_USER_ERROR)
+    if realism_tier and realism_tier not in ("crown_jewel", "high_impact", "stepping_stone"):
+        raise AjarError(f"Unsupported --realism-tier: {realism_tier!r}", EXIT_USER_ERROR)
     now_iso = utc_now_iso()
     with immediate_tx(conn):
         frow = conn.execute("SELECT * FROM findings WHERE finding_id = ?", (finding_id,)).fetchone()
@@ -935,15 +939,28 @@ def calibrate_finding(
             raise AjarError(f"Unsupported severity: {new_sev!r}", EXIT_USER_ERROR)
         new_title = scrub_text(title.strip()) if title and title.strip() else str(frow["title"])
         cur_tier = str(frow["realism_tier"] if "realism_tier" in frow.keys() else "stepping_stone")
-        new_tier = "stepping_stone" if new_sev in ("medium", "low") else cur_tier
+        try:
+            r_obj = json.loads(str(frow["realism_json"] or "{}")) if "realism_json" in frow.keys() else {}
+        except (ValueError, TypeError):
+            r_obj = {}
+        if declared_steps is not None:
+            r_obj["declared_steps"] = max(1, int(declared_steps))
+            r_obj["estimated_steps"] = max(1, int(declared_steps))
+        if realism_tier:
+            new_tier = realism_tier
+        elif new_sev in ("medium", "low"):
+            new_tier = "stepping_stone"
+        else:
+            new_tier = cur_tier
+        r_obj["realism_tier"] = new_tier
 
         conn.execute(
             """
             UPDATE findings
-            SET severity = ?, title = ?, realism_tier = ?, calibration_notes = ?
+            SET severity = ?, title = ?, realism_tier = ?, realism_json = ?, calibration_notes = ?
             WHERE finding_id = ?
             """,
-            (new_sev, new_title, new_tier, clean_reason, finding_id),
+            (new_sev, new_title, new_tier, json.dumps(r_obj, sort_keys=True), clean_reason, finding_id),
         )
         conn.execute(
             "UPDATE claims SET severity = ?, title = ?, updated_at = ? WHERE claim_id = ?",
@@ -952,7 +969,7 @@ def calibrate_finding(
         if worker_id == "operator":
             conn.execute(
                 "INSERT INTO human_touches(touch_id, kind, actor, notes, created_at) VALUES (?, 'scope_authority', 'operator', ?, ?)",
-                (new_id("tch"), f"calibrate {finding_id} -> {new_sev}: {clean_reason[:140]}", now_iso),
+                (new_id("tch"), f"calibrate {finding_id} -> {new_sev}/{new_tier}: {clean_reason[:140]}", now_iso),
             )
         log_event(
             conn,
@@ -964,6 +981,7 @@ def calibrate_finding(
                 "new_severity": new_sev,
                 "new_title": new_title,
                 "realism_tier": new_tier,
+                "declared_steps": declared_steps,
                 "reason": clean_reason[:200],
             },
         )
@@ -974,6 +992,7 @@ def calibrate_finding(
         "severity": new_sev,
         "title": new_title,
         "realism_tier": new_tier,
+        "declared_steps": r_obj.get("declared_steps"),
         "calibration_notes": clean_reason,
     }
 

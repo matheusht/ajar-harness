@@ -16,6 +16,10 @@ from ajar import (
     EXIT_USER_ERROR,
     __version__,
 )
+from ajar.catalog import (
+    search_issue_catalog,
+    trace_backward_sink_slices,
+)
 from ajar.cli.common import _check_sqlite_fts5, _emit
 from ajar.db import (
     AjarError,
@@ -366,6 +370,15 @@ def cmd_status(args: argparse.Namespace) -> int:
                 "SELECT COUNT(*) AS c FROM epistemic_hooks WHERE status = 'active'"
             ).fetchone()["c"],
             "findings_count": gates["findings_count"],
+            "distinct_root_causes_count": int(
+                conn.execute(
+                    """
+                    SELECT COUNT(DISTINCT COALESCE(NULLIF(c.same_root_claim_id, ''), NULLIF(c.duplicate_of_claim_id, ''), f.locus)) AS c
+                    FROM findings f
+                    JOIN claims c ON f.claim_id = c.claim_id
+                    """
+                ).fetchone()["c"]
+            ),
             "gates_passed": gates["passed"],
             "blockers": gates["blockers"],
             "economics": gates["economics"],
@@ -904,4 +917,33 @@ def cmd_lead(args: argparse.Namespace) -> int:
         return EXIT_OK
     finally:
         conn.close()
+
+
+def cmd_catalog(args: argparse.Namespace) -> int:
+    rid = resolve_run_id(args.run)
+    conn = open_run_db(rid)
+    try:
+        if args.catalog_cmd == "search":
+            res = search_issue_catalog(
+                conn,
+                query=args.query or "",
+                tags=args.tags or "",
+                subsystem=args.subsystem or "",
+                role=args.role or "",
+                include_unverified=not bool(args.verified_only),
+                limit=int(args.limit),
+            )
+            _emit(res, True)
+            return EXIT_OK
+        res = trace_backward_sink_slices(
+            conn,
+            sink=args.sink,
+            max_hops=int(args.max_hops),
+            limit=int(args.limit),
+        )
+        _emit(res, True)
+        return EXIT_OK
+    finally:
+        conn.close()
+
 

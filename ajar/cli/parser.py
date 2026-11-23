@@ -32,6 +32,7 @@ from ajar.cli.hunt import (
 )
 from ajar.cli.ops import (
     cmd_brief,
+    cmd_catalog,
     cmd_context,
     cmd_doctor,
     cmd_economics,
@@ -458,7 +459,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_bd.set_defaults(func=cmd_binding)
 
     # claim
-    p_cl = sub.add_parser("claim", help="Manage vulnerability hypotheses (`propose`, `rescope`, `falsify`, `survive`, `instrument`, `reproduce`).")
+    p_cl = sub.add_parser("claim", help="Manage vulnerability hypotheses (`propose`, `rescope`, `falsify`, `survive`, `duplicate`, `instrument`, `reproduce`).")
     cl_sub = p_cl.add_subparsers(dest="claim_cmd", required=True)
     pc_prop = cl_sub.add_parser("propose")
     pc_prop.add_argument("--worker", required=True)
@@ -470,8 +471,16 @@ def build_parser() -> argparse.ArgumentParser:
     pc_prop.add_argument("--falsification-test", required=True)
     pc_prop.add_argument("--surface")
     pc_prop.add_argument("--consume-anomaly")
+    pc_prop.add_argument("--same-root-of", default="", help="Optional parent `clm-*` ID when proposing an alternate entry route for the same root cause.")
     pc_prop.add_argument("--seeded-by-human", action="store_true")
     pc_prop.add_argument("--run")
+
+    pc_dup = cl_sub.add_parser("duplicate", help="Close a candidate claim as `duplicate_root_cause` of an existing parent claim.")
+    pc_dup.add_argument("claim_id")
+    pc_dup.add_argument("--of", required=True, help="Parent `clm-*` ID sharing the same root defect.")
+    pc_dup.add_argument("--worker", required=True)
+    pc_dup.add_argument("--reason", required=True)
+    pc_dup.add_argument("--run")
 
     pc_rsc = cl_sub.add_parser("rescope")
     pc_rsc.add_argument("claim_id")
@@ -568,12 +577,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_rpr.set_defaults(func=cmd_repro)
 
     # finding (Operator calibration & listing)
-    p_fnd = sub.add_parser("finding", help="Inspect confirmed findings and calibrate severity/titles without raw SQL.")
+    p_fnd = sub.add_parser("finding", help="Inspect confirmed findings and calibrate severity/titles/realism without raw SQL.")
     fnd_sub = p_fnd.add_subparsers(dest="finding_cmd", required=True)
-    pfn_c = fnd_sub.add_parser("calibrate", help="Calibrate severity or title on a confirmed finding.")
+    pfn_c = fnd_sub.add_parser("calibrate", help="Calibrate severity, title, declared steps, or realism tier on a confirmed finding.")
     pfn_c.add_argument("finding_id")
     pfn_c.add_argument("--severity", choices=("critical", "high", "medium", "low"))
     pfn_c.add_argument("--title")
+    pfn_c.add_argument("--declared-steps", type=int, default=None, help="Optional calibrated victim interaction step count.")
+    pfn_c.add_argument("--realism-tier", choices=("crown_jewel", "high_impact", "stepping_stone"), help="Optional calibrated realism tier.")
     pfn_c.add_argument("--reason", required=True)
     pfn_c.add_argument("--worker", default="operator")
     pfn_c.add_argument("--run")
@@ -597,6 +608,7 @@ def build_parser() -> argparse.ArgumentParser:
     pch_p.add_argument("--severity", choices=("critical", "high", "medium", "low"), default="critical")
     pch_p.add_argument("--oracle-json", help="Optional JSON oracle rules (`expect_regex`, `expect_exit_code`).")
     pch_p.add_argument("--step-micropatch", action="append", help="Per-step counterfactual patch `<step_id>:<path/to/step.diff>` (auto-inherited for `fnd-*` and `prim-*` with `--micropatch`).")
+    pch_p.add_argument("--backup-step", action="append", help="Modular backup step `<primary_step_id>:<backup_step_id>` automatically swapped if primary fails.")
     pch_p.add_argument("--door", default="", help="Optional Open Door ID (`door-*`) resolved by this chain.")
     pch_p.add_argument("--jewel", default="", help="Optional Crown Jewel ID (`cjw-*`) reached by this chain.")
     pch_p.add_argument("--declared-steps", type=int, default=None, help="Optional explicit victim interaction step count.")
@@ -604,6 +616,15 @@ def build_parser() -> argparse.ArgumentParser:
     pch_p.add_argument("--timeout", type=int, default=60)
     pch_p.add_argument("--worker", default="worker")
     pch_p.add_argument("--run")
+
+    pch_cal = ch_sub.add_parser("calibrate", help="Calibrate realism tier, severity, or declared steps on a recorded chain.")
+    pch_cal.add_argument("chain_id")
+    pch_cal.add_argument("--realism-tier", choices=("crown_jewel", "high_impact", "stepping_stone"))
+    pch_cal.add_argument("--severity", choices=("critical", "high", "medium", "low"))
+    pch_cal.add_argument("--declared-steps", type=int, default=None)
+    pch_cal.add_argument("--reason", required=True)
+    pch_cal.add_argument("--worker", default="operator")
+    pch_cal.add_argument("--run")
 
     pch_pr = ch_sub.add_parser("probe", help="Hydrate a Stage-1 post-state snapshot (`snp-*`) into the shared `slot-<k>` pool and probe Stage 2.")
     pch_pr.add_argument("--from-snapshot", required=True, help="Snapshot ID (`snp-*`) from `ajar claim reproduce --save-post-state`.")
@@ -896,6 +917,32 @@ def build_parser() -> argparse.ArgumentParser:
     pld_t = lead_sub.add_parser("throttles", help="Inspect per-root diminishing-returns plateau throttles.")
     pld_t.add_argument("--run")
     p_lead.set_defaults(func=cmd_lead)
+
+    # catalog (Unified Issue & Gadget Catalog + Backward Sink-to-Source Call-Cone Slicing)
+    p_cat = sub.add_parser(
+        "catalog",
+        help="Search the unified Issue & Gadget Catalog and trace backward sink-to-source call cones.",
+    )
+    cat_sub = p_cat.add_subparsers(dest="catalog_cmd", required=True)
+    pct_s = cat_sub.add_parser("search", help="Query findings, capabilities, trust gadgets, claims, anomalies, and Open Doors.")
+    pct_s.add_argument("query", nargs="?", default="", help="Optional lexical/symbol query.")
+    pct_s.add_argument("--tags", default="", help="Optional comma-separated capability tags (`ns:name`).")
+    pct_s.add_argument("--subsystem", default="", help="Optional subsystem or file filter.")
+    pct_s.add_argument(
+        "--role",
+        choices=("finding", "capability", "trust_gadget", "candidate_claim", "anomaly", "open_door"),
+        default="",
+    )
+    pct_s.add_argument("--verified-only", action="store_true", help="Exclude unverified candidate claims and unexplained anomalies.")
+    pct_s.add_argument("--limit", type=int, default=30)
+    pct_s.add_argument("--run")
+
+    pct_b = cat_sub.add_parser("backslice", help="Walk `repomap_edges` backward (`callee <- caller`) from a sink/jewel/door/symbol.")
+    pct_b.add_argument("sink", help="Crown-Jewel ID (`cjw-*`), Open-Door ID (`door-*`), `file:line` locus, or symbol name.")
+    pct_b.add_argument("--max-hops", type=int, default=3, help="Backward call-graph hops `1..6` (default: 3).")
+    pct_b.add_argument("--limit", type=int, default=20)
+    pct_b.add_argument("--run")
+    p_cat.set_defaults(func=cmd_catalog)
 
     return p
 

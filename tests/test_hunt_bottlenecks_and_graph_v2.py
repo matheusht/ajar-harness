@@ -1690,7 +1690,8 @@ class TestPR243ReviewRegressions(unittest.TestCase):
                         conn,
                         rule_text=(
                             f"PATH=/usr/bin:{alice_home}/bin:{var_tmp_p} "
-                            f"gcc -I{alice_home}/inc -L{alice_home}/lib -o{var_tmp_p} "
+                            f"gcc -I{alice_home}/inc -L{alice_home}/lib -Wl,-rpath,{alice_home}/lib -o{var_tmp_p} "
+                            "args=/tmp/csv_a,/tmp/csv_b "
                             f"file://{bob_users}/repo/src/app.c {root_p} {shared_p} "
                             f"state={custom_ajar_home}/runs/run-g2-san/artifacts/a.txt "
                             "docs=https://example.com/home/guide health=http://127.0.0.1:8080/tmp/health"
@@ -1719,6 +1720,8 @@ class TestPR243ReviewRegressions(unittest.TestCase):
                     for forbidden in (
                         "alice",
                         "bob",
+                        "/tmp/csv_a",
+                        "/tmp/csv_b",
                         var_tmp_p,
                         root_p,
                         shared_p,

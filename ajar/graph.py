@@ -56,7 +56,7 @@ _LOCAL_PATH_BODY = (
 )
 _FILE_URI_LOCAL_PATH_RE = re.compile(r"file://" + _LOCAL_PATH_BODY)
 _FLAG_LOCAL_PATH_RE = re.compile(r"((?:^|[\s'\"(=,;])-[A-Za-z])" + _LOCAL_PATH_BODY)
-_ABS_LOCAL_PATH_RE = re.compile(r"(?<![A-Za-z0-9_.+-/])" + _LOCAL_PATH_BODY)
+_ABS_LOCAL_PATH_RE = re.compile(r"(?<![A-Za-z0-9_.+/-])" + _LOCAL_PATH_BODY)
 _GIT_SLUG_RE = re.compile(r"[:/]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+?)(?:\.git)?/?$")
 _SEVERITY_RANK: dict[str, int] = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 

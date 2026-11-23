@@ -25,6 +25,7 @@ import shutil
 import signal
 import socket
 import sqlite3
+import stat
 import subprocess
 import tarfile
 import tempfile
@@ -705,13 +706,43 @@ def _snapshot_clean_build_outputs(
         files_fp[rel] = fp
 
     dirs: set[str] = set()
-    for root, dirnames, _ in os.walk(slot_dir, followlinks=False):
+    for root, dirnames, filenames in os.walk(slot_dir, followlinks=False):
         rel_root = pathlib.Path(root).relative_to(slot_dir)
         dirnames[:] = [d for d in dirnames if not (rel_root == pathlib.Path(".") and d == ".git")]
+        for fname in filenames:
+            if rel_root == pathlib.Path(".") and fname == ".git":
+                continue
+            try:
+                st_f = os.lstat(pathlib.Path(root) / fname)
+            except OSError:
+                return None
+            if (
+                stat.S_ISFIFO(st_f.st_mode)
+                or stat.S_ISSOCK(st_f.st_mode)
+                or stat.S_ISCHR(st_f.st_mode)
+                or stat.S_ISBLK(st_f.st_mode)
+            ):
+                return None
         for d in dirnames:
-            d_rel = (rel_root / d).as_posix()
-            dirs.add(d_rel)
+            dp = pathlib.Path(root) / d
+            try:
+                st_d = os.lstat(dp)
+            except OSError:
+                return None
+            if (
+                stat.S_ISFIFO(st_d.st_mode)
+                or stat.S_ISSOCK(st_d.st_mode)
+                or stat.S_ISCHR(st_d.st_mode)
+                or stat.S_ISBLK(st_d.st_mode)
+            ):
+                return None
+            if stat.S_ISDIR(st_d.st_mode):
+                dirs.add((rel_root / d).as_posix())
     return _CleanBuildSnapshot(files=files_fp, dirs=frozenset(dirs))
+
+
+def _is_special_file_mode(mode: int) -> bool:
+    return stat.S_ISFIFO(mode) or stat.S_ISSOCK(mode) or stat.S_ISCHR(mode) or stat.S_ISBLK(mode)
 
 
 def _try_clean_arm_preserving_build(
@@ -749,31 +780,67 @@ def _try_clean_arm_preserving_build(
             continue
         p = slot_dir / clean_rel
         try:
-            if p.is_symlink() or p.is_file():
+            st = os.lstat(p)
+            if stat.S_ISLNK(st.st_mode) or stat.S_ISREG(st.st_mode) or _is_special_file_mode(st.st_mode):
                 p.unlink(missing_ok=True)
-            elif p.is_dir():
+            elif stat.S_ISDIR(st.st_mode):
                 shutil.rmtree(p)
+        except FileNotFoundError:
+            continue
         except OSError:
             return False
 
-    # Remove any new directories created during Arm 1 that were absent after the clean build.
-    for root, dirnames, _ in os.walk(slot_dir, topdown=False, followlinks=False):
+    # Inspect every non-`.git` entry bottom-up:
+    # - Unlink special files (FIFOs, Unix sockets, device nodes) that `git ls-files --others` omits.
+    # - Remove any Arm-1 directory absent from `snapshot.dirs`; if non-empty or unremovable, fail closed.
+    for root, dirnames, filenames in os.walk(slot_dir, topdown=False, followlinks=False):
         rel_root = pathlib.Path(root).relative_to(slot_dir)
         if rel_root.parts and rel_root.parts[0] == ".git":
             continue
+        for fname in filenames:
+            if rel_root == pathlib.Path(".") and fname == ".git":
+                continue
+            fp = pathlib.Path(root) / fname
+            try:
+                st_f = os.lstat(fp)
+            except OSError:
+                return False
+            if _is_special_file_mode(st_f.st_mode):
+                try:
+                    fp.unlink()
+                except OSError:
+                    return False
         for d in dirnames:
             if rel_root == pathlib.Path(".") and d == ".git":
                 continue
+            dp = pathlib.Path(root) / d
             d_rel = (rel_root / d).as_posix()
-            if d_rel not in snapshot.dirs:
-                dp = slot_dir / d_rel
+            try:
+                st_d = os.lstat(dp)
+            except OSError:
+                return False
+            if _is_special_file_mode(st_d.st_mode):
                 try:
-                    if dp.is_symlink():
-                        dp.unlink(missing_ok=True)
-                    elif dp.is_dir() and not any(dp.iterdir()):
-                        dp.rmdir()
+                    dp.unlink()
                 except OSError:
                     return False
+                continue
+            if d_rel not in snapshot.dirs:
+                try:
+                    if stat.S_ISLNK(st_d.st_mode):
+                        dp.unlink()
+                    elif stat.S_ISDIR(st_d.st_mode):
+                        dp.rmdir()
+                    else:
+                        return False
+                except OSError:
+                    return False
+
+    # Verify every directory present after the clean build still exists as a real non-symlink directory.
+    for d_rel in snapshot.dirs:
+        dp = slot_dir / d_rel
+        if dp.is_symlink() or not dp.is_dir():
+            return False
 
     # Verify every recorded clean-HEAD build artifact still exists and matches its exact fingerprint.
     dummy_budget = [0]
@@ -1140,30 +1207,41 @@ def _persist_repro_failure_artifact(
     failures_dir = run_dir / "repro" / "failures"
     failures_dir.mkdir(parents=True, exist_ok=True)
     safe_cid = re.sub(r"[^A-Za-z0-9_.-]+", "_", (claim_id or "claim").strip())[:64] or "claim"
-    receipt = scrub_json_value(
-        {
-            "schema": "ajar-repro-failure/1",
-            "recorded_at": utc_now_iso(),
-            "claim_id": claim_id,
-            "error_class": str(result.get("error_class") or ""),
-            "reason": str(result.get("reason") or ""),
-            "observation_hash": str(result.get("observation_hash") or ""),
-            "replay": {
-                "poc_cmd": poc_cmd,
-                "control_cmd": control_cmd,
-                "build_cmd": build_cmd,
-                "micropatch_path": str(micropatch_path),
-            },
-            "arms": {
-                "arm1_clean_poc": result.get("arm1_clean_poc") or {},
-                "arm2_clean_control": result.get("arm2_clean_control") or {},
-                "arm3_patch_poc": result.get("arm3_patch_poc") or {},
-                "arm4_patch_control": result.get("arm4_patch_control") or {},
-                "arm5a_release_poc": result.get("arm5a_release_poc") or {},
-                "arm5b_release_control": result.get("arm5b_release_control") or {},
-            },
-        }
+    arms_payload = {
+        "arm1_clean_poc": result.get("arm1_clean_poc") or {},
+        "arm2_clean_control": result.get("arm2_clean_control") or {},
+        "arm3_patch_poc": result.get("arm3_patch_poc") or {},
+        "arm4_patch_control": result.get("arm4_patch_control") or {},
+        "arm5a_release_poc": result.get("arm5a_release_poc") or {},
+        "arm5b_release_control": result.get("arm5b_release_control") or {},
+    }
+    build_keys = ("build_clean", "build_arm2", "build_patched")
+    any_timed_out = bool(result.get("timed_out", False)) or any(
+        isinstance(v, dict) and bool(v.get("timed_out", False)) for v in arms_payload.values()
     )
+    raw_receipt: dict[str, Any] = {
+        "schema": "ajar-repro-failure/1",
+        "recorded_at": utc_now_iso(),
+        "claim_id": claim_id,
+        "error_class": str(result.get("error_class") or ""),
+        "reason": str(result.get("reason") or ""),
+        "observation_hash": str(result.get("observation_hash") or ""),
+        "replay": {
+            "poc_cmd": poc_cmd,
+            "control_cmd": control_cmd,
+            "build_cmd": build_cmd,
+            "micropatch_path": str(micropatch_path),
+        },
+        "arms": arms_payload,
+    }
+    for bk in build_keys:
+        bval = result.get(bk)
+        if isinstance(bval, dict) and bval:
+            raw_receipt[bk] = bval
+            if bool(bval.get("timed_out", False)):
+                any_timed_out = True
+    raw_receipt["timed_out"] = any_timed_out
+    receipt = scrub_json_value(raw_receipt)
     encoded = (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode("utf-8")
     seq = 1
     while True:
@@ -1367,10 +1445,12 @@ def _run_source_reproduction_impl(
                 helpers_dir=helpers_dir,
             )
             if bld_clean["exit_code"] != 0 or bld_clean["timed_out"]:
+                bld_desc = "timed out" if bld_clean["timed_out"] else f"failed (exit={bld_clean['exit_code']})"
                 return {
                     "passed": False,
                     "error_class": "build_or_env_error",
-                    "reason": f"Clean-HEAD --build-cmd failed (exit={bld_clean['exit_code']}): {bld_clean['stderr'][:240]}",
+                    "timed_out": bool(bld_clean["timed_out"]),
+                    "reason": f"Clean-HEAD --build-cmd {bld_desc}: {bld_clean['stderr'][:240]}",
                     "observation_hash": hashlib.sha256(f"bld1:{bld_clean['exit_code']}".encode("utf-8")).hexdigest()[:16],
                     "micropatch_diff": scrub_text(diff_text[:4000]),
                     "build_clean": bld_clean,
@@ -1448,12 +1528,19 @@ def _run_source_reproduction_impl(
                     helpers_dir=helpers_dir,
                 )
                 if bld_arm2["exit_code"] != 0 or bld_arm2["timed_out"]:
+                    bld_desc = (
+                        "timed out after reset"
+                        if bld_arm2["timed_out"]
+                        else f"failed after reset (exit={bld_arm2['exit_code']})"
+                    )
                     return {
                         "passed": False,
                         "error_class": "build_or_env_error",
-                        "reason": f"Arm-2 --build-cmd failed after reset (exit={bld_arm2['exit_code']}): {bld_arm2['stderr'][:240]}",
+                        "timed_out": bool(bld_arm2["timed_out"]),
+                        "reason": f"Arm-2 --build-cmd {bld_desc}: {bld_arm2['stderr'][:240]}",
                         "observation_hash": hashlib.sha256(f"bld2:{bld_arm2['exit_code']}".encode("utf-8")).hexdigest()[:16],
                         "micropatch_diff": scrub_text(diff_text[:4000]),
+                        "build_arm2": bld_arm2,
                         "arm1_clean_poc": arm1,
                         "arm2_clean_control": {"arm_passed": False},
                         "arm3_patch_poc": {"arm_passed": False},
@@ -1536,10 +1623,16 @@ def _run_source_reproduction_impl(
                 helpers_dir=helpers_dir,
             )
             if bld_patch["exit_code"] != 0 or bld_patch["timed_out"]:
+                bld_desc = (
+                    "timed out compiling micro-patch"
+                    if bld_patch["timed_out"]
+                    else f"failed to compile micro-patch (exit={bld_patch['exit_code']})"
+                )
                 return {
                     "passed": False,
                     "error_class": "build_or_env_error",
-                    "reason": f"Patched --build-cmd failed to compile micro-patch (exit={bld_patch['exit_code']}): {bld_patch['stderr'][:240]}",
+                    "timed_out": bool(bld_patch["timed_out"]),
+                    "reason": f"Patched --build-cmd {bld_desc}: {bld_patch['stderr'][:240]}",
                     "observation_hash": hashlib.sha256(f"bld3:{bld_patch['exit_code']}".encode("utf-8")).hexdigest()[:16],
                     "micropatch_diff": scrub_text(diff_text[:4000]),
                     "build_patched": bld_patch,
@@ -1886,7 +1979,7 @@ def aggregate_failure_telemetry(
                         receipt_timed_out = True
                         ak = str(arm_name)
                         timeouts_by_arm[ak] = timeouts_by_arm.get(ak, 0) + 1
-            for build_key in ("build_clean", "build_patch", "build"):
+            for build_key in ("build_clean", "build_arm2", "build_patched", "build_patch", "build"):
                 b_obj = raw.get(build_key)
                 if isinstance(b_obj, dict) and bool(b_obj.get("timed_out", False)):
                     receipt_timed_out = True

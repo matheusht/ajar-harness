@@ -722,75 +722,76 @@ def escalate_swarm_fallback(
     if reason not in VALID_FALLBACK_REASONS:
         raise AjarError(f"Invalid --reason {reason!r}; expected one of {VALID_FALLBACK_REASONS}.", EXIT_USER_ERROR)
 
-    row = conn.execute(
-        """
-        SELECT * FROM swarm_dispatches
-        WHERE dispatch_id = ? OR worker_id = ?
-        ORDER BY created_at DESC
-        LIMIT 1
-        """,
-        (target.strip(), target.strip()),
-    ).fetchone()
-    if row is None:
-        raise AjarError(
-            f"No swarm dispatch found matching dispatch_id or worker_id {target!r}.",
-            EXIT_USER_ERROR,
+    with immediate_tx(conn):
+        row = conn.execute(
+            """
+            SELECT * FROM swarm_dispatches
+            WHERE dispatch_id = ? OR worker_id = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (target.strip(), target.strip()),
+        ).fetchone()
+        if row is None:
+            raise AjarError(
+                f"No swarm dispatch found matching dispatch_id or worker_id {target!r}.",
+                EXIT_USER_ERROR,
+            )
+
+        prev_id = str(row["dispatch_id"])
+        stage = str(row["stage"])
+        prev_profile = str(row["wire_profile"] or "direct")
+        try:
+            item_ids = [str(x) for x in json.loads(row["item_ids_json"] or "[]") if str(x).strip()]
+        except json.JSONDecodeError:
+            item_ids = []
+        if not item_ids:
+            raise AjarError(f"Dispatch {prev_id} has zero tracked item IDs to re-dispatch.", EXIT_USER_ERROR)
+
+        now_iso = utc_now_iso()
+        conn.execute(
+            "UPDATE swarm_dispatches SET status = ?, notes = ?, updated_at = ? WHERE dispatch_id = ?",
+            (reason, scrub_text(notes or f"Escalated due to {reason}"), now_iso, prev_id),
         )
 
-    prev_id = str(row["dispatch_id"])
-    stage = str(row["stage"])
-    prev_profile = str(row["wire_profile"] or "direct")
-    try:
-        item_ids = [str(x) for x in json.loads(row["item_ids_json"] or "[]") if str(x).strip()]
-    except json.JSONDecodeError:
-        item_ids = []
-    if not item_ids:
-        raise AjarError(f"Dispatch {prev_id} has zero tracked item IDs to re-dispatch.", EXIT_USER_ERROR)
+        prev_idx = WIRE_PROFILE_LADDER.index(prev_profile) if prev_profile in WIRE_PROFILE_LADDER else 0
+        at_ceiling = prev_idx >= (len(WIRE_PROFILE_LADDER) - 1)
+        next_profile = WIRE_PROFILE_LADDER[min(prev_idx + 1, len(WIRE_PROFILE_LADDER) - 1)]
+        chunk_size = _profile_batch_cap(next_profile, len(item_ids))
 
-    now_iso = utc_now_iso()
-    conn.execute(
-        "UPDATE swarm_dispatches SET status = ?, notes = ?, updated_at = ? WHERE dispatch_id = ?",
-        (reason, scrub_text(notes or f"Escalated due to {reason}"), now_iso, prev_id),
-    )
+        # Filter out items that were already resolved (`reproduced`, `falsified`, `done`, `dry`) before partial stall!
+        unresolved_candidates = _select_stage_items(conn, stage=stage, explicit_ids=item_ids, limit=len(item_ids))
+        unresolved_ids = [
+            c["id"]
+            for c in unresolved_candidates
+            if c["status"] not in ("reproduced", "falsified", "duplicate_root_cause", "done", "dry")
+        ] or item_ids
 
-    prev_idx = WIRE_PROFILE_LADDER.index(prev_profile) if prev_profile in WIRE_PROFILE_LADDER else 0
-    at_ceiling = prev_idx >= (len(WIRE_PROFILE_LADDER) - 1)
-    next_profile = WIRE_PROFILE_LADDER[min(prev_idx + 1, len(WIRE_PROFILE_LADDER) - 1)]
-    chunk_size = _profile_batch_cap(next_profile, len(item_ids))
+        recovery_packets: list[dict[str, Any]] = []
+        for offset in range(0, len(unresolved_ids), chunk_size):
+            batch = unresolved_ids[offset : offset + chunk_size]
+            pkt = build_swarm_packet(
+                conn,
+                stage=stage,
+                wire_profile=next_profile,
+                item_ids=batch,
+                limit=chunk_size,
+            )
+            recovery_packets.append(pkt)
 
-    # Filter out items that were already resolved (`reproduced`, `falsified`, `done`, `dry`) before partial stall!
-    unresolved_candidates = _select_stage_items(conn, stage=stage, explicit_ids=item_ids, limit=len(item_ids))
-    unresolved_ids = [
-        c["id"]
-        for c in unresolved_candidates
-        if c["status"] not in ("reproduced", "falsified", "duplicate_root_cause", "done", "dry")
-    ] or item_ids
-
-    recovery_packets: list[dict[str, Any]] = []
-    for offset in range(0, len(unresolved_ids), chunk_size):
-        batch = unresolved_ids[offset : offset + chunk_size]
-        pkt = build_swarm_packet(
+        log_event(
             conn,
-            stage=stage,
-            wire_profile=next_profile,
-            item_ids=batch,
-            limit=chunk_size,
+            "orchestrator",
+            "swarm_wire_profile_escalated",
+            prev_id,
+            {
+                "reason": reason,
+                "previous_profile": prev_profile,
+                "next_profile": next_profile,
+                "at_ladder_ceiling": at_ceiling,
+                "recovery_dispatch_ids": [p["dispatch_id"] for p in recovery_packets],
+            },
         )
-        recovery_packets.append(pkt)
-
-    log_event(
-        conn,
-        "orchestrator",
-        "swarm_wire_profile_escalated",
-        prev_id,
-        {
-            "reason": reason,
-            "previous_profile": prev_profile,
-            "next_profile": next_profile,
-            "at_ladder_ceiling": at_ceiling,
-            "recovery_dispatch_ids": [p["dispatch_id"] for p in recovery_packets],
-        },
-    )
     return {
         "previous_dispatch_id": prev_id,
         "previous_worker_id": str(row["worker_id"]),

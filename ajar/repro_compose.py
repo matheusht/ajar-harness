@@ -406,7 +406,14 @@ def run_chain_reproduction(
             EXIT_USER_ERROR,
         )
 
-    eff_build_cmd = build_cmd.strip() or " && ".join(inherited_build_cmds)
+    if build_cmd.strip():
+        eff_build_cmd = build_cmd.strip()
+    elif len(inherited_build_cmds) > 1:
+        eff_build_cmd = " && ".join(f"({c})" for c in inherited_build_cmds)
+    elif inherited_build_cmds:
+        eff_build_cmd = inherited_build_cmds[0]
+    else:
+        eff_build_cmd = ""
 
     if invariant_breaking_count == 0:
         raise AjarError(

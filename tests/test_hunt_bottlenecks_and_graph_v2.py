@@ -8,6 +8,7 @@ import json
 import os
 import pathlib
 import shutil
+import socket
 import sqlite3
 import subprocess
 import tempfile
@@ -35,7 +36,10 @@ from ajar.repro_compose import (
     run_snapshot_chain_probe,
 )
 from ajar.repro_source import (
+    _prepare_slot_worktree,
     _run_shell_in_slot,
+    _snapshot_clean_build_outputs,
+    _try_clean_arm_preserving_build,
     aggregate_failure_telemetry,
     capture_slot_post_state_snapshot,
     init_source_mirror,
@@ -1513,6 +1517,344 @@ class TestPlatformGraphV2(unittest.TestCase):
                 self.assertEqual(g_v1["run_id"], "run-g2")
                 self.assertTrue(any(e["edge_type"] == "symbol_call" for e in g_v1["edges"]))  # type: ignore[index]
                 self.assertNotIn(fake_tok, json.dumps(g_v1))
+
+
+class TestPR243ReviewRegressions(unittest.TestCase):
+    def test_b3_clean_arm_unlinks_fifo_and_unix_socket_and_rejects_deleted_build_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            target = base / "repo"
+            rdir = base / "run"
+            _git_init_repo(target, {"src/app.py": "print('ok')\n"})
+            mirror = init_source_mirror(rdir, target)
+            slot_dir = rdir / "repro" / "slot-0"
+            _prepare_slot_worktree(mirror, slot_dir)
+
+            # Simulate build_cmd creating a compiled artifact and an empty runtime directory.
+            (slot_dir / "app.bin").write_text("bin", encoding="utf-8")
+            rt_dir = slot_dir / "build" / "runtime_dir"
+            rt_dir.mkdir(parents=True, exist_ok=True)
+            snap = _snapshot_clean_build_outputs(slot_dir)
+            self.assertIsNotNone(snap)
+            assert snap is not None
+            self.assertIn("build/runtime_dir", snap.dirs)
+
+            # 1. Arm-1 creates a FIFO and a Unix domain socket inside a new scratch directory.
+            fifo_path = slot_dir / "arm1.fifo"
+            os.mkfifo(fifo_path)
+            sock_dir = slot_dir / "arm1_ipc"
+            sock_dir.mkdir()
+            sock_path = sock_dir / "s.sock"
+            srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                srv.bind(str(sock_path))
+            finally:
+                srv.close()
+
+            self.assertTrue(_try_clean_arm_preserving_build(slot_dir, snap))
+            self.assertFalse(fifo_path.exists())
+            self.assertFalse(sock_path.exists())
+            self.assertFalse(sock_dir.exists())
+            self.assertTrue((slot_dir / "app.bin").is_file())
+            self.assertTrue(rt_dir.is_dir())
+
+            # 2. If Arm-1 deletes a build_cmd runtime directory, cleanup must return False to force rebuild.
+            rt_dir.rmdir()
+            self.assertFalse(_try_clean_arm_preserving_build(slot_dir, snap))
+
+            # 3. Replacing a snapshot directory with a symlink must also return False.
+            rt_dir.symlink_to(slot_dir / "src")
+            self.assertFalse(_try_clean_arm_preserving_build(slot_dir, snap))
+            rt_dir.unlink(missing_ok=True)
+            rt_dir.mkdir(exist_ok=True)
+
+            # 4. Non-empty Arm-1 scratch directory that cannot be removed fails closed (returns False).
+            stuck_dir = slot_dir / "arm1_stuck"
+            stuck_dir.mkdir()
+            with mock.patch("pathlib.Path.rmdir", side_effect=OSError("Directory not empty")):
+                self.assertFalse(_try_clean_arm_preserving_build(slot_dir, snap))
+
+    def test_b5_end_to_end_real_build_cmd_timeout_counted_by_telemetry(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            ajar_home = base / "ajar_home"
+            target = base / "repo"
+            _git_init_repo(target, {"src/app.c": "int main(void) { return 0; }\n"})
+            mpatch = base / "fix.diff"
+            mpatch.write_text(
+                "--- a/src/app.c\n"
+                "+++ b/src/app.c\n"
+                "@@ -1 +1 @@\n"
+                "-int main(void) { return 0; }\n"
+                "+int main(void) { return 1; }\n",
+                encoding="utf-8",
+            )
+            with mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}):
+                init_run_workspace(
+                    target=str(target),
+                    target_mode="source",
+                    workspace_mode="in_place",
+                    run_id="run-b5-e2e-to",
+                    ajar_home=ajar_home,
+                )
+                rdir = ajar_home / "runs" / "run-b5-e2e-to"
+
+                orig_run_shell = _run_shell_in_slot
+
+                def _short_timeout_shell(*args: object, **kwargs: object) -> dict[str, object]:
+                    kwargs["timeout_sec"] = 1
+                    return orig_run_shell(*args, **kwargs)  # type: ignore[arg-type]
+
+                with mock.patch("ajar.repro_source._run_shell_in_slot", side_effect=_short_timeout_shell):
+                    res = run_source_reproduction(
+                        run_dir=rdir,
+                        target_dir=target,
+                        claim_id="clm-b5-timeout",
+                        poc_cmd="./app",
+                        control_cmd="./app",
+                        build_cmd="sleep 5",
+                        micropatch_path=mpatch,
+                        timeout_sec=1,
+                    )
+
+                self.assertFalse(res["passed"])
+                self.assertEqual(res["error_class"], "build_or_env_error")
+                self.assertTrue(res["timed_out"])
+                self.assertIn("timed out", str(res["reason"]).lower())
+                rel_art = str(res["failure_artifact"])
+                receipt = json.loads((rdir / rel_art).read_text(encoding="utf-8"))
+                self.assertTrue(receipt["timed_out"])
+                self.assertTrue(receipt["build_clean"]["timed_out"])
+
+                telemetry = aggregate_failure_telemetry(rdir)
+                self.assertEqual(telemetry["total_receipts"], 1)
+                self.assertEqual(telemetry["timeout_count"], 1)
+                self.assertEqual(telemetry["timeouts_by_arm"], {"build_clean": 1})
+                self.assertEqual(telemetry["by_error_class"], {"build_or_env_error": 1})
+
+    def test_graph_v2_sanitizes_flag_path_file_uri_non_home_ajar_home_local_origin_and_door_claims(self) -> None:
+        alice_home = "/" + "home" + "/alice"
+        bob_users = "/" + "Users" + "/bob"
+        var_tmp_p = "/var/tmp/build_scratch/out.bin"
+        root_p = "/root/private/tools"
+        shared_p = "/shared/user/mirror/run-1"
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            # Non-$HOME AJAR_HOME combined with workspace_mode="in_place" (workspace_path != ajar_home!)
+            custom_ajar_home = base / "custom-ajar-store"
+            target = base / "sample-repo"
+            _git_init_repo(target, {"src/app.c": "int main(void) { return 0; }\n"})
+            # Set local filesystem path as remote.origin.url -> must NOT leak into repo_slug!
+            subprocess.run(
+                ["git", "-C", str(target), "remote", "add", "origin", f"{alice_home}/mirrors/sample-repo.git"],
+                check=True,
+                capture_output=True,
+            )
+
+            with mock.patch.dict(os.environ, {"AJAR_HOME": str(custom_ajar_home)}):
+                init_run_workspace(
+                    target=str(target),
+                    target_mode="source",
+                    workspace_mode="in_place",
+                    run_id="run-g2-san",
+                    ajar_home=custom_ajar_home,
+                )
+                conn = open_run_db("run-g2-san", ajar_home=custom_ajar_home)
+                try:
+                    surf = add_surface(conn, name="cli", kind="cli", locus="src/app.c:1", priority="high")
+                    sid = str(surf["surface_id"])
+
+                    # Unreproduced claim held by an Open Door (Polish #2: must keep `door_holds_step` edge!)
+                    clm_held = propose_claim(
+                        conn,
+                        worker_id="w-inv",
+                        title="Held door claim",
+                        locus="src/app.c:1",
+                        mechanism="Candidate flaw parked on open door",
+                        falsification_prediction="Guard blocks malformed input before main",
+                        falsification_test="Run ./app malformed",
+                        surface_id=sid,
+                    )
+                    cid_held = str(clm_held["claim_id"])
+                    door = park_open_door(
+                        conn,
+                        anchor_locus="src/app.c:1",
+                        missing_link_summary="Needs upstream trigger",
+                        held_ids=[cid_held],
+                        spawn_hunters=False,
+                    )
+                    did = str(door["door_id"])
+
+                    # Embed tricky local path forms AND legitimate http(s) URLs in steer + finding
+                    add_steer(
+                        conn,
+                        rule_text=(
+                            f"PATH=/usr/bin:{alice_home}/bin:{var_tmp_p} "
+                            f"gcc -I{alice_home}/inc -L{alice_home}/lib -o{var_tmp_p} "
+                            f"file://{bob_users}/repo/src/app.c {root_p} {shared_p} "
+                            f"state={custom_ajar_home}/runs/run-g2-san/artifacts/a.txt "
+                            "docs=https://example.com/home/guide health=http://127.0.0.1:8080/tmp/health"
+                        ),
+                        scope="global",
+                    )
+
+                    g_cust = export_attack_flow_graph(conn, schema="v2", visibility="customer_private")
+                    self.assertEqual(g_cust["run"]["repo_slug"], "sample-repo")
+                    self.assertEqual(g_cust["summary"]["dangling_edges"], 0)
+
+                    # Verify Polish #2: `clm-*` in open_door held_ids gets a claim node & `door_holds_step` edge!
+                    node_ids = {n["id"] for n in g_cust["nodes"]}
+                    self.assertIn(cid_held, node_ids)
+                    self.assertTrue(
+                        any(
+                            e["src"] == cid_held and e["dst"] == did and e["edge_type"] == "door_holds_step"
+                            for e in g_cust["edges"]
+                        )
+                    )
+                    for edge in g_cust["edges"]:
+                        self.assertIn(edge["src"], node_ids)
+                        self.assertIn(edge["dst"], node_ids)
+
+                    raw_cust = json.dumps(g_cust)
+                    for forbidden in (
+                        "alice",
+                        "bob",
+                        var_tmp_p,
+                        root_p,
+                        shared_p,
+                        str(custom_ajar_home),
+                        str(target),
+                    ):
+                        self.assertNotIn(forbidden, raw_cust, f"Leaked local path fragment: {forbidden}")
+                    # Legitimate HTTP(S) URLs must remain intact!
+                    self.assertIn("https://example.com/home/guide", raw_cust)
+                    self.assertIn("http://127.0.0.1:8080/tmp/health", raw_cust)
+                finally:
+                    conn.close()
+
+    def test_b2_diff_sync_build_cmd_failure_does_not_mark_prior_finding_falsified_or_closed(self) -> None:
+        if not shutil.which("cc"):
+            self.skipTest("C compiler `cc` not available")
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            ajar_home = base / "ajar_home"
+            target = base / "c-diff-fail"
+            _git_init_repo(
+                target,
+                {
+                    "src/app.c": (
+                        "#include <string.h>\n"
+                        "int main(int argc, char **argv) {\n"
+                        "    return (argc > 1 && strcmp(argv[1], \"bad\") == 0) ? 1 : 0;\n"
+                        "}\n"
+                    ),
+                },
+            )
+            git_env = {
+                **os.environ,
+                "GIT_AUTHOR_NAME": "Ajar Test",
+                "GIT_AUTHOR_EMAIL": "test@example.invalid",
+                "GIT_COMMITTER_NAME": "Ajar Test",
+                "GIT_COMMITTER_EMAIL": "test@example.invalid",
+            }
+            base_sha = subprocess.check_output(
+                ["git", "-C", str(target), "rev-parse", "HEAD"], text=True, env=git_env
+            ).strip()
+
+            # PR commit changes signature / breaks prior build_cmd without proving the bug was fixed.
+            (target / "src" / "app.c").write_text("int main(void) { return UNDEFINED_SYMBOL; }\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(target), "add", "-A"], check=True, env=git_env)
+            subprocess.run(["git", "-C", str(target), "commit", "-q", "-m", "break build"], check=True, env=git_env)
+            head_sha = subprocess.check_output(
+                ["git", "-C", str(target), "rev-parse", "HEAD"], text=True, env=git_env
+            ).strip()
+
+            with mock.patch.dict(os.environ, {"AJAR_HOME": str(ajar_home)}):
+                init_run_workspace(
+                    target=str(target),
+                    target_mode="source",
+                    workspace_mode="in_place",
+                    run_id="run-b2-bf-parent",
+                    ajar_home=ajar_home,
+                )
+                pconn = open_run_db("run-b2-bf-parent", ajar_home=ajar_home)
+                try:
+                    surf = add_surface(pconn, name="cli", kind="cli", locus="src/app.c:2")
+                    clm = propose_claim(
+                        pconn,
+                        worker_id="w-p",
+                        title="CLI accepts bad arg",
+                        locus="src/app.c:3",
+                        mechanism="main returns 1 on bad arg",
+                        falsification_prediction="main ignores argv[1]",
+                        falsification_test="run ./app bad",
+                        surface_id=str(surf["surface_id"]),
+                    )
+                    cid = str(clm["claim_id"])
+                    survive_claim(pconn, claim_id=cid, worker_id="w-f", notes="ok")
+                    fnd = record_reproduction_outcome(
+                        pconn,
+                        claim_id=cid,
+                        worker_id="w-r",
+                        poc_cmd="./app bad",
+                        control_cmd="./app good",
+                        build_cmd="cc -O1 src/app.c -o app",
+                        repro_result={
+                            "passed": True,
+                            "observation_hash": "obs-b2-bf",
+                            "micropatch_diff": "--- a/src/app.c\n+++ b/src/app.c\n",
+                            "arm1_clean_poc": {"arm_passed": True},
+                            "arm2_clean_control": {"arm_passed": True},
+                            "arm3_patch_poc": {"arm_passed": True},
+                            "arm4_patch_control": {"arm_passed": True},
+                        },
+                    )
+                    pfid = str(fnd["finding_id"])
+                finally:
+                    pconn.close()
+
+                init_run_workspace(
+                    target=str(target),
+                    target_mode="source",
+                    workspace_mode="in_place",
+                    run_id="run-b2-bf-child",
+                    ajar_home=ajar_home,
+                )
+                cdir = ajar_home / "runs" / "run-b2-bf-child"
+                cconn = open_run_db("run-b2-bf-child", ajar_home=ajar_home)
+                try:
+                    sync = sync_pr_differential_state(
+                        cconn,
+                        run_dir=cdir,
+                        target_dir=target,
+                        diff_range=f"{base_sha}..{head_sha}",
+                        parent_run_id="run-b2-bf-parent",
+                        ajar_home=ajar_home,
+                    )
+                    self.assertEqual(sync["kept_findings"], [])
+                    self.assertEqual(sync["closed_findings"], [])
+                    self.assertEqual(len(sync["build_failed_findings"]), 1)
+                    bf = sync["build_failed_findings"][0]
+                    self.assertEqual(bf["finding_id"], pfid)
+
+                    # Must NOT have inserted a falsified / closed claim!
+                    falsified_cnt = cconn.execute(
+                        "SELECT COUNT(*) AS c FROM claims WHERE status = 'falsified' OR diff_state = 'closed'"
+                    ).fetchone()["c"]
+                    self.assertEqual(int(falsified_cnt), 0)
+
+                    # Must have enqueued an open high-salience investigate task for re-verification!
+                    trow = cconn.execute(
+                        "SELECT kind, status, salience_score, diff_state FROM tasks WHERE task_id = ?",
+                        (bf["reverify_task_id"],),
+                    ).fetchone()
+                    self.assertIsNotNone(trow)
+                    self.assertEqual(str(trow["kind"]), "investigate")
+                    self.assertEqual(str(trow["status"]), "open")
+                    self.assertEqual(str(trow["diff_state"]), "build_failed")
+                    self.assertGreaterEqual(int(trow["salience_score"]), 90)
+                finally:
+                    cconn.close()
 
 
 if __name__ == "__main__":

@@ -184,6 +184,7 @@ def sync_pr_differential_state(
 
     kept_findings: list[str] = []
     closed_findings: list[str] = []
+    build_failed_findings: list[dict[str, str]] = []
     kept_dry_tasks: list[str] = []
     invalidated_guards: list[dict[str, str]] = []
     reopened_task_ids: list[str] = []
@@ -293,8 +294,43 @@ def sync_pr_differential_state(
                                     and (not ctrl_res["timed_out"])
                                 )
 
-                        new_cid = new_id("clm")
-                        if still_vulnerable:
+                        if not build_ok:
+                            rtid = new_id("task")
+                            f_loc = str(pf["locus"] or "")
+                            f_sub = str(pf["subsystem"] or infer_subsystem(f_loc))
+                            f_prio = "critical" if str(pf["severity"]) == "critical" else "high"
+                            with immediate_tx(conn):
+                                conn.execute(
+                                    """
+                                    INSERT INTO tasks(
+                                        task_id, surface_id, kind, direction, title, subsystem, locus, priority,
+                                        status, salience_score, diff_state, summary, created_at, updated_at
+                                    ) VALUES (?, ?, 'investigate', 'outside_in', ?, ?, ?, ?, 'open', 92, 'build_failed', ?, ?, ?)
+                                    """,
+                                    (
+                                        rtid,
+                                        pf["surface_id"],
+                                        f"Re-verify prior finding {pf['finding_id']} after PR build failure",
+                                        f_sub,
+                                        f_loc,
+                                        f_prio,
+                                        f"PR diff {norm_spec}: {build_err_note}; prior finding {pf['finding_id']} "
+                                        f"cannot be marked closed until re-verified against the updated build/interface.",
+                                        now_iso,
+                                        now_iso,
+                                    ),
+                                )
+                            build_failed_findings.append(
+                                {
+                                    "finding_id": str(pf["finding_id"]),
+                                    "locus": f_loc,
+                                    "reason": build_err_note,
+                                    "reverify_task_id": rtid,
+                                }
+                            )
+                            reopened_task_ids.append(rtid)
+                        elif still_vulnerable:
+                            new_cid = new_id("clm")
                             new_fid = new_id("fnd")
                             with immediate_tx(conn):
                                 conn.execute(
@@ -359,10 +395,9 @@ def sync_pr_differential_state(
                                 )
                             kept_findings.append(new_fid)
                         else:
+                            new_cid = new_id("clm")
                             close_reason = (
-                                f"Closed by PR diff {norm_spec}: {build_err_note} for prior finding {pf['finding_id']}."
-                                if build_err_note
-                                else f"Closed by PR diff {norm_spec}: prior PoC ({pf['finding_id']}) no longer triggers defect oracle on {head_sha[:8]}."
+                                f"Closed by PR diff {norm_spec}: prior PoC ({pf['finding_id']}) no longer triggers defect oracle on {head_sha[:8]}."
                             )
                             with immediate_tx(conn):
                                 conn.execute(
@@ -614,6 +649,7 @@ def sync_pr_differential_state(
             "changed_files": sorted(changed_hunks.keys()),
             "kept_findings": kept_findings,
             "closed_findings": closed_findings,
+            "build_failed_findings": build_failed_findings,
             "kept_dry_tasks": kept_dry_tasks,
             "invalidated_guards": invalidated_guards,
             "reopened_task_ids": reopened_task_ids,

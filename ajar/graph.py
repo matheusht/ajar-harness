@@ -15,6 +15,7 @@ into a deterministic, scrubbed JSON graph:
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import re
 import sqlite3
@@ -45,10 +46,17 @@ SNIPPET_CONTEXT_LINES = 6
 MAX_SNIPPET_LINES = 25
 MAX_SNIPPET_CHARS = 2048
 
-_ABS_LOCAL_PATH_RE = re.compile(
-    r"(?<![A-Za-z0-9_.:/-])/(?:home|Users)/[A-Za-z0-9._-]+(?:/[^\s'\",;:)}\]]*)?"
-    r"|(?<![A-Za-z0-9_.:/-])/(?:private/)?(?:tmp|var/folders)/[^\s'\",;:)}\]]*"
+_LOCAL_PATH_BODY = (
+    r"(?:"
+    r"/(?:home|Users)/[A-Za-z0-9._-]+(?:/[^\s'\",;:)}\]]*)?"
+    r"|/(?:private/)?(?:tmp|var/tmp|var/folders)(?:/[^\s'\",;:)}\]]*)?"
+    r"|/root(?:/[^\s'\",;:)}\]]*)?"
+    r"|/shared/user(?:/[^\s'\",;:)}\]]*)?"
+    r")"
 )
+_FILE_URI_LOCAL_PATH_RE = re.compile(r"file://" + _LOCAL_PATH_BODY)
+_FLAG_LOCAL_PATH_RE = re.compile(r"((?:^|[\s'\"(=,;])-[A-Za-z])" + _LOCAL_PATH_BODY)
+_ABS_LOCAL_PATH_RE = re.compile(r"(?<![A-Za-z0-9_.+-/])" + _LOCAL_PATH_BODY)
 _GIT_SLUG_RE = re.compile(r"[:/]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+?)(?:\.git)?/?$")
 _SEVERITY_RANK: dict[str, int] = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
@@ -81,7 +89,7 @@ def _infer_repo_slug(explicit_slug: str, target_path: str) -> str:
                 check=False,
             )
             url = (cp.stdout or "").strip()
-            if url:
+            if url and not url.startswith(("/", "file://", "./", "../")):
                 # Strip any embedded URL credentials before parsing owner/repo.
                 sanitized_url = re.sub(r"://[^/@]+@", "://", url)
                 m = _GIT_SLUG_RE.search(sanitized_url)
@@ -117,7 +125,11 @@ def _resolve_head_sha(run: dict[str, Any], target_path: str) -> str:
     return ""
 
 
-def _collect_local_roots(target_path: str, workspace_path: str) -> tuple[list[str], list[str]]:
+def _collect_local_roots(
+    target_path: str,
+    workspace_path: str,
+    conn: sqlite3.Connection | None = None,
+) -> tuple[list[str], list[str]]:
     target_roots: list[str] = []
     other_roots: list[str] = []
 
@@ -140,6 +152,21 @@ def _collect_local_roots(target_path: str, workspace_path: str) -> tuple[list[st
         ws_parent = pathlib.Path(workspace_path).parent
         if ws_parent.name:
             _add_path_variants(str(ws_parent), other_roots)
+    if conn is not None:
+        try:
+            for db_row in conn.execute("PRAGMA database_list").fetchall():
+                db_file = str(db_row[2] or "").strip()
+                if not db_file or db_file == ":memory:":
+                    continue
+                run_dir = pathlib.Path(db_file).parent
+                _add_path_variants(str(run_dir), other_roots)
+                if run_dir.parent.name == "runs" and run_dir.parent.parent.name:
+                    _add_path_variants(str(run_dir.parent.parent), other_roots)
+        except sqlite3.Error:
+            pass
+    ajar_home_env = os.environ.get("AJAR_HOME", "").strip()
+    if ajar_home_env:
+        _add_path_variants(ajar_home_env, other_roots)
     try:
         home_s = str(pathlib.Path.home()).rstrip("/")
         if home_s and len(home_s) > 1:
@@ -157,11 +184,17 @@ def _sanitize_external_text(text: str, *, target_roots: Sequence[str], other_roo
         return text
     out = text
     for root in target_roots:
+        out = out.replace("file://" + root + "/", "")
+        out = out.replace("file://" + root, "<REPO>")
         out = out.replace(root + "/", "")
         out = out.replace(root, "<REPO>")
     for root in other_roots:
+        out = out.replace("file://" + root + "/", "<RUN_DIR>/")
+        out = out.replace("file://" + root, "<RUN_DIR>")
         out = out.replace(root + "/", "<RUN_DIR>/")
         out = out.replace(root, "<RUN_DIR>")
+    out = _FILE_URI_LOCAL_PATH_RE.sub("<REDACTED_LOCAL_PATH>", out)
+    out = _FLAG_LOCAL_PATH_RE.sub(r"\1<REDACTED_LOCAL_PATH>", out)
     out = _ABS_LOCAL_PATH_RE.sub("<REDACTED_LOCAL_PATH>", out)
     return out
 
@@ -558,7 +591,7 @@ def _export_v1_graph(
         },
     }
     if visibility in ("customer_private", "public_disclosure"):
-        t_roots, o_roots = _collect_local_roots(raw_target_path, raw_workspace_path)
+        t_roots, o_roots = _collect_local_roots(raw_target_path, raw_workspace_path, conn=conn)
         payload = _sanitize_external_paths(payload, target_roots=t_roots, other_roots=o_roots)
     scrubbed = scrub_json_value(payload)
     assert isinstance(scrubbed, dict)
@@ -852,6 +885,35 @@ def _export_v2_graph(
             }
         )
 
+    def _ensure_step_node(step_id: str) -> None:
+        clean_id = step_id.strip()
+        if not clean_id or clean_id in node_by_id:
+            return
+        crow = conn.execute(
+            "SELECT claim_id, title, severity, locus, status, subsystem FROM claims WHERE claim_id = ?",
+            (clean_id,),
+        ).fetchone()
+        if crow is not None:
+            _add_node(
+                {
+                    "id": str(crow["claim_id"]),
+                    "node_type": "claim",
+                    "label": str(crow["title"]),
+                    "severity": str(crow["severity"]),
+                    "subsystem": str(crow["subsystem"] or infer_subsystem(str(crow["locus"]))),
+                    "locus": str(crow["locus"]),
+                    "status": str(crow["status"]),
+                }
+            )
+        else:
+            _add_node(
+                {
+                    "id": clean_id,
+                    "node_type": "chain_step_ref",
+                    "label": clean_id,
+                }
+            )
+
     # 7. Open Doors
     for d in open_doors:
         did = str(d["door_id"])
@@ -892,9 +954,13 @@ def _export_v2_graph(
         held_ids = _safe_json_loads(d.get("held_ids_json"), [])
         if isinstance(held_ids, list):
             for hid in held_ids:
+                hid_str = str(hid).strip()
+                if not hid_str:
+                    continue
+                _ensure_step_node(hid_str)
                 _add_edge(
                     {
-                        "src": str(hid),
+                        "src": hid_str,
                         "dst": did,
                         "edge_type": "door_holds_step",
                         "label": "held",
@@ -904,11 +970,15 @@ def _export_v2_graph(
         if isinstance(matched_entries, list):
             for me in matched_entries:
                 if isinstance(me, dict) and me.get("id"):
+                    mid_str = str(me["id"]).strip()
+                    if not mid_str:
+                        continue
+                    _ensure_step_node(mid_str)
                     modes = me.get("modes")
                     mode_lbl = ",".join(str(m) for m in modes) if isinstance(modes, list) and modes else "matched"
                     _add_edge(
                         {
-                            "src": str(me["id"]),
+                            "src": mid_str,
                             "dst": did,
                             "edge_type": "wakes_open_door",
                             "label": mode_lbl,
@@ -922,31 +992,7 @@ def _export_v2_graph(
         steps = [str(st).strip() for st in raw_steps if str(st).strip()] if isinstance(raw_steps, list) else []
 
         for step_id in steps:
-            if step_id not in node_by_id:
-                crow = conn.execute(
-                    "SELECT claim_id, title, severity, locus, status, subsystem FROM claims WHERE claim_id = ?",
-                    (step_id,),
-                ).fetchone()
-                if crow is not None:
-                    _add_node(
-                        {
-                            "id": str(crow["claim_id"]),
-                            "node_type": "claim",
-                            "label": str(crow["title"]),
-                            "severity": str(crow["severity"]),
-                            "subsystem": str(crow["subsystem"] or infer_subsystem(str(crow["locus"]))),
-                            "locus": str(crow["locus"]),
-                            "status": str(crow["status"]),
-                        }
-                    )
-                else:
-                    _add_node(
-                        {
-                            "id": step_id,
-                            "node_type": "chain_step_ref",
-                            "label": step_id,
-                        }
-                    )
+            _ensure_step_node(step_id)
 
         _add_node(
             {
@@ -1371,7 +1417,7 @@ def _export_v2_graph(
     }
 
     if visibility in ("customer_private", "public_disclosure"):
-        t_roots, o_roots = _collect_local_roots(raw_target_path, raw_workspace_path)
+        t_roots, o_roots = _collect_local_roots(raw_target_path, raw_workspace_path, conn=conn)
         payload = _sanitize_external_paths(payload, target_roots=t_roots, other_roots=o_roots)
     scrubbed = scrub_json_value(payload)
     assert isinstance(scrubbed, dict)

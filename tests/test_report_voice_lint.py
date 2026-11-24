@@ -2,7 +2,8 @@
 """Unit & regression test suite for report_voice_lint.py v2 (ajar-report-voice-lint/2).
 
 Verifies all 12 Judge-4 precision fixes, Blind-Judge-2 LLM-tell detectors, draft slug gate,
-and Rule #15 GFM mid-paragraph hard-wrapped prose line-break gate.
+Rule #15 GFM mid-paragraph hard-wrapped prose line-break gate, and Rule #16 canonical
+required-sections, section-ordering, and GHSA Patched Versions top-metadata gate.
 """
 
 from __future__ import annotations
@@ -29,9 +30,11 @@ import report_voice_lint as linter  # noqa: E402
 
 BASE_CLEAN_GHSA_TIER_S = """# proxy: missing length check in `do_SOCKS()` overflows heap buffer
 
+- **Ecosystem / Package:** `c / curl`
+- **Affected Versions:** `v7.69.0 .. v8.3.0` (verified on `master` at `4a4b63daaa12`)
+- **Patched Versions:** `v8.4.0`
 - **Severity:** High
 - **CWE:** CWE-122 (Heap-based Buffer Overflow)
-- **Affected versions:** `v7.69.0 .. v8.3.0` (verified on `master` at `4a4b63daaa12`)
 
 ### Summary
 
@@ -60,7 +63,7 @@ curl --socks5-hostname 127.0.0.1:1080 --limit-rate 1024 http://example.com/ || t
 
 Applications using `libcurl` with `CURLPROXY_SOCKS5_HOSTNAME` and small transfer buffers suffer a heap buffer overflow on redirect to an attacker-controlled host. Deployments without SOCKS5 proxies are unaffected.
 
-### Suggested fix
+### Suggested Fix
 
 Reject hostnames longer than 255 bytes before falling back, matching `Curl_socks4a()`. Verified against `tests/runtests.pl` suites 700 to 728.
 
@@ -88,9 +91,11 @@ class TestReportVoiceLintV2(unittest.TestCase):
         suffix: str = ".md",
         tier: str | None = "S",
         channel: str = "ghsa",
+        filename: str | None = None,
     ) -> linter.FileLintReport:
         with tempfile.TemporaryDirectory() as td:
-            p = pathlib.Path(td) / f"draft{suffix}"
+            name = filename if filename is not None else f"draft{suffix}"
+            p = pathlib.Path(td) / name
             p.write_text(content, encoding="utf-8")
             return linter.lint_file(p, tier=tier, channel=channel)
 
@@ -147,7 +152,7 @@ class TestReportVoiceLintV2(unittest.TestCase):
         self.assertGreaterEqual(len(bad_rep.harness_leaks), 1)
 
     def test_04_fp4_mailing_list_rfc5322_4space_repro_unfenced_diff_lowercase_c_starter(self) -> None:
-        """Case 4 (FP-4): Plain-text mailing-list with RFC 5322 headers, 4-space sh, unfenced diff, C starters, POSIX --."""
+        """Case 4 (FP-4): Plain-text mailing-list with RFC 5322 headers, canonical Setext sections, 4-space sh, unfenced diff, C starters, POSIX --."""
         email_txt = """From: Researcher Name <security@ajar.com>
 To: security@example.org
 Date: Mon, 24 Nov 2026 01:00:00 +0000
@@ -158,6 +163,7 @@ lib/socks.c:942 copies an overlong hostname into the negotiation buffer
 when CURLPROXY_SOCKS5_HOSTNAME falls back to local resolution.
 
 Affected versions: v7.69.0 .. v8.3.0
+Patched versions:  v8.4.0
 Introduced in:     31882f9100ab ("socks: state machine", 2020-02-11)
 Affected configs:  CURLPROXY_SOCKS5_HOSTNAME with buffer < 65541 bytes
 
@@ -170,8 +176,8 @@ do_SOCKS() falls back to local resolution without re-running the 255
 byte check, unlike Curl_socks4a(). Stock CLI runs without --limit-rate
 are unaffected. Invoke curl -- http://example.com/ to test end-of-flags.
 
-Verification
-------------
+PoC
+---
 Tested on Linux x86_64 with -O2 and -fsanitize=address.
 
     #!/bin/sh
@@ -179,6 +185,11 @@ Tested on Linux x86_64 with -O2 and -fsanitize=address.
     work=$(mktemp -d)
     trap 'rm -rf "$work"' EXIT
     curl --socks5-hostname 127.0.0.1:1080 -- http://example.com/ || true
+
+Impact
+------
+Applications enabling CURLPROXY_SOCKS5_HOSTNAME with transfer buffers
+below 65541 bytes suffer a heap buffer overflow on HTTP redirect.
 
 Suggested Fix
 -------------
@@ -191,6 +202,10 @@ All tests in tests/data/test700..728 pass.
    if(socks5_resolve_local && hostname_len > 255)
      return CURLE_PROXY;
 
+Workarounds
+-----------
+Keep CURLOPT_BUFFERSIZE at or above 65541 bytes until upgraded.
+
 Reported-by: Researcher Name <security@ajar.com> (Ajar Labs)
 """
         rep = self._lint_text(email_txt, suffix=".txt", tier="S", channel="mailing-list")
@@ -200,16 +215,18 @@ Reported-by: Researcher Name <security@ajar.com> (Ajar Labs)
         self.assertTrue(rep.has_diff_or_patch)
         self.assertEqual(rep.em_dash_count, 0)
         self.assertEqual(rep.severe_runons_over_50, 0)
+        self.assertEqual(rep.missing_sections, [])
+        self.assertEqual(rep.out_of_order_sections, [])
         self.assertEqual(rep.mechanical_score_100, 100)
 
     def test_05_fp5_compact_tier_s_and_6_section_ghsa_both_pass_strict(self) -> None:
-        """Case 5 (FP-5a): Both 6-section GHSA Tier S and compact ~105w 4-section Tier S pass strict."""
+        """Case 5 (FP-5a): Both full-header GHSA Tier S and concise ~125w 6-section Tier S pass strict at 100/100."""
         rep6 = self._lint_text(BASE_CLEAN_GHSA_TIER_S, tier="S", channel="ghsa")
         self.assertTrue(rep6.passed, f"Issues: {rep6.issues}")
         self.assertEqual(rep6.warnings, [], f"Warnings: {rep6.warnings}")
         self.assertEqual(rep6.mechanical_score_100, 100)
 
-        compact_s = """# x509: NULL dereference in `X509_STORE_CTX_init()` on empty store
+        concise_s = """# x509: NULL dereference in `X509_STORE_CTX_init()` on empty store
 
 ### Summary
 
@@ -217,7 +234,7 @@ On `master` at `9f8e7d6c5b4a` (unreleased), `X509_STORE_CTX_init()` in `crypto/x
 
 ### Details
 
-Introduced in commit `1a2b3c4d5e6f` ("x509: cache issuer lookup", 2026-04-02), the new fast path reads `store->objs` ahead of the existing `if (store == NULL)` guard at line 2148. Released `3.3.x` builds are unaffected. Callers using `SSL_CTX` always pass a non-NULL store, confining impact to direct `X509_STORE_CTX_init(ctx, NULL, cert, chain)` API users.
+Introduced in commit `1a2b3c4d5e6f` ("x509: cache issuer lookup", 2026-04-02), the new fast path reads `store->objs` ahead of the existing `if (store == NULL)` guard at line 2148. Released `3.3.x` builds are unaffected.
 
 ### PoC
 
@@ -228,6 +245,10 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 cc -O2 repro.c -lcrypto -o "$work/repro" && "$work/repro"
 ```
+
+### Impact
+
+Direct callers passing `store = NULL` to `X509_STORE_CTX_init()` crash with a deterministic NULL dereference, whereas `SSL_CTX` callers are unaffected.
 
 ### Suggested fix
 
@@ -240,12 +261,17 @@ Move the `store->objs` read below the `store == NULL` check. Verified with `make
 -    if (sk_X509_OBJECT_num(store->objs) == 0)
 +    if (store != NULL && sk_X509_OBJECT_num(store->objs) == 0)
 ```
+
+### Workarounds
+
+Pass a valid empty `X509_STORE_new()` handle instead of `NULL` until patched.
 """
-        rep4 = self._lint_text(compact_s, tier="S", channel="ghsa")
-        self.assertTrue(rep4.passed, f"Compact S issues: {rep4.issues}")
-        self.assertEqual(rep4.warnings, [], f"Compact S warnings: {rep4.warnings}")
-        self.assertGreaterEqual(rep4.prose_word_count, 90)
-        self.assertLess(rep4.prose_word_count, 160)
+        rep_concise = self._lint_text(concise_s, tier="S", channel="ghsa")
+        self.assertTrue(rep_concise.passed, f"Concise 6-section S issues: {rep_concise.issues}")
+        self.assertEqual(rep_concise.warnings, [], f"Concise 6-section S warnings: {rep_concise.warnings}")
+        self.assertEqual(rep_concise.mechanical_score_100, 100)
+        self.assertGreaterEqual(rep_concise.prose_word_count, 90)
+        self.assertLess(rep_concise.prose_word_count, 165)
 
     def test_06_fp5_low_dry_and_immunefi_modes_pass_strict(self) -> None:
         """Case 6 (FP-5b/c/d): --tier low, --tier dry, and --channel immunefi pass 100/100."""
@@ -256,7 +282,11 @@ Move the `store->objs` read below the `store == NULL` check. Verified with `make
 
 ### Description
 
-In `Vault.sol:88` at commit `a1b2c3d4e5f6`, `setTreasury(address next)` updates `treasury` without rejecting `address(0)`. Only the `TIMELOCK_ADMIN` multisig can call `setTreasury()`. No unprivileged user can trigger this path, and user principal remains withdrawable; impact is confined to protocol fee burn until the next timelock transaction restores a valid address.
+In `Vault.sol:88` at commit `a1b2c3d4e5f6`, `setTreasury(address next)` updates `treasury` without rejecting `address(0)`. Only the `TIMELOCK_ADMIN` multisig can call `setTreasury()`, and user principal remains withdrawable.
+
+### Impact
+
+Impact is confined to protocol fee burn until the next timelock transaction restores a valid treasury address.
 
 ### Recommendation
 
@@ -265,6 +295,7 @@ Revert with `ZeroAddress()` when `next == address(0)` inside `setTreasury()`.
         rep_low = self._lint_text(low_md, tier="low", channel="customer")
         self.assertTrue(rep_low.passed, f"Low issues: {rep_low.issues}")
         self.assertEqual(rep_low.warnings, [], f"Low warnings: {rep_low.warnings}")
+        self.assertEqual(rep_low.mechanical_score_100, 100)
 
         dry_md = """# Security Review Summary: `vault-core` (`a1b2c3d4e5f6`)
 
@@ -285,6 +316,7 @@ Cross-chain bridge relayer off-chain signing daemons were outside repository sco
         rep_dry = self._lint_text(dry_md, tier="dry", channel="customer")
         self.assertTrue(rep_dry.passed, f"Dry issues: {rep_dry.issues}")
         self.assertEqual(rep_dry.warnings, [], f"Dry warnings: {rep_dry.warnings}")
+        self.assertEqual(rep_dry.mechanical_score_100, 100)
 
         immunefi_md = """# VaultRouter: unchecked `minSharesOut` in `rebalance()` drains idle USDC buffer
 
@@ -302,13 +334,17 @@ On Ethereum mainnet at block `21000000`, `VaultRouter.rebalance()` at `0x1111111
 2. `Attacker` calls `VaultRouter.rebalance()`, which sells `412,800 USDC` with `amountOutMinimum = 0`.
 3. `Attacker` back-runs the pool swap and repays the flash loan, netting `398,100 USDC` after fees (`~0.04 ETH` gas).
 
-### Verification
+### PoC
 
 ```sh
 #!/bin/sh
 set -eu
 forge test --match-test test_rebalance_zero_slippage -vv
 ```
+
+### Impact
+
+Any unprivileged MEV searcher can drain up to `412,800 USDC` of idle router reserves in one atomic transaction whenever `idleRatio() > 1500` bps. Staked principal in `CoreVault` remains isolated and unaffected.
 
 ### Remediation
 
@@ -325,6 +361,7 @@ Pause `VaultRouter` via `guardian.pauseRouter()` immediately to protect the `412
         rep_imm = self._lint_text(immunefi_md, tier="M", channel="immunefi")
         self.assertTrue(rep_imm.passed, f"Immunefi issues: {rep_imm.issues}")
         self.assertEqual(rep_imm.warnings, [], f"Immunefi warnings: {rep_imm.warnings}")
+        self.assertEqual(rep_imm.mechanical_score_100, 100)
 
     def test_07_fp6_stative_adjectives_not_counted_as_passive_voice(self) -> None:
         """Case 7 (FP-6): 'are unaffected', 'is confined', 'is disabled', 'is required' -> 0 passive hits."""
@@ -385,7 +422,11 @@ mktemp -d
 
 ### Description
 
-In `Vault.sol:88` at `a1b2c3d4`, `setFee()` allows zero fee values when called by governance. No funds are at risk. Stock deployments are unaffected.
+In `Vault.sol:88` at `a1b2c3d4`, `setFee()` allows zero fee values when called by governance.
+
+### Impact
+
+No user funds are at risk; stock deployments are unaffected.
 
 | Param | Value |
 | :--- | :--- |
@@ -474,6 +515,8 @@ Document zero-fee behavior in NatSpec comments.
             data = json.loads(proc.stdout)
             self.assertEqual(data["schema"], "ajar-report-voice-lint/2")
             self.assertTrue(data["all_passed"])
+            self.assertEqual(data["reports"][0]["missing_sections"], [])
+            self.assertEqual(data["reports"][0]["out_of_order_sections"], [])
 
     def test_14_draft_ghsa_slug_caught_while_real_ghsa_id_passes(self) -> None:
         """Case 14 (Wave-4C): draft slugs (`ghsa-3a`, `ghsa-3b`, `GHSA-1`) fail; real 4-4-4 GHSA IDs pass."""
@@ -511,8 +554,8 @@ Document zero-fee behavior in NatSpec comments.
 
         # 15b: Multi-line hard-wrapped bullet item fails
         wrapped_bullet = BASE_CLEAN_GHSA_TIER_S.replace(
-            "- **Affected versions:** `v7.69.0 .. v8.3.0` (verified on `master` at `4a4b63daaa12`)",
-            "- **Affected versions:** `v7.69.0 .. v8.3.0`\n  (verified on `master` at `4a4b63daaa12`)",
+            "- **Affected Versions:** `v7.69.0 .. v8.3.0` (verified on `master` at `4a4b63daaa12`)",
+            "- **Affected Versions:** `v7.69.0 .. v8.3.0`\n  (verified on `master` at `4a4b63daaa12`)",
         )
         rep_bullet = self._lint_text(wrapped_bullet, tier="S", channel="ghsa")
         self.assertFalse(rep_bullet.passed)
@@ -536,8 +579,23 @@ Document zero-fee behavior in NatSpec comments.
             "In libcurl v8.3.0 (4a4b63daaa12), do_SOCKS() in lib/socks.c:942\n"
             "copies an overlong hostname into the negotiation buffer during\n"
             "local fallback, overflowing the heap allocation.\n\n"
+            "Analysis\n"
+            "--------\n"
+            "do_SOCKS() skips the 255-byte hostname check during local fallback,\n"
+            "unlike Curl_socks4a().\n\n"
+            "PoC\n"
+            "---\n"
             "    #!/bin/sh\n"
-            "    mktemp -d\n"
+            "    mktemp -d\n\n"
+            "Impact\n"
+            "------\n"
+            "Clients with small buffers suffer a heap buffer overflow.\n\n"
+            "Suggested Fix\n"
+            "-------------\n"
+            "Reject hostnames above 255 bytes before local resolution.\n\n"
+            "Workarounds\n"
+            "-----------\n"
+            "Keep CURLOPT_BUFFERSIZE at or above 65541 bytes.\n"
         )
         rep_ml = self._lint_text(mailing_wrapped, suffix=".txt", tier=None, channel="mailing-list")
         self.assertEqual(rep_ml.hard_wrapped_prose_lines, 0)
@@ -550,6 +608,206 @@ Document zero-fee behavior in NatSpec comments.
             raw_doc_lines = doc_path.read_text(encoding="utf-8").splitlines()
             wraps = linter._detect_markdown_hard_wrapped_prose(raw_doc_lines, False)
             self.assertEqual(wraps, [], f"{rel_doc} contains hard-wrapped prose at lines {wraps}")
+
+    def test_16_missing_required_sections_such_as_impact_or_workarounds_fails(self) -> None:
+        """Rule #16a: Omitting required sections (Impact, Workarounds, etc.) fails closed across all channels."""
+        # 16a: Old buggy 4-section GHSA omitting ### Impact and ### Workarounds MUST fail!
+        old_4sec_ghsa = BASE_CLEAN_GHSA_TIER_S.split("### Impact")[0] + (
+            "### Suggested Fix\n\n"
+            "Reject hostnames longer than 255 bytes before falling back, matching `Curl_socks4a()`.\n\n"
+            "```diff\n--- a/lib/socks.c\n+++ b/lib/socks.c\n@@ -940,3 +940,5 @@\n+  return CURLE_PROXY;\n```\n"
+        )
+        rep_ghsa = self._lint_text(old_4sec_ghsa, tier="S", channel="ghsa")
+        self.assertFalse(rep_ghsa.passed)
+        self.assertEqual(rep_ghsa.missing_sections, ["### Impact", "### Workarounds"])
+        self.assertTrue(any("### Impact" in iss and "### Workarounds" in iss for iss in rep_ghsa.issues))
+
+        # 16b: HackerOne (`h1`) valid 6-section passes; omitting ### Impact or ### Steps To Reproduce fails
+        valid_h1 = BASE_CLEAN_GHSA_TIER_S.replace("### PoC", "### Steps To Reproduce")
+        rep_h1_ok = self._lint_text(valid_h1, tier="S", channel="h1")
+        self.assertTrue(rep_h1_ok.passed, f"Valid H1 failed: {rep_h1_ok.issues}")
+        self.assertEqual(rep_h1_ok.warnings, [], f"Valid H1 warnings: {rep_h1_ok.warnings}")
+
+        bad_h1 = valid_h1.split("### Impact")[0] + "### Suggested Fix\n\nApply the guard.\n\n### Workarounds\n\nNone.\n"
+        rep_h1_bad = self._lint_text(bad_h1, tier="S", channel="h1")
+        self.assertFalse(rep_h1_bad.passed)
+        self.assertEqual(rep_h1_bad.missing_sections, ["### Impact"])
+
+        # 16c: Immunefi omitting ### Impact fails
+        bad_imm = (
+            "# Router: slippage bypass in `rebalance()`\n\n"
+            "### Quantified Summary & Activation Status\n\n"
+            "At block `21000000`, `VaultRouter.rebalance()` (`VaultRouter.sol:212`) passes `0` slippage, exposing `412,800 USDC`.\n\n"
+            "### Trust Boundary & Broken Invariant\n\n"
+            "`rebalance()` omits `minAmountOut`.\n\n"
+            "### State Walkthrough\n\n"
+            "1. Caller sandwiches `rebalance()`.\n\n"
+            "### PoC\n\n"
+            "```sh\nforge test -vv\n```\n\n"
+            "### Remediation\n\n"
+            "Pass `minOut`.\n"
+        )
+        rep_imm_bad = self._lint_text(bad_imm, tier="M", channel="immunefi")
+        self.assertFalse(rep_imm_bad.passed)
+        self.assertEqual(rep_imm_bad.missing_sections, ["### Impact"])
+
+        # 16d: Standalone mailing-list omitting Impact/Workarounds fails, whereas git format-patch & cover-letter pass
+        bad_ml = (
+            "Subject: [SECURITY] socks: overflow in do_SOCKS()\n\n"
+            "In libcurl v8.3.0 (4a4b63daaa12), do_SOCKS() in lib/socks.c:942\n"
+            "overflows a heap buffer on local fallback.\n\n"
+            "Analysis\n--------\ndo_SOCKS() skips the 255-byte check.\n\n"
+            "PoC\n---\n    #!/bin/sh\n    mktemp -d\n\n"
+            "Suggested Fix\n-------------\nReject names over 255 bytes.\n"
+        )
+        rep_ml_bad = self._lint_text(bad_ml, suffix=".txt", tier="S", channel="mailing-list")
+        self.assertFalse(rep_ml_bad.passed)
+        self.assertEqual(rep_ml_bad.missing_sections, ["Impact", "Workarounds"])
+
+        format_patch_commit = (
+            "From 0123456789abcdef0123456789abcdef01234567 Mon Sep 17 00:00:00 2001\n"
+            "From: Researcher Name <security@ajar.com>\n"
+            "Date: Mon, 24 Nov 2026 01:00:00 +0000\n"
+            "Subject: [PATCH 1/2] socks: check hostname length before local fallback\n\n"
+            "In libcurl v8.3.0 (4a4b63daaa12), do_SOCKS() in lib/socks.c:942 skips\n"
+            "the 255-byte hostname bound when falling back to local DNS resolution.\n\n"
+            "Introduced in commit 31882f9100ab (\"socks: state machine\", 2020-02-11),\n"
+            "parse_socks_state() shrinks the handshake buffer when --limit-rate caps\n"
+            "CURLOPT_BUFFERSIZE below 65541 bytes, steering do_SOCKS() into the local\n"
+            "resolver path without re-checking hostname_len. Curl_socks4a() already\n"
+            "enforces the 255-byte ceiling upfront. Stock CLI runs with default\n"
+            "100 KiB buffers are unaffected. Reject overlong hostnames before\n"
+            "entering the local resolver fallback and add regression test728.\n"
+            "Suites test700 through test728 pass under AddressSanitizer.\n\n"
+            "Signed-off-by: Researcher Name <security@ajar.com>\n"
+            "---\n"
+            " lib/socks.c | 2 ++\n"
+            " 1 file changed, 2 insertions(+)\n\n"
+            "diff --git a/lib/socks.c b/lib/socks.c\n"
+            "--- a/lib/socks.c\n"
+            "+++ b/lib/socks.c\n"
+            "@@ -940,3 +940,5 @@\n"
+            "+  if(hostname_len > 255) return CURLE_PROXY;\n"
+        )
+        rep_patch = self._lint_text(format_patch_commit, suffix=".patch", tier="S", channel="mailing-list")
+        self.assertTrue(rep_patch.passed, f"git format-patch commit failed: {rep_patch.issues}")
+        self.assertEqual(rep_patch.warnings, [], f"git format-patch commit warnings: {rep_patch.warnings}")
+        self.assertEqual(rep_patch.missing_sections, [])
+
+        cover_letter = (
+            "From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001\n"
+            "Subject: [PATCH 0/2] socks: tighten hostname bounds on local fallback\n\n"
+            "In libcurl v8.3.0 (4a4b63daaa12), do_SOCKS() in lib/socks.c:942 omits\n"
+            "the 255-byte check on local resolution fallback. Patch 1 adds the\n"
+            "missing guard and Patch 2 adds regression coverage.\n"
+        )
+        rep_cover = self._lint_text(
+            cover_letter, suffix=".txt", tier=None, channel="mailing-list", filename="0000-cover-letter.txt"
+        )
+        self.assertTrue(rep_cover.passed, f"Cover letter failed: {rep_cover.issues}")
+
+        # 16e: Customer S, low, and audit findings omitting Impact all fail closed
+        bad_cust_low = (
+            "## Missing zero-address check in `setTreasury()`\n\n"
+            "### Description\n\n"
+            "In `Vault.sol:88` (`a1b2c3d4`), `setTreasury()` accepts `address(0)` from governance.\n\n"
+            "### Recommendation\n\n"
+            "Revert on `address(0)`.\n"
+        )
+        rep_cust_low = self._lint_text(bad_cust_low, tier="low", channel="customer")
+        self.assertFalse(rep_cust_low.passed)
+        self.assertEqual(rep_cust_low.missing_sections, ["### Impact"])
+
+        bad_cust_audit = (
+            "# Security Review Report: acme-http\n\n"
+            "## Summary\n\n"
+            "Review of `acme-http` at `a1b2c3d4` confirmed 1 finding in `src/acme_parser.c:4`.\n\n"
+            "## Confirmed Findings\n\n"
+            "### 1. [MEDIUM] Negative chunk length in `parse_chunk_length()`\n\n"
+            "#### Root Cause\n\n"
+            "`parse_chunk_length()` skips negative checks.\n\n"
+            "#### Reproduction\n\n"
+            "```sh\n#!/bin/sh\nmktemp -d\n```\n\n"
+            "#### Suggested Fix\n\n"
+            "Reject `raw_len < 0`.\n\n"
+            "## Scope and Inspected Controls\n\n"
+            "Covered 2 entrypoints at `a1b2c3d4`.\n"
+        )
+        rep_cust_audit = self._lint_text(bad_cust_audit, tier="audit", channel="customer")
+        self.assertFalse(rep_cust_audit.passed)
+        self.assertEqual(rep_cust_audit.missing_sections, ["#### Impact"])
+
+    def test_17_renamed_poc_or_out_of_order_sections_fails_and_missing_patched_versions_fails(self) -> None:
+        """Rule #16b: Renaming ### PoC to ### Verification, swapping Workarounds before Suggested Fix, or omitting Patched Versions fails."""
+        # 17a: Renaming ### PoC -> ### Verification on GHSA fails and names both ### PoC and ### Verification
+        renamed_poc = BASE_CLEAN_GHSA_TIER_S.replace("### PoC", "### Verification")
+        rep_renamed = self._lint_text(renamed_poc, tier="S", channel="ghsa")
+        self.assertFalse(rep_renamed.passed)
+        self.assertEqual(rep_renamed.missing_sections, ["### PoC"])
+        self.assertTrue(
+            any("### PoC" in iss and "### Verification" in iss for iss in rep_renamed.issues),
+            f"Expected alias diagnostic in issues: {rep_renamed.issues}",
+        )
+
+        # 17b: Placing ### Workarounds BEFORE ### Suggested Fix fails with exact out-of-order diagnostic
+        before_fix, fix_and_after = BASE_CLEAN_GHSA_TIER_S.split("### Suggested Fix\n\n", 1)
+        fix_chunk, workarounds_chunk = fix_and_after.split("### Workarounds\n\n", 1)
+        workarounds_body, trailer = workarounds_chunk.split("\n\nReported-by:", 1)
+        swapped_order = (
+            before_fix
+            + "### Workarounds\n\n"
+            + workarounds_body
+            + "\n\n### Suggested Fix\n\n"
+            + fix_chunk
+            + "Reported-by:"
+            + trailer
+        )
+        with tempfile.TemporaryDirectory() as td:
+            p_swap = pathlib.Path(td) / "swapped.md"
+            p_swap.write_text(swapped_order, encoding="utf-8")
+            proc_swap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT_DIR / "report_voice_lint.py"),
+                    str(p_swap),
+                    "--tier",
+                    "S",
+                    "--channel",
+                    "ghsa",
+                    "--strict",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(proc_swap.returncode, 1, proc_swap.stdout + proc_swap.stderr)
+            rep_swap = linter.lint_file(p_swap, tier="S", channel="ghsa")
+            self.assertFalse(rep_swap.passed)
+            self.assertEqual(rep_swap.missing_sections, [])
+            self.assertEqual(rep_swap.out_of_order_sections, ["### Workarounds", "### Suggested Fix"])
+            self.assertTrue(
+                any("'### Workarounds' appears before '### Suggested Fix'" in iss for iss in rep_swap.issues),
+                f"Unexpected order error: {rep_swap.issues}",
+            )
+
+        # 17c: Omitting Patched Versions when top GHSA metadata bullets are present MUST fail (exit 1)
+        no_patched = "\n".join(
+            ln for ln in BASE_CLEAN_GHSA_TIER_S.splitlines() if not ln.startswith("- **Patched Versions:**")
+        ) + "\n"
+        rep_no_patched = self._lint_text(no_patched, tier="S", channel="ghsa")
+        self.assertFalse(rep_no_patched.passed)
+        self.assertTrue(
+            any("Patched Versions" in iss for iss in rep_no_patched.issues),
+            f"Missing Patched Versions not reported: {rep_no_patched.issues}",
+        )
+
+        # Omitting Affected Versions when top GHSA metadata bullets are present also fails
+        no_affected = "\n".join(
+            ln for ln in BASE_CLEAN_GHSA_TIER_S.splitlines() if not ln.startswith("- **Affected Versions:**")
+        ) + "\n"
+        rep_no_affected = self._lint_text(no_affected, tier="S", channel="ghsa")
+        self.assertFalse(rep_no_affected.passed)
+        self.assertTrue(any("Affected Versions" in iss for iss in rep_no_affected.issues))
 
 
 if __name__ == "__main__":

@@ -1021,6 +1021,21 @@ def _compose_finding_sections(
     )
     fix_block = f"```diff\n{clean_diff}\n```" if clean_diff else ""
 
+    explicit_workarounds = _bound_sentence_lengths(
+        _dejargonize_external_prose(
+            str(f.get("workarounds") or "").strip(),
+            target_roots=target_roots,
+            other_roots=other_roots,
+            target_slug=target_slug,
+        )
+    )
+    if explicit_workarounds:
+        workarounds_prose = explicit_workarounds
+    else:
+        workarounds_prose = (
+            f"No runtime configuration flag blocks malformed input at `{loc}` without applying the source patch."
+        )
+
     return {
         "title": title,
         "severity": sev,
@@ -1033,6 +1048,7 @@ def _compose_finding_sections(
         "suggested_fix_prose": fix_prose,
         "suggested_fix_block": fix_block,
         "suggested_fix_diff": clean_diff,
+        "workarounds": workarounds_prose,
         "poc_cmd": poc_clean,
         "control_cmd": ctrl_clean,
         "build_cmd": build_clean,
@@ -1325,6 +1341,7 @@ def build_report_data(
                         "diff": composed["suggested_fix_diff"],
                         "regression_suite_verified": bool(pv and pv.get("passed")),
                     },
+                    "workarounds": composed["workarounds"],
                 }
             )
         maint_chains: list[dict[str, Any]] = []
@@ -1459,7 +1476,7 @@ def _render_maintainer_markdown(
             [
                 f"# Security Verification Summary: {target_slug}",
                 "",
-                "## Summary",
+                "### Summary",
                 "",
                 (
                     f"Testing of `{target_slug}`{rev_clause} reproduced zero exploitable vulnerabilities "
@@ -1467,7 +1484,7 @@ def _render_maintainer_markdown(
                     f"Inspected guards apply only to the tested revision and do not establish absence of all defects."
                 ),
                 "",
-                "## Reproduction",
+                "### PoC",
                 "",
                 f"Run the project baseline check from a clean `{target_slug}` checkout.",
                 "",
@@ -1493,32 +1510,40 @@ def _render_maintainer_markdown(
             [
                 f"# {sec['title']}",
                 "",
-                "## Summary",
+                "### Summary",
                 "",
                 sec["summary"],
                 "",
-                "## Root Cause",
+                "### Details",
                 "",
                 sec["root_cause"],
                 "",
-                "## Reproduction",
+                "### PoC",
                 "",
                 sec["reproduction_prose"],
                 "",
                 sec["reproduction_block"],
                 "",
-                "## Impact",
+                "### Impact",
                 "",
                 sec["impact"],
                 "",
-                "## Suggested Fix",
+                "### Suggested Fix",
                 "",
                 sec["suggested_fix_prose"],
             ]
         )
         if sec["suggested_fix_block"]:
             lines.extend(["", sec["suggested_fix_block"]])
-        lines.append("")
+        lines.extend(
+            [
+                "",
+                "### Workarounds",
+                "",
+                sec["workarounds"],
+                "",
+            ]
+        )
         return scrub_text("\n".join(lines))
 
     # Multi-finding maintainer advisory
@@ -1556,13 +1581,15 @@ def _render_maintainer_markdown(
             [
                 f"## {idx}. [{sec['severity'].upper()}] {sec['title']}",
                 "",
+                "### Summary",
+                "",
                 sec["summary"],
                 "",
-                "### Root Cause",
+                "### Details",
                 "",
                 sec["root_cause"],
                 "",
-                "### Reproduction",
+                "### PoC",
                 "",
                 sec["reproduction_prose"],
                 "",
@@ -1579,7 +1606,15 @@ def _render_maintainer_markdown(
         )
         if sec["suggested_fix_block"]:
             lines.extend(["", sec["suggested_fix_block"]])
-        lines.append("")
+        lines.extend(
+            [
+                "",
+                "### Workarounds",
+                "",
+                sec["workarounds"],
+                "",
+            ]
+        )
 
     if core["chains"]:
         lines.extend(["## Multi-Step Attack Chains", ""])

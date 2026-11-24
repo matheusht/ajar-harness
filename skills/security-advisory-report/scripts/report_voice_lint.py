@@ -27,7 +27,7 @@ TIER_BUDGETS: dict[str, dict[str, Any]] = {
         "max_words": 180,
         "hard_min_words": 35,
         "hard_max_words": 220,
-        "max_sections": 4,
+        "max_sections": 5,
         "max_h4_plus": 0,
         "max_tables": 0,
         "requires_repro": False,
@@ -44,10 +44,10 @@ TIER_BUDGETS: dict[str, dict[str, Any]] = {
     },
     "S": {
         "min_words": 90,
-        "max_words": 350,
+        "max_words": 380,
         "hard_min_words": 60,
-        "hard_max_words": 420,
-        "max_sections": 6,
+        "hard_max_words": 450,
+        "max_sections": 7,
         "max_h4_plus": 0,
         "max_tables": 1,
         "requires_repro": True,
@@ -57,7 +57,7 @@ TIER_BUDGETS: dict[str, dict[str, Any]] = {
         "max_words": 650,
         "hard_min_words": 120,
         "hard_max_words": 780,
-        "max_sections": 6,
+        "max_sections": 7,
         "max_h4_plus": 2,
         "max_tables": 1,
         "requires_repro": True,
@@ -67,7 +67,7 @@ TIER_BUDGETS: dict[str, dict[str, Any]] = {
         "max_words": 1000,
         "hard_min_words": 240,
         "hard_max_words": 1200,
-        "max_sections": 7,
+        "max_sections": 8,
         "max_h4_plus": 4,
         "max_tables": 1,
         "requires_repro": True,
@@ -344,9 +344,11 @@ PROTECTED_DOT_PATTERNS: list[re.Pattern[str]] = [
 
 METADATA_FIELD_RE = re.compile(
     r"^(?:[-*]\s+)?\*{0,2}(?:"
-    r"Severity|CVSS(?:\s+v?[34]\.[01])?|CWE|Target|Category|Component|Status|Scope|Commit|Repository|Revision|Date|"
+    r"Title|Ecosystem(?:\s*/\s*Package)?|Package|"
+    r"Severity|CVSS(?:\s+v?[34]\.[01])?(?:\s+Vectors?)?|CWE(?:\s+ID)?|"
+    r"Target|Category|Component|Status|Scope|Commit|Repository|Revision|Date|"
     r"Difficulty(?:\s*/\s*Preconditions?)?|Preconditions?|"
-    r"Affected\s+versions?|Affected\s+files?|Affected\s+configs?|Affected\s+components?|"
+    r"Affected\s+versions?|Patched\s+versions?|Affected\s+files?|Affected\s+configs?|Affected\s+components?|"
     r"Introduced(?:-in|\s+in)|Baseline\s+commit|Reviewed\s+areas?|Locations?|Directory|"
     r"Signed-off-by|Co-authored-by|Reported-by|Credits?|Reviewed-by|Acked-by|Prepared\s+by|Author|"
     r"Next-review\s+trigger|base-commit"
@@ -372,6 +374,14 @@ CLI_DOUBLE_DASH_LINE_RE = re.compile(
 )
 
 LIST_ITEM_START_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)]|\([a-z0-9]+\))\s+")
+
+
+@dataclass(frozen=True)
+class SectionRequirement:
+    canonical_label: str
+    pattern: re.Pattern[str]
+    allowed_depths: tuple[int, ...]
+    disallowed_aliases: tuple[tuple[str, re.Pattern[str]], ...] = ()
 
 
 @dataclass
@@ -418,6 +428,8 @@ class FileLintReport:
     bureaucratic_triad_count: int
     markdown_decoration_in_plaintext: int
     hard_wrapped_prose_lines: int = 0
+    missing_sections: list[str] = field(default_factory=list)
+    out_of_order_sections: list[str] = field(default_factory=list)
     harness_leaks: list[FindingHit] = field(default_factory=list)
     local_path_leaks: list[FindingHit] = field(default_factory=list)
     slop_hits: list[FindingHit] = field(default_factory=list)
@@ -429,6 +441,38 @@ def _is_patch_or_email(lines: list[str]) -> bool:
     for line in lines:
         if line.strip():
             return bool(EMAIL_FIRST_LINE_RE.match(line))
+    return False
+
+
+def _is_setext_heading_pair(title_line: str, underline_line: str) -> bool:
+    title = title_line.strip()
+    under = underline_line.strip()
+    if not title or not re.match(r"^(?:={3,}|-{3,})$", under):
+        return False
+    if len(under) < 4 and len(under) != len(title):
+        return False
+    if title_line.lstrip().startswith("-") or title_line.startswith(("diff ", "+++ ", "@@ ")):
+        return False
+    if METADATA_FIELD_RE.match(title):
+        return False
+    return True
+
+
+def _is_git_format_patch_or_cover_letter(path: pathlib.Path, raw_text: str) -> bool:
+    if path.suffix.lower() == ".patch" or "0000-cover-letter" in path.name.lower():
+        return True
+    if re.search(r"^From [0-9a-f]{40}\b", raw_text, re.MULTILINE):
+        return True
+    if re.search(r"\*\*\* BLURB HERE \*\*\*", raw_text):
+        return True
+    if re.search(r"^Subject:\s*\[(?:RFC\s+)?PATCH(?:\s+v\d+)?(?:\s+\d+/\d+)?\]", raw_text, re.MULTILINE | re.IGNORECASE):
+        return True
+    if raw_text.lstrip().startswith("diff --git "):
+        return True
+    if re.search(r"^---\n(?: [^\n]+\|\s+\d+| \d+ files? changed)", raw_text, re.MULTILINE) and re.search(
+        r"^diff --git ", raw_text, re.MULTILINE
+    ):
+        return True
     return False
 
 
@@ -506,10 +550,7 @@ def _detect_markdown_hard_wrapped_prose(raw_lines: list[str], is_email: bool) ->
 
         if in_diff_body:
             if re.match(r"^#{1,6}\s+", line) or (
-                i + 1 < n
-                and line.strip()
-                and re.match(r"^(?:={4,}|-{4,})\s*$", raw_lines[i + 1])
-                and not line.startswith(("---", "+++"))
+                i + 1 < n and _is_setext_heading_pair(line, raw_lines[i + 1])
             ):
                 in_diff_body = False
             else:
@@ -519,13 +560,7 @@ def _detect_markdown_hard_wrapped_prose(raw_lines: list[str], is_email: bool) ->
                 continue
 
         # Setext headings
-        if (
-            i + 1 < n
-            and line.strip()
-            and re.match(r"^(?:={4,}|-{4,})\s*$", raw_lines[i + 1])
-            and not line.lstrip().startswith("-")
-            and not line.startswith("--- ")
-        ):
+        if i + 1 < n and _is_setext_heading_pair(line, raw_lines[i + 1]):
             prev_open_prose = False
             prev_blockquote_prose = False
             i += 2
@@ -548,7 +583,7 @@ def _detect_markdown_hard_wrapped_prose(raw_lines: list[str], is_email: bool) ->
 
         # 4+-space indented code blocks following a blank line or Setext underline
         prev_blank = (i == 0) or (raw_lines[i - 1].strip() == "") or bool(
-            i >= 1 and re.match(r"^(?:={4,}|-{4,})\s*$", raw_lines[i - 1])
+            i >= 2 and _is_setext_heading_pair(raw_lines[i - 2], raw_lines[i - 1])
         )
         if (
             not prev_open_prose
@@ -723,14 +758,8 @@ def _strip_code_and_extract_structure(text: str) -> dict[str, Any]:
 
         if in_diff_body:
             # Exit unfenced diff if a Markdown heading or clear non-diff section follows a blank line
-            if (
-                re.match(r"^#{1,6}\s+", line)
-                or (
-                    i + 1 < n
-                    and line.strip()
-                    and re.match(r"^(?:={4,}|-{4,})\s*$", raw_lines[i + 1])
-                    and not line.startswith(("---", "+++"))
-                )
+            if re.match(r"^#{1,6}\s+", line) or (
+                i + 1 < n and _is_setext_heading_pair(line, raw_lines[i + 1])
             ):
                 if current_diff:
                     code_blocks.append("\n".join(current_diff))
@@ -742,14 +771,8 @@ def _strip_code_and_extract_structure(text: str) -> dict[str, Any]:
                 i += 1
                 continue
 
-        # Setext headings (e.g. Title\n===== or Section\n-----)
-        if (
-            i + 1 < n
-            and line.strip()
-            and re.match(r"^(?:={4,}|-{4,})\s*$", raw_lines[i + 1])
-            and not line.lstrip().startswith("-")
-            and not line.startswith("--- ")
-        ):
+        # Setext headings (e.g. Title\n===== or Section\n----- or PoC\n---)
+        if i + 1 < n and _is_setext_heading_pair(line, raw_lines[i + 1]):
             in_table = False
             skipping_metadata_continuation = False
             depth = 1 if raw_lines[i + 1].lstrip().startswith("=") else 2
@@ -768,7 +791,7 @@ def _strip_code_and_extract_structure(text: str) -> dict[str, Any]:
 
         # Indented C/shell/Python/test blocks in plain-text notes (4+ spaces after blank/heading)
         prev_blank = (i == 0) or (raw_lines[i - 1].strip() == "") or bool(
-            i >= 1 and re.match(r"^(?:={4,}|-{4,})\s*$", raw_lines[i - 1])
+            i >= 2 and _is_setext_heading_pair(raw_lines[i - 2], raw_lines[i - 1])
         )
         if (
             not skipping_metadata_continuation
@@ -927,14 +950,14 @@ def _extract_lead_paragraph(
             collected: list[str] = []
             for j in range(lineno, len(lines)):
                 cur_line = lines[j].strip()
-                if re.match(r"^(?:={4,}|-{4,})\s*$", cur_line):
+                if j == lineno and re.match(r"^(?:={3,}|-{3,})$", cur_line):
                     continue
                 if not cur_line:
                     if collected:
                         break
                     continue
                 if re.match(r"^#{1,6}\s+", cur_line) or (
-                    j + 1 < len(lines) and re.match(r"^(?:={4,}|-{4,})\s*$", lines[j + 1])
+                    j + 1 < len(lines) and _is_setext_heading_pair(lines[j], lines[j + 1])
                 ):
                     break
                 if cur_line.startswith("```") or cur_line.startswith("|"):
@@ -963,6 +986,415 @@ def _extract_lead_paragraph(
         if not p.lstrip().startswith("> [!"):
             return p
     return paragraphs[0] if paragraphs else ""
+
+
+def _normalize_heading_title(title: str) -> str:
+    return re.sub(r"\s+", " ", title.strip().rstrip(":"))
+
+
+def _format_heading_ref(depth: int, title: str, channel: str) -> str:
+    if channel == "mailing-list":
+        return title.strip()
+    return f"{'#' * depth} {title.strip()}"
+
+
+def _evaluate_section_sequence(
+    headings: list[tuple[int, int, str]],
+    reqs: list[SectionRequirement],
+    *,
+    channel: str,
+    context_label: str = "",
+) -> tuple[list[str], list[str], list[str], int]:
+    missing: list[str] = []
+    out_of_order: list[str] = []
+    issues: list[str] = []
+    penalty = 0
+    matched: list[tuple[int, str, int]] = []
+    hints: list[str] = []
+
+    for idx, req in enumerate(reqs):
+        found_line: int | None = None
+        for lineno, depth, raw_title in headings:
+            norm = _normalize_heading_title(raw_title)
+            if depth in req.allowed_depths and req.pattern.match(norm):
+                found_line = lineno
+                break
+        if found_line is not None:
+            matched.append((idx, req.canonical_label, found_line))
+            continue
+
+        missing.append(req.canonical_label)
+        hint_added = False
+        for lineno, depth, raw_title in headings:
+            norm = _normalize_heading_title(raw_title)
+            if req.pattern.match(norm) and depth not in req.allowed_depths:
+                hints.append(
+                    f"found wrong heading level '{_format_heading_ref(depth, raw_title, channel)}' "
+                    f"at L{lineno} instead of '{req.canonical_label}'"
+                )
+                hint_added = True
+                break
+        if not hint_added:
+            for lineno, depth, raw_title in headings:
+                norm = _normalize_heading_title(raw_title)
+                for _, alias_pat in req.disallowed_aliases:
+                    if alias_pat.match(norm):
+                        hints.append(
+                            f"found non-canonical heading '{_format_heading_ref(depth, raw_title, channel)}' "
+                            f"at L{lineno} instead of '{req.canonical_label}'"
+                        )
+                        hint_added = True
+                        break
+                if hint_added:
+                    break
+
+    doc_ordered = sorted(matched, key=lambda item: item[2])
+    pair_msgs: list[str] = []
+    involved_set: set[str] = set()
+    for a_idx in range(len(doc_ordered)):
+        for b_idx in range(a_idx + 1, len(doc_ordered)):
+            if doc_ordered[a_idx][0] > doc_ordered[b_idx][0]:
+                later_sec = doc_ordered[a_idx][1]
+                earlier_sec = doc_ordered[b_idx][1]
+                pair_msgs.append(f"'{later_sec}' appears before '{earlier_sec}'")
+                involved_set.add(later_sec)
+                involved_set.add(earlier_sec)
+
+    if involved_set:
+        out_of_order = [lbl for _, lbl, _ in doc_ordered if lbl in involved_set]
+
+    expected_chain = " -> ".join(r.canonical_label for r in reqs)
+    scope_prefix = f" in {context_label}" if context_label else f" for channel '{channel}'"
+    if missing:
+        hint_suffix = f" ({'; '.join(hints)})" if hints else ""
+        issues.append(
+            f"Missing required section(s){scope_prefix}: {', '.join(missing)}{hint_suffix} "
+            f"(expected canonical order: {expected_chain})."
+        )
+        penalty += min(30, 8 * len(missing))
+
+    if out_of_order:
+        issues.append(
+            f"Out-of-order required section(s){scope_prefix}: {'; '.join(pair_msgs)} "
+            f"(expected canonical order: {expected_chain})."
+        )
+        penalty += min(20, 6 * len(out_of_order))
+
+    return missing, out_of_order, issues, penalty
+
+
+def _build_channel_requirements(channel: str, effective_tier: str | None) -> list[SectionRequirement]:
+    poc_aliases = (
+        ("Verification", re.compile(r"^verification$", re.IGNORECASE)),
+        ("Reproduction", re.compile(r"^(?:reproduction|steps\s+to\s+reproduce|proof\s+of\s+concept)$", re.IGNORECASE)),
+    )
+    details_aliases = (
+        ("Root Cause", re.compile(r"^(?:root\s+cause|description|analysis)$", re.IGNORECASE)),
+    )
+    fix_aliases = (
+        ("Remediation", re.compile(r"^(?:remediation|recommendations?|fix|mitigations?)$", re.IGNORECASE)),
+    )
+    workaround_aliases = (
+        ("Workaround", re.compile(r"^workaround$", re.IGNORECASE)),
+    )
+
+    if channel == "ghsa":
+        if effective_tier in {"DRY", "LOW", "AUDIT"}:
+            return []
+        return [
+            SectionRequirement("### Summary", re.compile(r"^summary$", re.IGNORECASE), (3,)),
+            SectionRequirement("### Details", re.compile(r"^details$", re.IGNORECASE), (3,), details_aliases),
+            SectionRequirement("### PoC", re.compile(r"^poc$", re.IGNORECASE), (3,), poc_aliases),
+            SectionRequirement("### Impact", re.compile(r"^impact$", re.IGNORECASE), (3,)),
+            SectionRequirement("### Suggested Fix", re.compile(r"^suggested\s+fix$", re.IGNORECASE), (3,), fix_aliases),
+            SectionRequirement("### Workarounds", re.compile(r"^workarounds$", re.IGNORECASE), (3,), workaround_aliases),
+        ]
+
+    if channel == "h1":
+        if effective_tier in {"DRY", "LOW", "AUDIT"}:
+            return []
+        return [
+            SectionRequirement("### Summary", re.compile(r"^summary$", re.IGNORECASE), (3,)),
+            SectionRequirement("### Details", re.compile(r"^details$", re.IGNORECASE), (3,), details_aliases),
+            SectionRequirement(
+                "### Steps To Reproduce",
+                re.compile(r"^steps\s+to\s+reproduce$", re.IGNORECASE),
+                (3,),
+                (
+                    ("Verification", re.compile(r"^verification$", re.IGNORECASE)),
+                    ("PoC", re.compile(r"^(?:poc|reproduction)$", re.IGNORECASE)),
+                ),
+            ),
+            SectionRequirement("### Impact", re.compile(r"^impact$", re.IGNORECASE), (3,)),
+            SectionRequirement("### Suggested Fix", re.compile(r"^suggested\s+fix$", re.IGNORECASE), (3,), fix_aliases),
+            SectionRequirement("### Workarounds", re.compile(r"^workarounds$", re.IGNORECASE), (3,), workaround_aliases),
+        ]
+
+    if channel == "immunefi":
+        if effective_tier in {"DRY", "LOW", "AUDIT"}:
+            return []
+        return [
+            SectionRequirement(
+                "### Quantified Summary & Activation Status",
+                re.compile(r"^quantified\s+summary\s*(?:&|and)\s*activation\s+status$", re.IGNORECASE),
+                (3,),
+            ),
+            SectionRequirement(
+                "### Trust Boundary & Broken Invariant",
+                re.compile(r"^trust\s+boundary\s*(?:&|and)\s*broken\s+invariant$", re.IGNORECASE),
+                (3,),
+            ),
+            SectionRequirement("### State Walkthrough", re.compile(r"^state\s+walkthrough$", re.IGNORECASE), (3,)),
+            SectionRequirement("### PoC", re.compile(r"^poc$", re.IGNORECASE), (3,), poc_aliases),
+            SectionRequirement("### Impact", re.compile(r"^impact$", re.IGNORECASE), (3,)),
+            SectionRequirement("### Remediation", re.compile(r"^remediation$", re.IGNORECASE), (3,)),
+        ]
+
+    if channel == "mailing-list":
+        if effective_tier in {"DRY", "LOW", "AUDIT"}:
+            return []
+        return [
+            SectionRequirement("Analysis", re.compile(r"^(?:analysis|details)$", re.IGNORECASE), (1, 2)),
+            SectionRequirement(
+                "PoC",
+                re.compile(r"^(?:poc|reproduction)$", re.IGNORECASE),
+                (1, 2),
+                (("Verification", re.compile(r"^verification$", re.IGNORECASE)),),
+            ),
+            SectionRequirement("Impact", re.compile(r"^impact$", re.IGNORECASE), (1, 2)),
+            SectionRequirement("Suggested Fix", re.compile(r"^suggested\s+fix$", re.IGNORECASE), (1, 2)),
+            SectionRequirement("Workarounds", re.compile(r"^workarounds$", re.IGNORECASE), (1, 2), workaround_aliases),
+        ]
+
+    if channel == "customer":
+        if effective_tier == "LOW":
+            return [
+                SectionRequirement(
+                    "### Description",
+                    re.compile(r"^(?:summary|description|root\s+cause|details)$", re.IGNORECASE),
+                    (2, 3, 4),
+                ),
+                SectionRequirement("### Impact", re.compile(r"^impact$", re.IGNORECASE), (2, 3, 4)),
+                SectionRequirement(
+                    "### Suggested Fix",
+                    re.compile(r"^(?:suggested\s+fix|recommendations?|remediation)$", re.IGNORECASE),
+                    (2, 3, 4),
+                ),
+            ]
+        if effective_tier == "DRY":
+            return [
+                SectionRequirement(
+                    "### Security Review Summary",
+                    re.compile(
+                        r"^(?:(?:security\s+review\s+|executive\s+)?summary|"
+                        r"reviewed\s+scope(?:\s*(?:&|and)\s*[^:]+)?|"
+                        r"scope(?:\s*(?:&|and)\s*[^:]+)?)$",
+                        re.IGNORECASE,
+                    ),
+                    (2, 3),
+                ),
+                SectionRequirement(
+                    "### Verified Boundaries",
+                    re.compile(
+                        r"^(?:verified\s+(?:guards?|boundaries|controls?)|"
+                        r"inspected\s+(?:guards?|controls?)|"
+                        r"bounded\s+outcome(?:\s*(?:&|and)\s*[^:]+)?)$",
+                        re.IGNORECASE,
+                    ),
+                    (2, 3),
+                ),
+                SectionRequirement(
+                    "### Limitations and Unresolved Paths",
+                    re.compile(
+                        r"^(?:limitations?(?:\s*(?:&|and)\s*[^:]+)?|"
+                        r"unresolved\s+paths?|"
+                        r"reliance\s+boundary(?:\s*(?:&|and)\s*[^:]+)?)$",
+                        re.IGNORECASE,
+                    ),
+                    (2, 3),
+                ),
+            ]
+        if effective_tier == "AUDIT":
+            return []
+        return [
+            SectionRequirement("### Summary", re.compile(r"^summary$", re.IGNORECASE), (2, 3, 4)),
+            SectionRequirement(
+                "### Root Cause",
+                re.compile(r"^(?:root\s+cause|details)$", re.IGNORECASE),
+                (2, 3, 4),
+                (("Description", re.compile(r"^description$", re.IGNORECASE)),),
+            ),
+            SectionRequirement(
+                "### Reproduction",
+                re.compile(r"^(?:reproduction|poc)$", re.IGNORECASE),
+                (2, 3, 4),
+                (("Verification", re.compile(r"^verification$", re.IGNORECASE)),),
+            ),
+            SectionRequirement("### Impact", re.compile(r"^impact$", re.IGNORECASE), (2, 3, 4)),
+            SectionRequirement(
+                "### Suggested Fix",
+                re.compile(r"^(?:suggested\s+fix|remediation)$", re.IGNORECASE),
+                (2, 3, 4),
+            ),
+        ]
+
+    return []
+
+
+def _check_required_sections_and_metadata(
+    *,
+    path: pathlib.Path,
+    raw_text: str,
+    raw_lines: list[str],
+    headings: list[tuple[int, int, str]],
+    non_code_lines: list[tuple[int, str]],
+    channel: str,
+    effective_tier: str | None,
+) -> tuple[list[str], list[str], list[str], int]:
+    """Rule #16: Enforce canonical required sections, section ordering, and GHSA top metadata completeness."""
+    if channel == "mailing-list" and _is_git_format_patch_or_cover_letter(path, raw_text):
+        return [], [], [], 0
+
+    missing_all: list[str] = []
+    out_of_order_all: list[str] = []
+    issues: list[str] = []
+    penalty = 0
+
+    if channel == "customer" and effective_tier == "AUDIT":
+        top_reqs = [
+            SectionRequirement(
+                "## Summary",
+                re.compile(r"^(?:(?:executive\s+|security\s+review\s+)?summary|overview)$", re.IGNORECASE),
+                (2, 3),
+            ),
+            SectionRequirement(
+                "## Scope and Inspected Controls",
+                re.compile(
+                    r"^(?:scope(?:\s*(?:&|and)\s*[^:]+)?|verified\s+(?:guards?|boundaries|controls?)|"
+                    r"inspected\s+(?:guards?|controls?)|limitations?(?:\s*(?:&|and)\s*[^:]+)?)$",
+                    re.IGNORECASE,
+                ),
+                (2, 3),
+            ),
+        ]
+        m_top, o_top, iss_top, pen_top = _evaluate_section_sequence(headings, top_reqs, channel=channel)
+        missing_all.extend(m_top)
+        out_of_order_all.extend(o_top)
+        issues.extend(iss_top)
+        penalty += pen_top
+
+        # Check each per-finding h3 block that defines h4 subheadings
+        h_idx = 0
+        while h_idx < len(headings):
+            h_ln, h_depth, h_title = headings[h_idx]
+            if h_depth == 3:
+                sub_headings: list[tuple[int, int, str]] = []
+                k = h_idx + 1
+                while k < len(headings) and headings[k][1] > 3:
+                    if headings[k][1] == 4:
+                        sub_headings.append(headings[k])
+                    k += 1
+                if sub_headings:
+                    has_repro_sub = any(
+                        re.match(r"^(?:reproduction|poc)$", _normalize_heading_title(st), re.IGNORECASE)
+                        for _, _, st in sub_headings
+                    )
+                    sub_reqs = [
+                        SectionRequirement(
+                            "#### Root Cause",
+                            re.compile(r"^(?:root\s+cause|details|description)$", re.IGNORECASE),
+                            (4,),
+                        ),
+                    ]
+                    if has_repro_sub:
+                        sub_reqs.append(
+                            SectionRequirement(
+                                "#### Reproduction",
+                                re.compile(r"^(?:reproduction|poc)$", re.IGNORECASE),
+                                (4,),
+                            )
+                        )
+                    sub_reqs.extend(
+                        [
+                            SectionRequirement("#### Impact", re.compile(r"^impact$", re.IGNORECASE), (4,)),
+                            SectionRequirement(
+                                "#### Suggested Fix",
+                                re.compile(r"^(?:suggested\s+fix|recommendations?|remediation)$", re.IGNORECASE),
+                                (4,),
+                            ),
+                        ]
+                    )
+                    m_sub, o_sub, iss_sub, pen_sub = _evaluate_section_sequence(
+                        sub_headings,
+                        sub_reqs,
+                        channel=channel,
+                        context_label=f"finding '{h_title}' (L{h_ln})",
+                    )
+                    for item in m_sub:
+                        if item not in missing_all:
+                            missing_all.append(item)
+                    for item in o_sub:
+                        if item not in out_of_order_all:
+                            out_of_order_all.append(item)
+                    issues.extend(iss_sub)
+                    penalty += pen_sub
+                h_idx = k
+            else:
+                h_idx += 1
+        return missing_all, out_of_order_all, issues, penalty
+
+    reqs = _build_channel_requirements(channel, effective_tier)
+    if reqs:
+        m_sec, o_sec, iss_sec, pen_sec = _evaluate_section_sequence(headings, reqs, channel=channel)
+        missing_all.extend(m_sec)
+        out_of_order_all.extend(o_sec)
+        issues.extend(iss_sec)
+        penalty += pen_sec
+
+    # Reject stray 'Verification' section headings even if added alongside PoC
+    if channel in {"ghsa", "h1", "immunefi", "mailing-list"} and effective_tier not in {"DRY", "LOW", "AUDIT"}:
+        for lineno, depth, raw_title in headings:
+            if depth >= 2 or (channel == "mailing-list" and depth in {1, 2}):
+                if re.match(r"^verification$", _normalize_heading_title(raw_title), re.IGNORECASE):
+                    if "### PoC" not in missing_all and "PoC" not in missing_all and "### Steps To Reproduce" not in missing_all:
+                        issues.append(
+                            f"Non-canonical heading '{_format_heading_ref(depth, raw_title, channel)}' at L{lineno}; "
+                            f"use exact canonical PoC/Reproduction heading for channel '{channel}'."
+                        )
+                        penalty += 6
+
+    # GHSA top metadata block completeness check (Severity, CWE, Affected Versions, Patched Versions)
+    if channel == "ghsa" and effective_tier not in {"DRY", "LOW", "AUDIT"}:
+        first_section_line = min((ln for ln, d, _ in headings if d >= 2), default=len(raw_lines) + 1)
+        top_meta: list[tuple[str, str]] = []
+        for ln, line in non_code_lines:
+            if ln >= first_section_line:
+                break
+            m_bullet = re.match(r"^\s*[-*]\s+\*{0,2}([^*:]+?)\*{0,2}\s*:\s*(.*)$", line)
+            if m_bullet:
+                key_norm = re.sub(r"\s+", " ", m_bullet.group(1).strip().lower())
+                val_clean = m_bullet.group(2).strip().strip("*").strip()
+                top_meta.append((key_norm, val_clean))
+
+        if top_meta:
+            required_ghsa_meta: list[tuple[str, re.Pattern[str]]] = [
+                ("Severity", re.compile(r"^severity$", re.IGNORECASE)),
+                ("CWE", re.compile(r"^cwe(?:\s+id)?$", re.IGNORECASE)),
+                ("Affected Versions", re.compile(r"^affected\s+versions?$", re.IGNORECASE)),
+                ("Patched Versions", re.compile(r"^patched\s+versions?$", re.IGNORECASE)),
+            ]
+            missing_meta: list[str] = []
+            for label, key_pat in required_ghsa_meta:
+                if not any(key_pat.match(k) and bool(v) for k, v in top_meta):
+                    missing_meta.append(label)
+            if missing_meta:
+                issues.append(
+                    f"Missing required GHSA top metadata field(s): {', '.join(missing_meta)} "
+                    "(when top metadata bullets are present, include Severity, CWE, Affected Versions, and Patched Versions)."
+                )
+                penalty += min(15, 5 * len(missing_meta))
+
+    return missing_all, out_of_order_all, issues, penalty
 
 
 def lint_file(
@@ -1381,10 +1813,23 @@ def lint_file(
         )
         score -= min(12, 3 + 2 * hard_wrapped_prose_lines)
 
-    if requires_repro and path.suffix not in {".patch"} and not re.search(r"0000-cover-letter", path.name):
+    if requires_repro and not _is_git_format_patch_or_cover_letter(path, raw_text):
         if not has_repro:
             issues.append("No self-contained reproduction command or PoC code block detected.")
             score -= 12
+
+    missing_sections, out_of_order_sections, sec_issues, sec_penalty = _check_required_sections_and_metadata(
+        path=path,
+        raw_text=raw_text,
+        raw_lines=raw_lines,
+        headings=headings,
+        non_code_lines=non_code_lines,
+        channel=channel,
+        effective_tier=effective_tier,
+    )
+    if sec_issues:
+        issues.extend(sec_issues)
+        score -= sec_penalty
 
     score = max(0, min(100, score))
     passed = len(issues) == 0
@@ -1428,6 +1873,8 @@ def lint_file(
         bureaucratic_triad_count=bureaucratic_triad_count,
         markdown_decoration_in_plaintext=markdown_in_plaintext,
         hard_wrapped_prose_lines=hard_wrapped_prose_lines,
+        missing_sections=missing_sections,
+        out_of_order_sections=out_of_order_sections,
         harness_leaks=harness_leaks,
         local_path_leaks=local_path_leaks,
         slop_hits=slop_hits,
@@ -1453,8 +1900,8 @@ def _format_human(rep: FileLintReport) -> str:
     lines = [
         f"[{status}] {rep.path}{tier_str} (channel={rep.channel}, mechanical_score={rep.mechanical_score_100}/100)",
         f"  Words: prose={rep.prose_word_count}, non_code_total={rep.total_non_code_word_count} | "
-        f"Headings={rep.heading_count} (max_depth=h{rep.max_heading_depth}) | Tables={rep.table_count} | "
-        f"CodeBlocks={rep.code_block_count} (repro={rep.has_reproducer_block}, diff={rep.has_diff_or_patch})",
+        f"Headings={rep.heading_count} (max_depth=h{rep.max_heading_depth}, missing={len(rep.missing_sections)}, out_of_order={len(rep.out_of_order_sections)}) | "
+        f"Tables={rep.table_count} | CodeBlocks={rep.code_block_count} (repro={rep.has_reproducer_block}, diff={rep.has_diff_or_patch})",
         f"  Lead: words={rep.lead_word_count}, sentences={rep.lead_sentence_count}, "
         f"anchor={rep.lead_has_concrete_anchor}, throat_clearing={rep.lead_throat_clearing}",
         f"  LeadExcerpt: \"{rep.lead_excerpt}\"",
@@ -1481,7 +1928,7 @@ def main(argv: list[str] | None = None) -> int:
         "--tier",
         choices=["S", "M", "C", "low", "dry", "audit", "s", "m", "c", "LOW", "DRY", "AUDIT"],
         default=None,
-        help="Proportionality tier budget: S (90-350w), M (280-650w), C (500-1000w), low (50-180w), dry (80-380w), or audit.",
+        help="Proportionality tier budget: S (90-380w), M (180-650w), C (350-1000w), low (50-180w), dry (80-380w), or audit.",
     )
     parser.add_argument(
         "--channel",

@@ -1,13 +1,13 @@
 ---
 name: security-advisory-report
-description: Draft maintainer-grade security advisories, GHSAs, bug-bounty reports, plain-text mailing-list disclosures, Immunefi disclosures, and commissioned customer security reviews with complexity-proportional brevity, causal code precision, upfront trust-boundary honesty, portable defensive verification, idiomatic fixes, and zero AI slop or internal harness jargon.
+description: Draft maintainer-grade security advisories, GHSAs, bug-bounty reports, plain-text mailing-list disclosures, Immunefi disclosures, and commissioned customer security reviews with canonical section completeness, complexity-proportional brevity, causal code precision, upfront trust-boundary honesty, portable defensive PoCs, idiomatic fixes, and zero AI slop or internal harness jargon.
 ---
 
 # Security Advisory & Report Skill (v2)
 
-Write outbound vulnerability advisories and commissioned security review deliverables so an upstream maintainer, triage lead, or engineering buyer grasps the exact defect, trust boundary, verification check, and fix on the **first read**.
+Write outbound vulnerability advisories and commissioned security review deliverables so an upstream maintainer, triage lead, or engineering buyer grasps the exact defect, trust boundary, reproduction proof, impact ceiling, fix, and workaround on the **first read**.
 
-Assume the reader wrote the target subsystem. Never waste maintainer attention on throat-clearing preambles, multi-pass restatement, severity inflation, Goodharted filler, or leaked internal engine telemetry.
+Assume the reader wrote the target subsystem. Never waste maintainer attention on throat-clearing preambles, multi-pass restatement, severity inflation, Goodharted filler, or leaked internal engine telemetry, and **never omit required channel sections**.
 
 **Engine Handoff Boundary:** Internal closeout skills (`ajar-report`) own SQL gates, `report.json` telemetry, and `DEC-0113` SHA-256 preimage ledger sealing. This skill owns **every word of human-facing prose** across external disclosures and customer deliverables.
 
@@ -15,9 +15,9 @@ Assume the reader wrote the target subsystem. Never waste maintainer attention o
 
 1. **Run the 5-Point Pre-Flight Check** (Section 1).
 2. **Pick the Complexity Tier & Channel** (`S`, `M`, `C`, `low`, `dry`, or `audit` across `ghsa`, `mailing-list`, `h1`, `immunefi`, or `customer`, Section 2).
-3. **Load the Channel Spine** from `references/channel-formats-and-rubric.md`.
+3. **Load the Canonical Channel Spine** from `references/channel-formats-and-rubric.md` and keep **every required section present in exact canonical order**.
 4. **Draft Using the 7 Core Proof & Craft Rules** (Section 3) and **Voice & Jargon Discipline** (Section 4).
-5. **Pass `scripts/report_voice_lint.py --strict`** with `0` errors and `0` warnings before finalizing (Section 5).
+5. **Pass `scripts/report_voice_lint.py --strict`** with `0` errors, `0` warnings, `0` missing or out-of-order sections, and `0` hard-wrapped Markdown lines before finalizing (Section 5).
 
 ---
 
@@ -37,20 +37,28 @@ Before drafting prose, verify five fail-closed conditions:
 
 ---
 
-## 2. Complexity-Proportional Budgets ("Simple Where It Needs to Be")
+## 2. Complexity-Proportional Budgets & Canonical Section Completeness
 
-Scale length strictly with **causal complexity**. Never pad a crisp 100-word single-branch bug to hit an arbitrary word quota, and never force 10 headings onto a 1-line fix:
+Scale **prose length inside sections** strictly with **causal complexity**. Never pad a crisp 110-word single-branch bug to hit an arbitrary word quota, and never omit required sections (`### Impact`, `### Workarounds`, `Patched Versions`) to save lines:
 
-| Tier (`--tier`) | When to Use | Prose Word Band *(Hard Cap)* | `h2`/`h3` Sections | Tables | Reproducer / Diff |
+| Tier (`--tier`) | When to Use | Prose Word Band *(Hard Cap)* | Canonical `h2`/`h3` Sections | Tables | Reproducer / Diff |
 | :--- | :--- | :---: | :---: | :---: | :--- |
-| **`low`** | Customer audit Low / Informational hardening or config hygiene | **`50–180w`** *(`<= 220w`)* | `2–3` (`Target`, `Description`, `Recommendation`) | **`0`** | Optional (`<= 4`-line diff); omit `Impact` & `Scenario` |
-| **`dry`** | Zero-finding Verified Boundaries or `DEC-0099` buyer-safe summary | **`80–380w`** *(`<= 500w`)* | `3–5` | `<= 1` | Optional; cite verified `file:line` guards |
-| **`S`** | Single-branch missing check, NULL/bounds/reset flaw (`CVE-2024-2004`) | **`90–350w`** *(`<= 420w`)* | **`3–4` compact** or `5–6` full GHSA | `<= 1` | **Required** (`< 35`-line check + diff) |
-| **`M`** | Stateful protocol/parser interaction, client/server gate split (`CVE-2023-38545`) | **`180–650w`** *(`<= 780w`)* | `4–6` (`h4 <= 2`) | `<= 1` | **Required** (`< 60`-line check + diff) |
-| **`C`** | Multi-step state/aliasing composition (`CVE-2023-23946`, `CVE-2024-32002`) | **`350–1,000w`** *(`<= 1,200w`)* | `5–7` (`h4 <= 4`) | `<= 1` | **Required** (`< 65`-line check + diff) |
-| **`audit`** | Full multi-finding customer review (`--channel customer`) | Per-finding bands above | Executive split + findings | Per section | Per finding (`High/Med` required; `Low` optional) |
+| **`low`** | Customer audit Low / Informational hardening or config hygiene | **`50–180w`** *(`<= 220w`)* | `3–4` (`Description`/`Summary`, `Impact`, `Suggested Fix`/`Recommendation`; `max_sections=5`) | **`0`** | Optional (`<= 4`-line diff); `1`-sentence `Impact` required |
+| **`dry`** | Zero-finding Verified Boundaries or `DEC-0099` buyer-safe summary | **`80–380w`** *(`<= 500w`)* | `3–5` (`Summary`, `Verified Boundaries`, `Limitations`; `max_sections=6`) | `<= 1` | Optional; cite verified `file:line` guards |
+| **`S`** | Single-branch missing check, NULL/bounds/reset flaw (`CVE-2024-2004`) | **`90–380w`** *(`<= 450w`)* | **All `6` canonical channel sections** (`max_sections=7` with `# H1`) | `<= 1` | **Required** (`< 35`-line check + diff) |
+| **`M`** | Stateful protocol/parser interaction, client/server gate split (`CVE-2023-38545`) | **`180–650w`** *(`<= 780w`)* | **All `6` canonical channel sections** (`max_sections=7`, `h4 <= 2`) | `<= 1` | **Required** (`< 60`-line check + diff) |
+| **`C`** | Multi-step state/aliasing composition (`CVE-2023-23946`, `CVE-2024-32002`) | **`350–1,000w`** *(`<= 1,200w`)* | **All `6` canonical channel sections** (`max_sections=8`, `h4 <= 4`) | `<= 1` | **Required** (`< 65`-line check + diff) |
+| **`audit`** | Full multi-finding customer review (`--channel customer`) | Per-finding bands above | Executive split + canonical per-finding sections | Per section | Per finding (`High/Med` required; `Low` optional) |
 
-**Compact `Tier S` Rule:** When a single-branch defect takes 4 sentences to explain, use 4 sections (`Summary`, `Details`, `PoC`, `Suggested fix`) unless submitting to a GHSA form that maps `### Impact` and `### Workarounds` directly (`<= 6` sections supported). Cut every sentence that repeats `Summary`.
+> **Canonical Section Completeness Law:** **Proportionality shrinks prose length inside sections; NEVER omit required channel sections.** On a simple `Tier S` defect, keep `### Impact` to 1–2 crisp sentences and `### Workarounds` to 1 sentence so every required section remains present in exact canonical order.
+
+### Canonical Section Headings & Order by Channel
+
+- **`--channel ghsa` (`S`, `M`, `C`):** Preceded by the 7-field GHSA Form Header (`# <Title>` or `- **Title:**`, `- **Ecosystem / Package:**`, `- **Affected Versions:**`, `- **Patched Versions:**`, `- **Severity:**`, `- **CVSS v3.1 Vector:**` [omit for projects that reject CVSS], `- **CWE:**` — top bullets may be omitted only when pasting directly into separate web form fields; whenever top bullets are included, `Affected Versions`, `Patched Versions`, `Severity`, and `CWE` are mandatory), followed by the exact 6 `###` sections in order: `### Summary` -> `### Details` -> `### PoC` (**never** `### Verification`) -> `### Impact` -> `### Suggested Fix` (case-insensitive `Fix`/`fix` allowed; prefer `### Suggested Fix`) -> `### Workarounds`.
+- **`--channel h1` (`S`, `M`, `C`):** `### Summary` -> `### Details` -> `### Steps To Reproduce` -> `### Impact` -> `### Suggested Fix` -> `### Workarounds`.
+- **`--channel immunefi` (`S`, `M`, `C`):** `### Quantified Summary & Activation Status` -> `### Trust Boundary & Broken Invariant` -> `### State Walkthrough` -> `### PoC` (**never** `### Verification`) -> `### Impact` -> `### Remediation`.
+- **`--channel mailing-list` (`S`, `M`, `C`):** Standalone RFC 5322 plain-text email advisories must include `Analysis` (or `Details`) -> `PoC` (or `Reproduction`, **never** `Verification`) -> `Impact` -> `Suggested Fix` -> `Workarounds` Setext sections (`git format-patch` `.patch` commits and `0000-cover-letter.txt` series cover letters keep standard `SubmittingPatches` commit format).
+- **`--channel customer`:** `S/M/C` findings include `Summary` -> `Root Cause` (or `Details`) -> `Reproduction` (or `PoC`) -> `Impact` -> `Suggested Fix` (or `Remediation`). `low` findings include `Description` (or `Summary`/`Root Cause`) -> `Impact` (1 sentence) -> `Suggested Fix` (or `Recommendation`) so `Impact` is never missing. `dry` deliverables use `DEC-0099` `Security Review Summary` -> `Verified Boundaries` -> `Limitations and Unresolved Paths`.
 
 ---
 
@@ -67,22 +75,23 @@ Scale length strictly with **causal complexity**. Never pad a crisp 100-word sin
 - **Archaeological provenance:** Cite `Introduced in commit <12-char-sha> ("<subject>", YYYY-MM-DD)` via `git bisect` plus any incomplete prior fix (`CVE-2023-23946`) so maintainers can scope backports immediately.
 - **Zero prompt-schema artifacts:** Never open paragraphs with rubric-echo bold labels (`**Trust boundary and precondition:**`, `**Root cause:**`), never emit `- Intended:` / `- Bypass:` bullet pairs, and never label bug steps as `Hop 1` / `Hop 2`. Name the subsystem mechanics directly.
 
-### Rule 3: Upfront Negative Scope, Boundary Ceilings, & CVSS Discipline
+### Rule 3: Upfront Negative Scope, Boundary Ceilings, & CVSS / Version Discipline
 - **Foreground what is NOT affected:** State default vs. non-default config, OS/filesystem, and server-vs-client gates up front (*"Hosting servers with `receive.fsckObjects=true` reject this object on push; exposure is confined to clients cloning with default `transfer.fsckObjects=false`"*).
-- **Sandbox & blast-radius ceiling:** Ground claims in the target's boundary doc (`gitsecurityboundary(7)`, sandbox/privilege model) and state what downstream guards prevent (read-only probing vs. file write, ASan crash vs. `-O2` error return).
-- **CVSS calibration:** Include a 1-sentence rationale whenever an integrity/UI/AC vector depends on a follow-up subcommand or local ingestion (`UI:R`, `AV:L`). Omit CVSS entirely on projects that reject it (`curl`, `OpenSSL`), and omit redundant top metadata bullets when pasting into structured GHSA web fields.
+- **Sandbox & blast-radius ceiling in `### Impact`:** Ground `### Impact` in the target's boundary doc (`gitsecurityboundary(7)`, sandbox/privilege model) and state what downstream guards prevent (read-only probing vs. file write, ASan crash vs. `-O2` error return). Keep `### Impact` present on every finding (`1–2` crisp sentences on `Tier S`, `1` sentence on `low`).
+- **CVSS & `Patched Versions` calibration:** Include a 1-sentence rationale whenever an integrity/UI/AC vector depends on a follow-up subcommand or local ingestion (`UI:R`, `AV:L`). Omit CVSS entirely on projects that reject it (`curl`, `OpenSSL`). Whenever top GHSA metadata bullets are included, state both `Affected Versions` and `Patched Versions` (`None (unpatched on master at <sha>)` before release, or the exact patched tag).
 
-### Rule 4: Portable, Hermetic, Defensive Verification (`PoC` / `Verification`)
+### Rule 4: Portable, Hermetic, Defensive `PoC` (`### PoC` / `### Steps To Reproduce` / `### Reproduction`)
+- **Exact canonical heading:** Use `### PoC` on `ghsa` and `immunefi`, `### Steps To Reproduce` on `h1`, `PoC` or `Reproduction` on standalone `mailing-list` advisories, and `Reproduction` or `PoC` on `customer` reports. **Never rename `### PoC` to `### Verification`.**
 - **Strictly harmless & hermetic:** Use `mktemp -d` + `trap 'rm -rf "$work"' EXIT` or native test harnesses (`test_expect_success`, `pytest`, `cargo test`, `forge test --fork-block-number`). Assert harmless exit codes, diagnostics, or inert marker files inside `$work`.
-- **macOS / BSD / Linux portability:** Construct multiline files with **POSIX `cat <<'EOF' >file` heredocs**—never GNU-only `sed -i` or multiline `sed` insertions that fail on macOS. Prefer native plumbing (`git mktree`, `printf`) over external `python3` scripts or hardcoded hash sizes (`SHA-1` vs. `SHA-256`) unless explicitly noted in setup.
+- **macOS / BSD / Linux portability:** Construct multiline files with **POSIX `cat <<'EOF' >file` heredocs** — never GNU-only `sed -i` or multiline `sed` insertions that fail on macOS. Prefer native plumbing (`git mktree`, `printf`) over external `python3` scripts or hardcoded hash sizes (`SHA-1` vs. `SHA-256`) unless explicitly noted in setup.
 - **Positive + Benign Control:** Show both the failing check (**Expected** vs. **Observed**) and a brief benign control confirming normal input succeeds.
 
 ### Rule 5: Subsystem-Clean `Suggested Fix`
 - **Native idioms & header layering:** Respect subsystem header boundaries (do not pull internal cache headers into unrelated config units when a public `path.h` helper exists), use native string/memory helpers (`strbuf_tolower()`, `Curl_safecmp()`), hoist guards before state-mutating calls, and keep parallel validation helpers in sync.
-- **Backport clarity & full sentences:** Note when a multi-hunk patch separates the root state fix from defense-in-depth checks. Write complete sentences with grammatical subjects when citing test runs (*"With this patch applied, `test700` and `test728` pass"*—never clipped *"Passed `test700`"*).
+- **Backport clarity & full sentences:** Note when a multi-hunk patch separates the root state fix from defense-in-depth checks. Write complete sentences with grammatical subjects when citing test runs (*"With this patch applied, `test700` and `test728` pass"* — never clipped *"Passed `test700`"*).
 
-### Rule 6: Dedicated `### Workarounds`
-Place concrete no-upgrade CLI/config mitigations in a dedicated **`### Workarounds`** section (mapping 1:1 to the GHSA form field) rather than burying a `Workaround:` sentence inside `Impact`. State plainly if a workaround is partial or if none exists.
+### Rule 6: Dedicated `### Workarounds` After `### Suggested Fix`
+Place concrete no-upgrade CLI/config mitigations in a dedicated **`### Workarounds`** section immediately **after `### Suggested Fix`** (mapping 1:1 to the GHSA form order) rather than dropping `### Workarounds`, placing it before `### Suggested Fix`, or burying a `Workaround:` sentence inside `Impact` or `Details`. State plainly in one sentence if a workaround is partial or if none exists.
 
 ### Rule 7: Customer Engagement Split, `DEC-0099` Summary, & Honest Dry Closure
 In `--channel customer` deliverables:
@@ -106,7 +115,7 @@ In `--channel customer` deliverables:
 
 | Banned Internal / Scanner Token | Maintainer-Facing Translation |
 | :--- | :--- |
-| `4-arm`, `9-arm`, `Arm 1..9`, `verified_local`, `survived_falsify` | Present directly as `PoC` + `Benign control` + `Suggested fix` + test suite results |
+| `4-arm`, `9-arm`, `Arm 1..9`, `verified_local`, `survived_falsify` | Present directly as `PoC` + `Benign control` + `Suggested Fix` + test suite results |
 | `micropatched`, `maintainer_patched` *(pre-merge)* | *"Unpatched on `master` at `<sha>`; candidate patch verified locally against `<suite>`"* |
 | `clm-*`, `fnd-*`, `cor-*`, `pvf-*`, `chn-*`, `surf-*`, `Hop 1..N` | Omit IDs completely; name subsystem steps directly (*"mode-less copy step"*, *"second patch"*) |
 | `locus`, `dry_control_locus`, `primitive`, `sink`, `trust_gadget`, `open door` | Name exact `file.c:line` and concrete behavior (*"cryptographic primitives"* / *"log sink"* are fine) |
@@ -126,4 +135,4 @@ python3 <path-to-skill>/scripts/report_voice_lint.py <draft_file> \
   --strict
 ```
 
-The gate must exit `0` (`PASS`, `0` errors, `0` warnings, `0` hard-wrapped Markdown lines, and `0` leaks across the entire file including post-diff lines). For channel templates and the full `0–10` per-axis evaluation rubric, load `references/channel-formats-and-rubric.md`.
+The gate must exit `0` (`PASS`, `0` errors, `0` warnings, `0` missing or out-of-order required channel sections, `0` missing GHSA top metadata fields when top bullets are used, `0` hard-wrapped Markdown lines, and `0` leaks across the entire file including post-diff lines). For channel templates and the full `0–10` per-axis evaluation rubric, load `references/channel-formats-and-rubric.md`.

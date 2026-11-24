@@ -1082,6 +1082,9 @@ def apply_latest_finding_corrections(
                     imp_override = str(payload.get("impact") or "").strip()
                     if imp_override:
                         out["impact"] = scrub_text(imp_override)
+                    wk_override = str(payload.get("workarounds") or "").strip()
+                    if wk_override:
+                        out["workarounds"] = scrub_text(wk_override)
                     poc_override = str(payload.get("poc_cmd") or "").strip()
                     if poc_override and "poc_cmd" in out:
                         out["poc_cmd"] = scrub_text(poc_override)

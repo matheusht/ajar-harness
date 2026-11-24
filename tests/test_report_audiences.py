@@ -242,10 +242,24 @@ class TestReportAudiences(unittest.TestCase):
         maint_lint = voice_lint.lint_file(maint_md_path, tier="S", channel="ghsa")
         self.assertEqual(maint_lint.hard_wrapped_prose_lines, 0, f"Hard wraps in maintainer report:\n{md}")
         self.assertTrue(maint_lint.passed, f"Maintainer report failed voice lint: {maint_lint.issues}")
+        self.assertEqual(maint_lint.warnings, [], f"Maintainer report strict warnings: {maint_lint.warnings}\n{md}")
+        self.assertEqual(maint_lint.mechanical_score_100, 100, f"Maintainer report score < 100: {maint_lint}")
+        self.assertEqual(maint_lint.missing_sections, [])
+        self.assertEqual(maint_lint.out_of_order_sections, [])
 
-        # Required human-grade section headings
-        for heading in ("## Summary", "## Root Cause", "## Reproduction", "## Impact", "## Suggested Fix"):
-            self.assertIn(heading, md)
+        # Required canonical 6-section headings in exact order
+        canonical_headings = (
+            "### Summary",
+            "### Details",
+            "### PoC",
+            "### Impact",
+            "### Suggested Fix",
+            "### Workarounds",
+        )
+        positions = [md.find(h) for h in canonical_headings]
+        for heading, pos in zip(canonical_headings, positions, strict=True):
+            self.assertNotEqual(pos, -1, f"Missing canonical heading {heading!r} in:\n{md}")
+        self.assertEqual(positions, sorted(positions), f"Out-of-order headings in:\n{md}")
 
         # Calibrated title/prose/severity applied; stale pre-calibration text absent
         self.assertIn("Negative chunk length bypasses upper-bound check in parse_chunk_length", md)

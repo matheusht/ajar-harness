@@ -31,13 +31,13 @@ jobs:
           test "$lines" -le 50
 
       - name: Lint with ruff
-        run: ruff check ajar tests tools/arch_lint.py
+        run: ruff check src/ajar tests tools/arch_lint.py
 
       - name: Check mechanical architecture guardrails
         run: python3 tools/arch_lint.py
 
       - name: Static type-check with mypy
-        run: mypy --strict ajar tools/arch_lint.py
+        run: mypy --strict src/ajar tools/arch_lint.py
 
       - name: Run unit, gate, redaction, and conformance suite
         run: pytest -q

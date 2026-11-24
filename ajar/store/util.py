@@ -1070,6 +1070,42 @@ def apply_latest_finding_corrections(
                     rtier = str(payload.get("realism_tier") or "").strip()
                     if rtier in ("crown_jewel", "high_impact", "stepping_stone"):
                         out["realism_tier"] = rtier
+                    rc_prose = str(payload.get("root_cause") or payload.get("mechanism") or "").strip()
+                    if rc_prose:
+                        out["root_cause"] = scrub_text(rc_prose)
+                    loc_override = str(payload.get("locus") or "").strip()
+                    if loc_override:
+                        out["locus"] = scrub_text(loc_override)
+                    sum_override = str(payload.get("summary") or "").strip()
+                    if sum_override:
+                        out["summary"] = scrub_text(sum_override)
+                    imp_override = str(payload.get("impact") or "").strip()
+                    if imp_override:
+                        out["impact"] = scrub_text(imp_override)
+                    poc_override = str(payload.get("poc_cmd") or "").strip()
+                    if poc_override and "poc_cmd" in out:
+                        out["poc_cmd"] = scrub_text(poc_override)
+                    ctrl_override = str(payload.get("control_cmd") or "").strip()
+                    if ctrl_override and "control_cmd" in out:
+                        out["control_cmd"] = scrub_text(ctrl_override)
+                    cal_override = str(payload.get("calibration_notes") or "").strip()
+                    if cal_override:
+                        out["calibration_notes"] = scrub_text(cal_override)
+                    elif str(fc["reason"] or "").strip():
+                        out["calibration_notes"] = scrub_text(str(fc["reason"]).strip())
+                    if payload.get("declared_steps") is not None:
+                        try:
+                            dsteps = max(1, int(payload["declared_steps"]))
+                            r_json = json.loads(str(out.get("realism_json") or "{}"))
+                            if not isinstance(r_json, dict):
+                                r_json = {}
+                            r_json["declared_steps"] = dsteps
+                            r_json["estimated_steps"] = dsteps
+                            out["realism_json"] = json.dumps(r_json, sort_keys=True)
+                        except (ValueError, TypeError):
+                            pass
+                elif str(fc["reason"] or "").strip():
+                    out["calibration_notes"] = scrub_text(str(fc["reason"]).strip())
                 out["applied_correction_id"] = str(fc["correction_id"])
         merged.append(out)
 

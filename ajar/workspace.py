@@ -225,6 +225,8 @@ def init_run_workspace(
         raise AjarError(f"Run {rid} already exists at {rdir}", EXIT_USER_ERROR)
 
     src_git_dir: pathlib.Path | None = None
+    source_target_str = ""
+    source_target_name = ""
     if target_mode == "live":
         target_url = target.strip()
         target_path_str = target_url
@@ -239,6 +241,8 @@ def init_run_workspace(
             raise AjarError(f"Target path does not exist: {src_path}", EXIT_USER_ERROR)
         if target_mode == "binary" and not src_path.is_file():
             raise AjarError(f"--mode binary requires an executable file, got: {src_path}", EXIT_USER_ERROR)
+        source_target_str = str(src_path)
+        source_target_name = src_path.name
         src_git_dir = src_path if src_path.is_dir() else src_path.parent
 
         if target_mode == "source" and not allow_historical_target and not (diff_range and diff_range.strip()):
@@ -381,6 +385,8 @@ def init_run_workspace(
                     json.dumps(
                         {
                             "target": target_path_str,
+                            "source_target": source_target_str,
+                            "source_target_name": source_target_name,
                             "target_mode": target_mode,
                             "allowed_hosts": hosts,
                             "allow_live_requests": bool(allow_live_requests),

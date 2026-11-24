@@ -67,6 +67,7 @@ from ajar.graph import (
     VALID_GRAPH_VISIBILITIES,
 )
 from ajar.mcp import serve_mcp_stdio
+from ajar.report import VALID_REPORT_AUDIENCES
 from ajar.slice_probe import VALID_SLICE_TRACERS
 from ajar.swarm import (
     ENV_BLOCKER_KINDS,
@@ -612,10 +613,11 @@ def build_parser() -> argparse.ArgumentParser:
     # finding (Operator calibration & listing)
     p_fnd = sub.add_parser("finding", help="Inspect confirmed findings and calibrate severity/titles/realism without raw SQL.")
     fnd_sub = p_fnd.add_subparsers(dest="finding_cmd", required=True)
-    pfn_c = fnd_sub.add_parser("calibrate", help="Calibrate severity, title, declared steps, or realism tier on a confirmed finding.")
+    pfn_c = fnd_sub.add_parser("calibrate", help="Calibrate severity, title, root cause, declared steps, or realism tier on a confirmed finding.")
     pfn_c.add_argument("finding_id")
     pfn_c.add_argument("--severity", choices=("critical", "high", "medium", "low"))
     pfn_c.add_argument("--title")
+    pfn_c.add_argument("--root-cause", help="Optional calibrated root-cause prose replacing stale pre-calibration text.")
     pfn_c.add_argument("--declared-steps", type=int, default=None, help="Optional calibrated victim interaction step count.")
     pfn_c.add_argument("--realism-tier", choices=("crown_jewel", "high_impact", "stepping_stone"), help="Optional calibrated realism tier.")
     pfn_c.add_argument("--reason", required=True)
@@ -808,6 +810,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_rep = sub.add_parser("report", help="Render Markdown or JSON security verification report.")
     p_rep.add_argument("--run")
     p_rep.add_argument("--format", choices=("md", "json"), default="md")
+    p_rep.add_argument(
+        "--audience",
+        choices=VALID_REPORT_AUDIENCES,
+        default="customer",
+        help="Target audience (`customer`, `maintainer`, `internal`; default: `customer`).",
+    )
+    p_rep.add_argument(
+        "--finding",
+        action="append",
+        help="Optional confirmed finding ID (`fnd-*`) filter for single-finding or per-subsystem advisories.",
+    )
     p_rep.add_argument("--output")
     p_rep.add_argument("--include-rejected-appendix", action="store_true")
     p_rep.set_defaults(func=cmd_report)

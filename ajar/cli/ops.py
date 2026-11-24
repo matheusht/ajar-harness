@@ -734,16 +734,28 @@ def cmd_finish(args: argparse.Namespace) -> int:
 
 def cmd_report(args: argparse.Namespace) -> int:
     rid = resolve_run_id(args.run)
+    audience = str(getattr(args, "audience", "customer") or "customer")
+    finding_ids = getattr(args, "finding", None)
     conn = open_run_db(rid)
     try:
         if args.format == "json":
             out_str = json.dumps(
-                build_report_data(conn, include_rejected_appendix=bool(args.include_rejected_appendix)),
+                build_report_data(
+                    conn,
+                    include_rejected_appendix=bool(args.include_rejected_appendix),
+                    audience=audience,
+                    finding_ids=finding_ids,
+                ),
                 indent=2,
                 sort_keys=True,
             )
         else:
-            out_str = render_markdown_report(conn, include_rejected_appendix=bool(args.include_rejected_appendix))
+            out_str = render_markdown_report(
+                conn,
+                include_rejected_appendix=bool(args.include_rejected_appendix),
+                audience=audience,
+                finding_ids=finding_ids,
+            )
     finally:
         conn.close()
 

@@ -974,11 +974,12 @@ def calibrate_finding(
     reason: str,
     severity: str | None = None,
     title: str | None = None,
+    root_cause: str | None = None,
     declared_steps: int | None = None,
     realism_tier: str | None = None,
     worker_id: str = "operator",
 ) -> dict[str, Any]:
-    """Calibrate severity/title/realism on a confirmed finding without ad-hoc SQL edits."""
+    """Calibrate severity/title/root_cause/realism on a confirmed finding without ad-hoc SQL edits."""
     clean_reason = scrub_text((reason or "").strip())
     if len(clean_reason) < 8:
         raise AjarError("Finding calibration --reason must be at least 8 characters.", EXIT_USER_ERROR)
@@ -993,6 +994,11 @@ def calibrate_finding(
         if new_sev not in ("critical", "high", "medium", "low"):
             raise AjarError(f"Unsupported severity: {new_sev!r}", EXIT_USER_ERROR)
         new_title = scrub_text(title.strip()) if title and title.strip() else str(frow["title"])
+        new_root_cause = (
+            scrub_text(root_cause.strip())
+            if root_cause is not None and root_cause.strip()
+            else str(frow["root_cause"])
+        )
         cur_tier = str(frow["realism_tier"] if "realism_tier" in frow.keys() else "stepping_stone")
         try:
             r_obj = json.loads(str(frow["realism_json"] or "{}")) if "realism_json" in frow.keys() else {}
@@ -1012,14 +1018,22 @@ def calibrate_finding(
         conn.execute(
             """
             UPDATE findings
-            SET severity = ?, title = ?, realism_tier = ?, realism_json = ?, calibration_notes = ?
+            SET severity = ?, title = ?, root_cause = ?, realism_tier = ?, realism_json = ?, calibration_notes = ?
             WHERE finding_id = ?
             """,
-            (new_sev, new_title, new_tier, json.dumps(r_obj, sort_keys=True), clean_reason, finding_id),
+            (
+                new_sev,
+                new_title,
+                new_root_cause,
+                new_tier,
+                json.dumps(r_obj, sort_keys=True),
+                clean_reason,
+                finding_id,
+            ),
         )
         conn.execute(
-            "UPDATE claims SET severity = ?, title = ?, updated_at = ? WHERE claim_id = ?",
-            (new_sev, new_title, now_iso, str(frow["claim_id"])),
+            "UPDATE claims SET severity = ?, title = ?, mechanism = ?, updated_at = ? WHERE claim_id = ?",
+            (new_sev, new_title, new_root_cause, now_iso, str(frow["claim_id"])),
         )
         if worker_id == "operator":
             conn.execute(
@@ -1035,6 +1049,7 @@ def calibrate_finding(
                 "old_severity": frow["severity"],
                 "new_severity": new_sev,
                 "new_title": new_title,
+                "root_cause_updated": bool(root_cause and root_cause.strip()),
                 "realism_tier": new_tier,
                 "declared_steps": declared_steps,
                 "reason": clean_reason[:200],
@@ -1046,6 +1061,7 @@ def calibrate_finding(
         "old_severity": str(frow["severity"]),
         "severity": new_sev,
         "title": new_title,
+        "root_cause": new_root_cause,
         "realism_tier": new_tier,
         "declared_steps": r_obj.get("declared_steps"),
         "calibration_notes": clean_reason,

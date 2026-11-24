@@ -67,13 +67,13 @@ cmp -s AGENTS.md CLAUDE.md
 echo "    OK (AGENTS.md == CLAUDE.md, ${lines} lines)"
 
 echo "==> [2/${TOTAL}] Ruff lint (E, F, I, W, B)"
-"$RUFF" check ajar tests tools/arch_lint.py
+"$RUFF" check src/ajar tests tools/arch_lint.py
 
 echo "==> [3/${TOTAL}] Mechanical architecture guardrails (tools/arch_lint.py)"
 python3 tools/arch_lint.py
 
-echo "==> [4/${TOTAL}] Static type-check (mypy --strict ajar/ + arch_lint.py)"
-"$MYPY" --strict ajar tools/arch_lint.py
+echo "==> [4/${TOTAL}] Static type-check (mypy --strict src/ajar + arch_lint.py)"
+"$MYPY" --strict src/ajar tools/arch_lint.py
 
 if [[ "$MODE" == "fast" ]]; then
   echo "==> [5/${TOTAL}] Fast inner-loop suite (unit + conformance + arch_lint + parity + DST)"

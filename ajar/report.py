@@ -523,7 +523,7 @@ def _normalize_locus(
     target_slug: str = "target-repo",
 ) -> str:
     cleaned = _sanitize_external_text(
-        (locus or "").strip(),
+        " ".join((locus or "").split()),
         target_roots=target_roots,
         other_roots=other_roots,
         target_slug=target_slug,
@@ -582,7 +582,7 @@ def _dejargonize_external_prose(
     work = re.sub(r"\s+,", ",", work)
     work = re.sub(r",\s*,+", ",", work)
     work = re.sub(r"\(\s*\)", "", work)
-    work = re.sub(r"[ \t]{2,}", " ", work).strip(" ,;-")
+    work = re.sub(r"\s+", " ", work).strip(" ,;-")
 
     for idx, span in enumerate(code_spans):
         work = work.replace(f"__AJAR_CODE_SPAN_{idx}__", span)

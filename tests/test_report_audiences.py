@@ -8,6 +8,7 @@ import os
 import pathlib
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -181,8 +182,8 @@ class TestReportAudiences(unittest.TestCase):
                     "title": "Negative chunk length bypasses upper-bound check in parse_chunk_length",
                     "locus": f"{self.repo}/src/acme_parser.c:4",
                     "root_cause": (
-                        "Furthermore, `parse_chunk_length()` in `src/acme_parser.c:4` utilizes a signed `int` "
-                        "comparison against `max_frame` (`clm-88aa11bb`) — allowing negative `raw_len` values from "
+                        "Furthermore, `parse_chunk_length()` in `src/acme_parser.c:4` utilizes a signed `int`\n"
+                        "comparison against `max_frame` (`clm-88aa11bb`) — allowing negative `raw_len` values from\n"
                         "the 4-arm stepping stone primitive sink to pass validation, causing bounded out-of-bounds "
                         "reads when callers forward the signed length into downstream buffer slices."
                     ),
@@ -218,12 +219,29 @@ class TestReportAudiences(unittest.TestCase):
             conn.close()
 
     def test_maintainer_audience_strips_jargon_paths_and_stale_prose(self) -> None:
+        import importlib.util
+
+        lint_spec = importlib.util.spec_from_file_location(
+            "report_voice_lint_maint",
+            pathlib.Path(__file__).resolve().parents[1] / "skills" / "security-advisory-report" / "scripts" / "report_voice_lint.py",
+        )
+        assert lint_spec is not None and lint_spec.loader is not None
+        voice_lint = importlib.util.module_from_spec(lint_spec)
+        sys.modules[lint_spec.name] = voice_lint
+        lint_spec.loader.exec_module(voice_lint)
+
         self._seed_contaminated_run("run-maint")
         rc, md, err = _run_cli(
             ["report", "--run", "run-maint", "--format", "md", "--audience", "maintainer"],
             self.ajar_home,
         )
         self.assertEqual(rc, EXIT_OK, err)
+
+        maint_md_path = self.base / "maint.md"
+        maint_md_path.write_text(md, encoding="utf-8")
+        maint_lint = voice_lint.lint_file(maint_md_path, tier="S", channel="ghsa")
+        self.assertEqual(maint_lint.hard_wrapped_prose_lines, 0, f"Hard wraps in maintainer report:\n{md}")
+        self.assertTrue(maint_lint.passed, f"Maintainer report failed voice lint: {maint_lint.issues}")
 
         # Required human-grade section headings
         for heading in ("## Summary", "## Root Cause", "## Reproduction", "## Impact", "## Suggested Fix"):
@@ -296,11 +314,27 @@ class TestReportAudiences(unittest.TestCase):
         self.assertEqual(payload["findings"][0]["severity"], "medium")
 
     def test_customer_default_and_internal_audiences_plus_calibrate_root_cause(self) -> None:
+        import importlib.util
+
+        lint_spec = importlib.util.spec_from_file_location(
+            "report_voice_lint_cust",
+            pathlib.Path(__file__).resolve().parents[1] / "skills" / "security-advisory-report" / "scripts" / "report_voice_lint.py",
+        )
+        assert lint_spec is not None and lint_spec.loader is not None
+        voice_lint = importlib.util.module_from_spec(lint_spec)
+        sys.modules[lint_spec.name] = voice_lint
+        lint_spec.loader.exec_module(voice_lint)
+
         self._seed_contaminated_run("run-cust")
 
         # Default `--audience` is `customer`: Markdown strips host paths, COGS headers, and internal IDs
         rc_md, cust_md, err_md = _run_cli(["report", "--run", "run-cust", "--format", "md"], self.ajar_home)
         self.assertEqual(rc_md, EXIT_OK, err_md)
+        cust_md_path = self.base / "cust.md"
+        cust_md_path.write_text(cust_md, encoding="utf-8")
+        cust_lint = voice_lint.lint_file(cust_md_path, tier="audit", channel="customer")
+        self.assertEqual(cust_lint.hard_wrapped_prose_lines, 0, f"Hard wraps in customer report:\n{cust_md}")
+        self.assertTrue(cust_lint.passed, f"Customer report failed voice lint: {cust_lint.issues}")
         self.assertIn("# Security Review Report: acme-http", cust_md)
         self.assertIn("## Scope and Inspected Controls", cust_md)
         self.assertIn("`src/http_router.py:2`", cust_md)

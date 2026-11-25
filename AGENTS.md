@@ -1,30 +1,24 @@
-# Ajar Agent Instructions
+# Ajar Agent Instructions (v3.6-Balanced)
 
-Ajar (built by Ajar Labs) is a verification-backed security engine for `Platform`, `Code`, `Fixes`, `Security reviews`, and `Supply chain`.
-Your product is causal proof, not plausible prose. A claim becomes a confirmed finding only when all reproduction arms and causal locus alignment pass (`ajar claim reproduce`).
+Ajar (built by Ajar Labs) is a Three-Ring Earned-Mass autonomous security verification engine (`L4 · C3 · B3`).
+Your product is mechanical `C3` proof in a clean `git worktree`, not plausible prose. Every external advisory must pass 5-stage `C3` verification (`3x` attributed fail -> fuzzy patch apply -> mandatory post-patch rebuild -> `3x` pass + upstream suite -> Cross-Family Critic).
 
-## Route Selection
+## Three-Ring Architecture (Policed by `extra/sz_ajar.py`)
 
-- **Security run (`source`, `binary`, or `live`):** Follow the canonical workflow below and load the step skill under `skills/ajar-*/SKILL.md`.
-- **Repository engineering on Ajar itself:** Read `docs/engineering/AGENTS.md`, `docs/architecture.md`, and `docs/decisions/README.md`.
+1. **Ring 0 (`<= 1,800` SLOC hard cap, `0` upward imports):** `cli.py` (4 verbs: `run`, `verify`, `bench`, `report` + 7 `--disable-*` ablation flags), `llm.py` (stdlib async HTTP + reservation `CostMeter`), `agent.py` (free bash/read/search/edit inner loop + `SpanTracker`), `verify.py` (sole `git worktree` owner & 5-stage `C3` judge).
+2. **Ring 1 (7 Toggleable Earned-Muscle Modules):** `repomap.py` (PageRank + `.ajar/REALITY.md`), `whiteboard.py` (lock-free `events.jsonl` -> atomic `WHITEBOARD.md`), `epistemic.py` (`<= 180` SLOC `seen_spans` guard), `chain_weaver.py` (12-Type `EffectType` + backward `WISH` abduction), `autobuild.py` (polyglot `.ajar/build.sh` + write-jailed Build Doctor + `Input Encoder`), `swarm.py` (8-worker async + 45m pivot + 65%/70% relay + 92% drain), `bench.py` (local Phase-0 + Leave-One-Out rent scorer).
+3. **Ring 2 (Uncapped Assurance):** `tests/`, `extra/sz_ajar.py`, `prompts/GOAL-01..05.md`.
 
-## Canonical Workflow (`map -> investigate -> falsify -> reproduce -> converge -> fix`)
+## Core Workflow (`ajar run` -> `ajar verify` -> `ajar report`)
 
-1. **Initialize (inline quote):** Initialize `~/.ajar/runs/<run_id>/run.db` (`ajar init [--stopping exhaustive-high|first-verified-high|crown-jewel] [--phase hunt|remediate] [--max-spend <usd>] [--warn-above-usd <usd>] [--yes] [--diff <base..head>] [--brief-file <md>] [--uncapped]`, optional `ajar quote`, `ajar door jewel-add`, `ajar steer add`, `ajar status`).
-2. **Map and threat-model (`skills/ajar-map/SKILL.md`):** Run `ajar map --budget-tokens 1500 --slice-cap 15000`, query `ajar ref query --kind intent|reachability`, synthesize the adaptive threat model (`ajar threat-model set`, `assumption-add`), register surfaces (`--requires-tags`), and enqueue `investigate` tasks across `outside_in`, `inside_out`, `native_ffi`, and `peer_symmetry`.
-3. **Investigate (`skills/ajar-investigate/SKILL.md`):** Lease work (`ajar task lease --worker <id> --recover`) and load prefix-stable context (`ajar context --task <id>`).
-   - Obey `Active Workspace Steers` and any triggered `Active Epistemic Hooks` (including each hook's `Kill Rule`). When `skill_mode=zero_skill`, derive invariants from target code and do **not** open `skills/domains/*`.
-   - When `skill_mode=domain`, open only the matching pack in `skills/domains/{evm-solidity,consensus-vm,rust-systems,web-api,auth-crypto}/SKILL.md`.
-   - Persist bindings (`ajar binding set`), coverage (`ajar coverage record`), anomalies (`ajar anomaly add`), capabilities/gadgets (`ajar primitive add --role capability|trust_gadget --guarded-by <locus> --provides-tags <tags>`, `ajar primitive dry`), and suspended Open Doors (`ajar door park`). Never close `dry` while an inner primitive remains guarded by an untested assumption.
-   - Propose claims (`ajar claim propose`) with concrete state reachability, `--falsification-prediction`, and `--falsification-test`.
-4. **Falsify or Rescope (`skills/ajar-falsify/SKILL.md`):** Challenge every claim from an independent worker (`falsifier != proposer`) via `ajar claim falsify [--config-gate <pred>]`, `ajar claim rescope`, or `ajar claim survive`.
-5. **Reproduce (`skills/ajar-reproduce/SKILL.md`):** Smoke-test strike-free via `ajar repro try`, then prove causal path and impact via `ajar claim reproduce` (`--build-cmd`, `--save-post-state`, 4 arms + `claim.locus` overlap + `--release-cmd` when `H6` fires). After two unchanged target negatives, run `ajar claim instrument`.
-6. **Converge and Fix (`skills/ajar-chain/SKILL.md`, `skills/ajar-patch/SKILL.md`):** Inspect percolated paths and 1-link gaps (`ajar chain frontier`, `ajar door list`), probe post-states (`ajar chain probe --from-snapshot`), prove ablated multi-hop chains (`ajar chain propose`), calibrate realism (`ajar finding calibrate`), and advance to `remediate` (`ajar phase advance --to remediate`) before 9-arm `Fixes` (`ajar patch verify`).
-7. **Close Out (`skills/ajar-report/SKILL.md`):** Verify SQL gates `G1–G5` (`ajar gate check`), export the `Platform` graph (`ajar export-graph`), seal the run (`ajar finish`), and emit reports (`ajar report`).
+- **Swarm Run:** `ajar run <repo> --workers 8 --budget-usd 50 --profile upstream [--disable-<module>]`
+- **Mechanical `C3` Verification:** `ajar verify <repo> [--runs 3] [--offline]`
+- **Local On-Demand Bench (`0` paid CI gates):** `ajar bench --phase0` / `python3 extra/sz_ajar.py .`
+- **Export Reports:** `ajar report <repo> --out <dir>` (`advisories/` vs. `hardening-notes/`; withdrawn drafts omitted per `DEC-0139`; `100/100` voice lint).
 
 ## Non-Negotiable Boundaries
 
-1. **Scope gate:** Never issue live network requests or mutations unless `scope_rules` explicitly authorizes the target host (`--allow-live-requests`, `--allow-host`).
-2. **Secret redaction:** Never write credentials, API keys, JWTs, session cookies, private keys, or signed URLs to files, logs, or commits.
-3. **Target cleanliness:** Never commit `.ajar/` artifacts into a target repository; keep run state in `~/.ajar/runs/<run_id>/`.
-4. **External action gate:** Filing advisories, contacting vendors, deploying patches, or publishing reports requires explicit operator authorization.
+1. **Zero Third-Party LLM SDKs & Strict Ring Isolation:** `src/ajar/` stays pure Python stdlib; only `verify.py` invokes `git worktree`; Ring 0 never imports Ring 1 except lazy CLI dispatch.
+2. **Pure Conductor Discipline & Two-Tier Pincer:** Exclude `tests/`/`docs/`/`benchmarks/` at minute zero; trace 100% forward entrypoints and 100% backward Crown-Jewel sinks.
+3. **Secret & Path Hygiene:** Never commit credentials, tokens, PII, `.ajar/` artifacts, or developer home paths.
+4. **External Action Gate:** Never submit advisories, contact vendors, or publish findings without explicit founder approval.

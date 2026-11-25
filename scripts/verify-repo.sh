@@ -55,9 +55,9 @@ RUFF="$(resolve_tool ruff)"
 MYPY="$(resolve_tool mypy)"
 PYTEST="$(resolve_tool pytest)"
 
-TOTAL=5
+TOTAL=6
 if [[ "$MODE" == "full" ]]; then
-  TOTAL=6
+  TOTAL=7
 fi
 
 echo "==> [1/${TOTAL}] AGENTS.md budget (<= 50 lines) & CLAUDE.md parity"
@@ -67,25 +67,28 @@ cmp -s AGENTS.md CLAUDE.md
 echo "    OK (AGENTS.md == CLAUDE.md, ${lines} lines)"
 
 echo "==> [2/${TOTAL}] Ruff lint (E, F, I, W, B)"
-"$RUFF" check ajar tests tools/arch_lint.py skills/security-advisory-report/scripts/report_voice_lint.py
+"$RUFF" check src/ajar extra/sz_ajar.py tests tools/arch_lint.py skills/security-advisory-report/scripts/report_voice_lint.py
 
-echo "==> [3/${TOTAL}] Mechanical architecture guardrails (tools/arch_lint.py)"
+echo "==> [3/${TOTAL}] Ring-0/Ring-1 structural & anti-golf gates (extra/sz_ajar.py)"
+python3 extra/sz_ajar.py .
+
+echo "==> [4/${TOTAL}] Mechanical architecture guardrails (tools/arch_lint.py)"
 python3 tools/arch_lint.py
 
-echo "==> [4/${TOTAL}] Static type-check (mypy --strict ajar/ + arch_lint.py + report_voice_lint.py)"
-"$MYPY" --strict ajar tools/arch_lint.py skills/security-advisory-report/scripts/report_voice_lint.py
+echo "==> [5/${TOTAL}] Static type-check (mypy --strict src/ajar + sz_ajar + arch_lint + report_voice_lint)"
+"$MYPY" --strict src/ajar extra/sz_ajar.py tools/arch_lint.py skills/security-advisory-report/scripts/report_voice_lint.py
 
 if [[ "$MODE" == "fast" ]]; then
-  echo "==> [5/${TOTAL}] Fast inner-loop suite (unit + conformance + arch_lint + parity + DST)"
+  echo "==> [6/${TOTAL}] Fast inner-loop suite (unit + v3.6 + voice lint)"
   "$PYTEST" -m "not integration" -q
   echo "verify-repo (--fast): PASS"
   exit 0
 fi
 
-echo "==> [5/${TOTAL}] Full pytest suite (unit + DST + compiler/debugger integration)"
+echo "==> [6/${TOTAL}] Full pytest suite"
 "$PYTEST" -q
 
-echo "==> [6/${TOTAL}] Archived historical record reader tests (tools/legacy/*-test.py)"
+echo "==> [7/${TOTAL}] Archived historical record reader tests (tools/legacy/*-test.py)"
 if python3 -c "import jsonschema" >/dev/null 2>&1; then
   for t in tools/legacy/*-test.py; do
     [[ -e "$t" ]] || continue

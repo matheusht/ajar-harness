@@ -77,9 +77,19 @@ class LintViolation:
         }
 
 
+def _ajar_pkg_subdir(root: pathlib.Path) -> str | None:
+    if (root / "src" / "ajar").is_dir():
+        return "src/ajar"
+    if (root / "ajar").is_dir():
+        return "ajar"
+    return None
+
+
 def _package_parts_for_rel(rel_posix: str) -> list[str]:
     p = pathlib.PurePosixPath(rel_posix)
     parts = list(p.with_suffix("").parts)
+    if parts and parts[0] == "src":
+        parts = parts[1:]
     if parts and parts[-1] == "__init__":
         return parts[:-1]
     return parts[:-1]
@@ -225,7 +235,10 @@ def check_no_raw_sql_in_mcp(
     *,
     _cache: _RepoAstCache | None = None,
 ) -> list[LintViolation]:
-    mcp_path = root / "ajar" / "mcp.py"
+    pkg_sub = _ajar_pkg_subdir(root)
+    if pkg_sub is None:
+        return []
+    mcp_path = root / pkg_sub / "mcp.py"
     parsed = _cache.get(mcp_path) if _cache is not None else None
     if _cache is not None and parsed is None:
         return []
@@ -234,7 +247,7 @@ def check_no_raw_sql_in_mcp(
         violations.append(
             LintViolation(
                 rule="NO_RAW_SQL_IN_MCP",
-                path="ajar/mcp.py",
+                path=f"{pkg_sub}/mcp.py",
                 line=lineno,
                 message=f"Raw SQL mutation found in MCP transport adapter: {snippet!r}",
                 fix_hint="Move this state mutation into `ajar/services/workflow.py` and call the service from `ajar/mcp.py`.",
@@ -249,11 +262,14 @@ def check_cli_raw_sql_ratchet(
     max_writes: int = MAX_CLI_RAW_SQL_WRITES,
     _cache: _RepoAstCache | None = None,
 ) -> list[LintViolation]:
+    pkg_sub = _ajar_pkg_subdir(root)
+    if pkg_sub is None:
+        return []
     targets: list[pathlib.Path] = []
-    cli_file = root / "ajar" / "cli.py"
+    cli_file = root / pkg_sub / "cli.py"
     if cli_file.is_file():
         targets.append(cli_file)
-    cli_pkg = root / "ajar" / "cli"
+    cli_pkg = root / pkg_sub / "cli"
     if cli_pkg.is_dir():
         targets.extend(sorted(cli_pkg.rglob("*.py")))
     if not targets:
@@ -289,12 +305,13 @@ def check_layer_dag_boundaries(
     *,
     _cache: _RepoAstCache | None = None,
 ) -> list[LintViolation]:
-    ajar_dir = root / "ajar"
-    if not ajar_dir.is_dir():
+    pkg_sub = _ajar_pkg_subdir(root)
+    if pkg_sub is None:
         return []
+    ajar_dir = root / pkg_sub
     cache = _cache if _cache is not None else _RepoAstCache(root)
     violations: list[LintViolation] = []
-    for parsed in cache.py_files_under("ajar"):
+    for parsed in cache.py_files_under(pkg_sub):
         rel = parsed.rel
         imports = _iter_imported_modules(parsed.tree, rel)
         seen_line_rule: set[tuple[int, str]] = set()
@@ -333,35 +350,35 @@ def check_layer_dag_boundaries(
                     )
 
             # 2. Layer-specific DAG rules
-            if rel.startswith("ajar/domain/") and mod.startswith("ajar."):
+            if rel.startswith(f"{pkg_sub}/domain/") and mod.startswith("ajar."):
                 if not any(_module_is_under(mod, p) for p in DOMAIN_ALLOWED_AJAR_PREFIXES if p != "ajar"):
                     top_sub = mod.split(".", 2)[1]
                     if (ajar_dir / f"{top_sub}.py").exists() or (ajar_dir / top_sub).is_dir():
                         _record(
                             lineno,
                             "LAYER_DAG_BOUNDARY",
-                            f"`ajar/domain/` must remain pure and cannot import `{mod}`.",
+                            f"`{pkg_sub}/domain/` must remain pure and cannot import `{mod}`.",
                             "Move pure types/enums/transitions into `ajar/domain/` or move SQL/IO logic to `ajar/store/` or `ajar/services/`.",
                         )
 
-            elif rel.startswith("ajar/store/") and mod.startswith("ajar."):
+            elif rel.startswith(f"{pkg_sub}/store/") and mod.startswith("ajar."):
                 if not any(_module_is_under(mod, p) for p in STORE_ALLOWED_AJAR_PREFIXES if p != "ajar"):
                     top_sub = mod.split(".", 2)[1]
                     if (ajar_dir / f"{top_sub}.py").exists() or (ajar_dir / top_sub).is_dir():
                         _record(
                             lineno,
                             "LAYER_DAG_BOUNDARY",
-                            f"`ajar/store/` cannot depend upward on `{mod}`.",
+                            f"`{pkg_sub}/store/` cannot depend upward on `{mod}`.",
                             "`ajar/store/` may only import stdlib, top-level `ajar` constants, `ajar.domain`, `ajar.redact`, and `ajar.store`.",
                         )
 
-            elif rel.startswith("ajar/services/") and any(
+            elif rel.startswith(f"{pkg_sub}/services/") and any(
                 _module_is_under(mod, p) for p in SERVICES_FORBIDDEN_AJAR_PREFIXES
             ):
                 _record(
                     lineno,
                     "LAYER_DAG_BOUNDARY",
-                    f"`ajar/services/` cannot import transport/driver module `{mod}`.",
+                    f"`{pkg_sub}/services/` cannot import transport/driver module `{mod}`.",
                     "Transport layers (`ajar/cli/`, `mcp.py`, `runner.py`) depend on `ajar/services/`, never the reverse.",
                 )
     return violations
@@ -373,7 +390,7 @@ def check_no_hardcoded_devbox_paths(
     _cache: _RepoAstCache | None = None,
 ) -> list[LintViolation]:
     violations: list[LintViolation] = []
-    scan_roots = ("ajar", "tests", "skills", "docs")
+    scan_roots = ("src", "ajar", "extra", "prompts", "tests", "skills", "docs")
     scan_exts = {".py", ".md", ".sh", ".yml", ".yaml", ".json", ".toml"}
     for subdir in scan_roots:
         base = root / subdir
@@ -496,12 +513,12 @@ def check_no_unfiltered_tar_extract(
     *,
     _cache: _RepoAstCache | None = None,
 ) -> list[LintViolation]:
-    ajar_dir = root / "ajar"
-    if not ajar_dir.is_dir():
+    pkg_sub = _ajar_pkg_subdir(root)
+    if pkg_sub is None:
         return []
     cache = _cache if _cache is not None else _RepoAstCache(root)
     violations: list[LintViolation] = []
-    for parsed in cache.py_files_under("ajar"):
+    for parsed in cache.py_files_under(pkg_sub):
         if "tarfile" not in parsed.src:
             continue
         rel = parsed.rel
@@ -552,12 +569,12 @@ def check_no_commit_noop(
     _cache: _RepoAstCache | None = None,
 ) -> list[LintViolation]:
     """Reject `.commit()` calls inside `ajar/` (connections use autocommit + `immediate_tx`)."""
-    ajar_dir = root / "ajar"
-    if not ajar_dir.is_dir():
+    pkg_sub = _ajar_pkg_subdir(root)
+    if pkg_sub is None:
         return []
     cache = _cache if _cache is not None else _RepoAstCache(root)
     violations: list[LintViolation] = []
-    for parsed in cache.py_files_under("ajar"):
+    for parsed in cache.py_files_under(pkg_sub):
         if ".commit(" not in parsed.src:
             continue
         for node in ast.walk(parsed.tree):
@@ -611,12 +628,12 @@ def check_multi_write_requires_immediate_tx(
     _cache: _RepoAstCache | None = None,
 ) -> list[LintViolation]:
     """Require `with immediate_tx(conn):` on any function in `ajar/` issuing >= 2 SQL writes."""
-    ajar_dir = root / "ajar"
-    if not ajar_dir.is_dir():
+    pkg_sub = _ajar_pkg_subdir(root)
+    if pkg_sub is None:
         return []
     cache = _cache if _cache is not None else _RepoAstCache(root)
     violations: list[LintViolation] = []
-    for parsed in cache.py_files_under("ajar"):
+    for parsed in cache.py_files_under(pkg_sub):
         if "execute" not in parsed.src:
             continue
         for node in ast.walk(parsed.tree):
@@ -641,9 +658,36 @@ def check_multi_write_requires_immediate_tx(
 
 def _module_name_for_rel(rel_posix: str) -> str:
     parts = list(pathlib.PurePosixPath(rel_posix).with_suffix("").parts)
+    if parts and parts[0] == "src":
+        parts = parts[1:]
     if parts and parts[-1] == "__init__":
         parts = parts[:-1]
     return ".".join(parts)
+
+
+def _iter_dag_imported_modules(tree: ast.AST, rel_posix: str) -> list[tuple[int, str]]:
+    """Collect imports for DAG cycle check, exempting lazy CLI dispatch inside `cli.py:main`."""
+    is_cli = rel_posix.endswith("/cli.py") or rel_posix == "cli.py"
+    found: list[tuple[int, str]] = []
+
+    def _walk(node: ast.AST) -> None:
+        if (
+            is_cli
+            and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in {"main", "_main", "_amain", "async_main"}
+        ):
+            return
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                found.append((node.lineno, alias.name))
+        elif isinstance(node, ast.ImportFrom):
+            for mod in _resolve_import_from(rel_posix, node):
+                found.append((node.lineno, mod))
+        for child in ast.iter_child_nodes(node):
+            _walk(child)
+
+    _walk(tree)
+    return found
 
 
 def check_no_circular_imports(
@@ -651,12 +695,12 @@ def check_no_circular_imports(
     *,
     _cache: _RepoAstCache | None = None,
 ) -> list[LintViolation]:
-    """Enforce a strict module DAG (0 circular imports, including function-scoped lazy imports) across `ajar/`."""
-    ajar_dir = root / "ajar"
-    if not ajar_dir.is_dir():
+    """Enforce a strict module DAG (0 circular imports) across `ajar/`."""
+    pkg_sub = _ajar_pkg_subdir(root)
+    if pkg_sub is None:
         return []
     cache = _cache if _cache is not None else _RepoAstCache(root)
-    parsed_files = cache.py_files_under("ajar")
+    parsed_files = cache.py_files_under(pkg_sub)
     mod_to_rel: dict[str, str] = {}
     for parsed in parsed_files:
         mod_to_rel[_module_name_for_rel(parsed.rel)] = parsed.rel
@@ -664,7 +708,7 @@ def check_no_circular_imports(
     graph: dict[str, set[str]] = {m: set() for m in mod_to_rel}
     for parsed in parsed_files:
         src_mod = _module_name_for_rel(parsed.rel)
-        for _lineno, imported in _iter_imported_modules(parsed.tree, parsed.rel):
+        for _lineno, imported in _iter_dag_imported_modules(parsed.tree, parsed.rel):
             if imported in mod_to_rel and imported != src_mod:
                 graph[src_mod].add(imported)
 

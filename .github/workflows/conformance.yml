@@ -31,13 +31,16 @@ jobs:
           test "$lines" -le 50
 
       - name: Lint with ruff
-        run: ruff check ajar tests tools/arch_lint.py skills/security-advisory-report/scripts/report_voice_lint.py
+        run: ruff check src/ajar extra/sz_ajar.py tests tools/arch_lint.py skills/security-advisory-report/scripts/report_voice_lint.py
+
+      - name: Check Ring-0/Ring-1 structural and anti-golf gates (sz_ajar.py)
+        run: python3 extra/sz_ajar.py .
 
       - name: Check mechanical architecture guardrails
         run: python3 tools/arch_lint.py
 
       - name: Static type-check with mypy
-        run: mypy --strict ajar tools/arch_lint.py skills/security-advisory-report/scripts/report_voice_lint.py
+        run: mypy --strict src/ajar extra/sz_ajar.py tools/arch_lint.py skills/security-advisory-report/scripts/report_voice_lint.py
 
       - name: Run unit, gate, redaction, and conformance suite
         run: pytest -q

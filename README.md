@@ -10,7 +10,7 @@ Legacy `v3.4` orchestration scaffolding (`~45k` LoC) is preserved in git history
 | --- | --- | --- |
 | **Ring 0** *(Core Kernel)* | `cli.py`, `llm.py`, `agent.py`, `verify.py` | **`<= 1,800` SLOC hard cap**, `0` upward imports into Ring 1, `verify.py` is sole owner of `git worktree` and 5-stage `C3` minting |
 | **Ring 1** *(7 Earned Muscles)* | `repomap.py`, `whiteboard.py`, `epistemic.py`, `chain_weaver.py`, `autobuild.py`, `swarm.py`, `bench.py` | Every muscle wires `--disable-<module>` (`7` flags), `epistemic.py <= 180` SLOC, anti-golf `Tokens/SLOC <= 10.5`, `0` semicolons |
-| **Ring 2** *(Uncapped Perimeter)* | `tests/`, `extra/sz_ajar.py`, `prompts/GOAL-01..05.md` | `$0` deterministic `pytest` + `sz_ajar.py` on commit; paid `ajar bench` runs strictly locally on demand |
+| **Ring 2** *(Uncapped Perimeter)* | `tests/`, `extra/sz_ajar.py` | `$0` deterministic `pytest` + `sz_ajar.py` on commit; paid `ajar bench` runs strictly locally on demand |
 
 ## Quickstart
 
@@ -29,14 +29,6 @@ ajar report /path/to/target --out ./reports
 scripts/verify-repo.sh --fast    # AGENTS.md <= 50 lines + CLAUDE.md parity, ruff, sz_ajar.py, arch_lint.py, mypy --strict, pytest
 scripts/verify-repo.sh --full    # Adds archived historical reader checks under tools/legacy/
 ```
-
-## Campaign Charters (`prompts/`)
-
-- [`prompts/GOAL-01-openai-agents-python.md`](prompts/GOAL-01-openai-agents-python.md) — OpenAI Bugcrowd VRP
-- [`prompts/GOAL-02-libavif-chromium.md`](prompts/GOAL-02-libavif-chromium.md) — Chrome VRP / `libavif` + `dav1d` + `libyuv`
-- [`prompts/GOAL-03-euler-evk-evc.md`](prompts/GOAL-03-euler-evk-evc.md) — Cantina / Euler Vault Kit + EVC + EPO
-- [`prompts/GOAL-04-opencontainers-runc.md`](prompts/GOAL-04-opencontainers-runc.md) — Google Cloud / kCTF VRP (`runc`)
-- [`prompts/GOAL-05-libvips-sharp-nextjs.md`](prompts/GOAL-05-libvips-sharp-nextjs.md) — `libvips` -> `sharp` -> `Next.js` flagship chain
 
 ## Boundaries
 

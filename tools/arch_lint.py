@@ -390,7 +390,7 @@ def check_no_hardcoded_devbox_paths(
     _cache: _RepoAstCache | None = None,
 ) -> list[LintViolation]:
     violations: list[LintViolation] = []
-    scan_roots = ("src", "ajar", "extra", "prompts", "tests", "skills", "docs")
+    scan_roots = ("src", "ajar", "extra", "tests", "skills", "docs")
     scan_exts = {".py", ".md", ".sh", ".yml", ".yaml", ".json", ".toml"}
     for subdir in scan_roots:
         base = root / subdir

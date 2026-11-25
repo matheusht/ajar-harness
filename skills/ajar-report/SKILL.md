@@ -1,61 +1,78 @@
 ---
 name: ajar-report
-description: Verify deterministic closeout gates G1-G5, export the Platform graph, calibrate severity from primary precedents, and generate evidence-backed security reports.
+description: Verify deterministic closeout gates G1-G5, seal internal run ledgers, calibrate precedent-grounded severity and root-cause truth, and render de-jargonized customer or maintainer deliverables.
 ---
 
 # Ajar Report
 
-Use this skill to verify run completion against SQL closeout gates `G1–G5`, export the `Platform` component and attack-flow graph, seal the run receipt, and produce customer-ready deliverables for `Code`, `Fixes`, `Security reviews`, or `Supply chain` engagements.
+Use this skill to verify run completion against SQL closeout gates `G1–G5`, seal internal `Platform` telemetry, calibrate finding severity and deduplication, and emit audience-scoped deliverables for `Code`, `Fixes`, `Security reviews`, and `Supply chain` runs.
 
-## 1. Run Closeout Gates, Export Graph, and Seal the Run
+## 1. Deterministic Closeout Gates (`G1–G5`) & Internal Run Sealing
 
-1. Check all five deterministic SQL gates before writing any final summary:
+1. Verify all five deterministic SQL gates pass before sealing a completed run:
    ```bash
    ajar gate check
    ```
-   - `G1`: All `critical`/`high` surfaces and tasks completed (or `first-verified-high` satisfied with zero leased verification tasks).
-   - `G2`: Zero unresolved claims in `proposed`, `survived_falsify`, or `needs_instrumentation`.
-   - `G3`: Every confirmed finding carries a locus-bound 4-arm reproduction record and independent falsification (`proposer_worker_id != falsifier_worker_id`).
-   - `G4`: Zero-Skill First-Principles worker quota satisfied when `>= 2` workers ran, and every `dry` closure cites a valid `file:line` locus with zero unchained guarded primitives.
-   - `G5`: Zero orphaned `unexplained` anomalies and Stage-5 `Converge` (`chain`) evaluation completed across all composable and guarded primitives.
-2. Export the deterministic `Platform` component and attack-flow graph (`ajar-platform-graph/2`):
+   - `G1`: All `critical`/`high` surfaces and tasks completed (or `first-verified-high` / `crown-jewel` stopping rule satisfied cleanly).
+   - `G2`: Zero unresolved claims in `proposed`, `survived_falsify`, `needs_instrumentation`, or open `config_gated` override probes.
+   - `G3`: Every confirmed finding has passing locus-bound 4-arm JSON receipts, `proposer_worker_id != falsifier_worker_id`, and zero `debug_assert_only` `critical`/`high` findings.
+   - `G4`: `zero_skill` first-principles worker quota satisfied when `>= 2` workers ran, `dry` guard loci verified with zero unchained active guarded primitives, and zero policy-withheld `blocked` claims.
+   - `G5`: Zero orphaned `unexplained` anomalies, zero unwaived `ready` Open Doors, and Stage-5 `Converge` (`chain`) evaluation completed across composable signals.
+2. Export the `Platform` component and attack-flow graph (`ajar-platform-graph/2`) and seal the run (or close early via `ajar close --reason <stopped_by_operator|window_reached|superseded> --notes "<why>"` when stopping before `G1–G5` complete, without claiming `all_gates_passed`):
    ```bash
-   ajar export-graph --output graph.json
-   ```
-3. Seal the run and emit `artifacts/report.md` and `artifacts/report.json` (or close explicitly via `ajar close --reason <stopped_by_operator|window_reached|superseded> --notes "<why>"` when an operator stops a campaign before `G1–G5` complete, without claiming `all_gates_passed`):
-   ```bash
+   ajar export-graph --visibility <internal_full|customer_private|public_disclosure> --output graph.json
    ajar finish
    ```
-4. Render standalone Markdown or JSON deliverables and atomically seal external disclosure/deliverable directories (`BUNDLE-MANIFEST.json` + `SEAL.sha256`, rejecting symlinks, secrets, and local filesystem paths):
+3. Emit internal engineering ledgers (`--audience internal`) when operator postmortems require `G1–G5` receipts, `runs.harness_sha256` integrity (`harness_modified_mid_run`), `COGS` telemetry, active `Steers`, raw `clm-*`/`fnd-*` IDs, `micropatched` vs `9-arm` `verified_local` `remediation_state`, and `found_autonomously_by_ajar` / `found_with_ajar` / `validated_by_ajar` attribution:
    ```bash
-   ajar report --format md --output report.md
-   ajar report --format json --output report.json
-   ajar bundle seal <bundle_dir>
-   ajar bundle verify <bundle_dir>
+   ajar report --audience internal --format md --output internal-ledger.md
+   ajar report --audience internal --format json --output internal-ledger.json
    ```
-   Customer reports include causally verified `findings` (applying timestamp-ordered calibration/correction records and noting `distinct_root_causes_count`, `harness_modified_mid_run`, and `micropatched` vs `verified_local` remediation status), verified `chains`, active operator `Steers`, and bounded `dry` surface coverage. Pass `--include-rejected-appendix` only for internal postmortems.
+   Pass `--include-rejected-appendix` only on `--audience internal` postmortems.
 
-## 2. Precedent-Grounded Severity Calibration
+## 2. Audience-Scoped Deliverables (`customer` vs `maintainer`)
 
-Calibrate every finding's severity against primary external benchmarks and enumerated sample counts (`N`) before finalizing:
+Render external deliverables from timestamp-ordered calibrated truth (`apply_latest_finding_corrections`) with repo-relative `path:line` normalization and host-path scrubbing (`ajar report --audience customer|maintainer [--finding <id>]`):
 
-- Query `skills/references/severity-precedent-corpus.md` (NVD/GHSA CVSS v3.1/v4.0 anchors) and `skills/references/defi-contest-rulings-corpus.md` (Code4rena, Sherlock, and Immunefi rulings):
-  ```bash
-  ajar precedent search "<vulnerability_class> severity"
-  ```
-- Score strictly by **proven preconditions, enumerated sample scope (`N`), and proven impact**:
-  - Require `AV:L` / `UI:R` when exploitation requires local file open or user click (`ZDI-26-355` / `CVE-2026-27220`).
-  - Cap severity when non-default administrative misconfiguration or a permissioned operator role is a prerequisite (`CVE-2012-5613`).
-  - Never score a crash or out-of-bounds read as RCE unless control-flow or write primitive execution is reproduced (`CVE-2013-3245`).
-  - Separate **(a) Unprivileged Live Entrypoint Findings** (reproduced end-to-end against active production configurations) from **(b) Operator-Gated, Config-Gated, Component-Isolated, or Pre-Activation Findings** in executive tables so raw finding counts never overstate external exploitability or bounty eligibility.
+```bash
+ajar report --audience customer --format md --output security-review.md
+ajar report --audience customer --format json --output security-review.json
+ajar report --audience maintainer --finding <finding_id> --format md --output advisory.md
+ajar ledger commit-preimage <finding_id> --public-out commitment.json --preimage-out preimage.json
+ajar bundle seal <bundle_dir>
+ajar bundle verify <bundle_dir>
+```
 
-## 3. Direct Technical Writing Rules
+- **`customer` (default):** Buyer-safe `DEC-0099` security review report reporting `distinct_root_causes_count`, verified multi-step chains, and inspected `dry` controls while stripping internal unit-economics headers, worker handles, and harness state enums.
+- **`maintainer`:** Upstream OSS, GHSA, or bug-bounty advisory (`### Summary`, `### Details`, `### PoC`, `### Impact`, `### Suggested Fix`, `### Workarounds`; pass `--finding <finding_id>` to split one subsystem per advisory) preferring `9-arm` `verified_local` production patches over raw counterfactual micropatches.
+- **Channel Drafting & Voice Gate Handoff:** Load [`security-advisory-report`](../security-advisory-report/SKILL.md) when tailoring channel-specific submissions (`ghsa`, `mailing-list`, `h1`, `immunefi`, `customer`) and validate outbound drafts with [`report_voice_lint.py`](../security-advisory-report/scripts/report_voice_lint.py) (`--strict`).
+- **External Action & Sealing Gate:** Never file advisories, contact vendors, or publish deliverables without explicit operator authorization (`AGENTS.md` Boundary #4). Commit the `DEC-0113` SHA-256 preimage (`ajar ledger commit-preimage`) and seal/verify deliverable directories (`BUNDLE-MANIFEST.json` + `SEAL.sha256`, rejecting symlinks, secrets, and local host paths) before authorized handoff.
 
-Write for senior software and security engineers:
+## 3. Precedent-Grounded Severity Calibration & Deduplication
 
-1. Lead with the exact `file:line` locus, affected component, required attacker privilege, and concrete impact in the first two sentences.
-2. State the exact reproduction command, benign control command, and 4-arm (or 8-arm `Fixes`) verification result.
-3. Explain the root cause using concrete variable, function, and state names from the codebase.
-4. Provide the root-cause fix diff and note audited callers and sibling routes.
-5. Preserve exact attribution (`found_autonomously_by_ajar`, `found_with_ajar`, or `validated_by_ajar`) computed from `human_touches` and `steers`.
-6. Never use filler adjectives, dramatic framing, or unsupported assurances (never claim "complete security", "guaranteed clean", or "zero false positives"). When a run finishes with zero findings, state the exact surfaces mapped, `dry` controls verified, active `Steers`, and out-of-scope boundaries.
+Deduplicate shared root causes and calibrate every finding against primary external rulings before rendering `customer` or `maintainer` outputs:
+
+1. **Root-Cause Deduplication & Pre-Filing Checks:** Group alternate entry routes sharing one defect under a single root cause (`ajar claim duplicate <claim_id> --of <parent_claim_id> --worker <worker_id> --reason "<shared root defect>"` or `--same-root-of` at proposal) so `distinct_root_causes_count` stays exact. Before external filing, verify upstream `HEAD`, latest release tag, open and recently closed PRs/issues, published advisories/changelogs, documented security boundaries/known issues, and real capability delta over starting privilege.
+2. **Precedent Search & Atomic Calibration:** Query `skills/references/severity-precedent-corpus.md` (NVD/GHSA CVSS v3.1/v4.0 anchors) and `skills/references/defi-contest-rulings-corpus.md` (Code4rena, Sherlock, and Immunefi rulings), then update severity, title, root-cause prose, victim step count, or realism tier atomically:
+   ```bash
+   ajar precedent search "<vulnerability_class> severity"
+   ajar finding calibrate <finding_id> \
+     --severity <critical|high|medium|low> \
+     --title "<calibrated title>" \
+     --root-cause "<calibrated root-cause prose>" \
+     --declared-steps <N> \
+     --realism-tier <crown_jewel|high_impact|stepping_stone> \
+     --reason "<precondition and precedent rationale>"
+   ```
+3. **Precondition Honesty & Executive Split:** Score strictly by proven preconditions, enumerated sample scope (`N`), and reproduced impact: require `AV:L` / `UI:R` for local file open or user interaction (`ZDI-26-355` / `CVE-2026-27220`), cap non-default config or permissioned operator prerequisites (`CVE-2012-5613`), and never score a crash or out-of-bounds read as RCE without reproduced control-flow or write execution (`CVE-2013-3245`). Separate **(a) Unprivileged Live Entrypoint Findings** from **(b) Config/Operator-Gated, Component-Isolated, or Pre-Activation Findings** in executive summaries.
+
+## 4. Humanistic Technical Writing & Zero-Jargon Discipline
+
+Write direct, active-voice prose for senior software maintainers and security engineers (see [`security-advisory-report`](../security-advisory-report/SKILL.md) for full channel spines and rubric):
+
+1. **2-Sentence Lead (`<= 55w`):** State the tested revision/commit SHA, repo-relative `file:line` and function/struct symbol, required attacker precondition, and concrete outcome within the first `1–2` sentences (`<= 55` words).
+2. **Complexity-Proportional Length, Canonical Section Completeness, & Unwrapped Markdown Paragraphs:** Match prose length inside sections to the bug (`90–380w` single-invariant simple defect, `180–650w` stateful or protocol bug, `350–1,000w` multi-step chain) without padding, repeating explanations, or omitting required channel sections (`Impact`, `PoC`, `Suggested Fix`, `Workarounds`). Keep one line per paragraph and bullet item in Markdown (`ghsa`, `h1`, `immunefi`, `customer`) so GFM never turns mid-sentence `\n` breaks into `<br>`, reserving 72-column hard wrapping strictly for `--channel mailing-list` plain text.
+3. **Code-Subject Causal Trace & Upfront Negative Scope:** Put functions, types, and callers in the grammatical subject slot, cite `Introduced-in:` commit provenance (`git bisect` SHA, subject, and date) plus sibling-route contrast where applicable, and state non-default config/OS/build gates, sanitizer vs release (`-O2`) behavior, and blast-radius ceilings upfront.
+4. **Portable Defensive Verification & `9-Arm` `Suggested Fix`:** Supply a self-contained, hermetic verification script (`mktemp -d` + `trap` cleanup) paired with a benign control check, and present an idiomatic root-cause `Suggested Fix` diff verified against the `9-arm` `verified_local` remediation gate (`ajar patch verify` covering caller error/NULL safety, sibling symmetry, regression suite, and `git apply -R` revert proof).
+5. **Zero Internal Jargon & Zero Host Paths:** Strip all internal harness tokens (`G1–G5`, `H1–H9`, `4-arm`, `9-arm`, `micropatched`, `verified_local`, `Steers`, `clm-*`, `fnd-*`, `prim-*`, `chn-*`, `Hop 1..N`, `trust_gadget`, `stepping_stone`, `found_autonomously_by_ajar`, worker IDs, and raw `/Users/`, `/home/`, `/tmp/`, or `~/.ajar/` host paths), em-dash punctuation, minimizing adverbs (`simply`/`trivially`), and AI filler from `customer` and `maintainer` prose, then run `python3 skills/security-advisory-report/scripts/report_voice_lint.py <draft_file> --strict`.
+6. **Honest Dry-Run & Review Boundaries (`DEC-0099`):** When a run or surface finishes with zero findings, state the exact commit/scope, engineering invariants tested, repo-relative `file:line` guards verified, unresolved or blocked paths, explicit non-certification notice (never claim "complete security", "proof of clean", "guaranteed findings", or "zero false positives"), and next-review trigger.

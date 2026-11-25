@@ -542,6 +542,7 @@ def cmd_finding(args: argparse.Namespace) -> int:
                 reason=args.reason,
                 severity=args.severity,
                 title=args.title,
+                root_cause=getattr(args, "root_cause", None),
                 declared_steps=getattr(args, "declared_steps", None),
                 realism_tier=getattr(args, "realism_tier", None),
                 worker_id=args.worker,

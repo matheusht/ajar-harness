@@ -1,78 +1,48 @@
 ---
 name: ajar-report
-description: Verify deterministic closeout gates G1-G5, seal internal run ledgers, calibrate precedent-grounded severity and root-cause truth, and render de-jargonized customer or maintainer deliverables.
+description: Export C3-verified advisories and hardening notes via ajar report, enforce DEC-0139 withdrawal hygiene, calibrate severity, and pass 100/100 voice lint.
 ---
 
-# Ajar Report
+# Ajar Report (`v3.6-Balanced`)
 
-Use this skill to verify run completion against SQL closeout gates `G1–G5`, seal internal `Platform` telemetry, calibrate finding severity and deduplication, and emit audience-scoped deliverables for `Code`, `Fixes`, `Security reviews`, and `Supply chain` runs.
+Use this skill to export verified findings from `.ajar/candidates.jsonl` + `.ajar/verdicts.jsonl` into maintainer-ready advisories and hardening notes, and validate outbound prose to `100/100` voice hygiene.
 
-## 1. Deterministic Closeout Gates (`G1–G5`) & Internal Run Sealing
+## 1. Export Reports (`ajar report`)
 
-1. Verify all five deterministic SQL gates pass before sealing a completed run:
-   ```bash
-   ajar gate check
-   ```
-   - `G1`: All `critical`/`high` surfaces and tasks completed (or `first-verified-high` / `crown-jewel` stopping rule satisfied cleanly).
-   - `G2`: Zero unresolved claims in `proposed`, `survived_falsify`, `needs_instrumentation`, or open `config_gated` override probes.
-   - `G3`: Every confirmed finding has passing locus-bound 4-arm JSON receipts, `proposer_worker_id != falsifier_worker_id`, and zero `debug_assert_only` `critical`/`high` findings.
-   - `G4`: `zero_skill` first-principles worker quota satisfied when `>= 2` workers ran, `dry` guard loci verified with zero unchained active guarded primitives, and zero policy-withheld `blocked` claims.
-   - `G5`: Zero orphaned `unexplained` anomalies, zero unwaived `ready` Open Doors, and Stage-5 `Converge` (`chain`) evaluation completed across composable signals.
-2. Export the `Platform` component and attack-flow graph (`ajar-platform-graph/2`) and seal the run (or close early via `ajar close --reason <stopped_by_operator|window_reached|superseded> --notes "<why>"` when stopping before `G1–G5` complete, without claiming `all_gates_passed`):
-   ```bash
-   ajar export-graph --visibility <internal_full|customer_private|public_disclosure> --output graph.json
-   ajar finish
-   ```
-3. Emit internal engineering ledgers (`--audience internal`) when operator postmortems require `G1–G5` receipts, `runs.harness_sha256` integrity (`harness_modified_mid_run`), `COGS` telemetry, active `Steers`, raw `clm-*`/`fnd-*` IDs, `micropatched` vs `9-arm` `verified_local` `remediation_state`, and `found_autonomously_by_ajar` / `found_with_ajar` / `validated_by_ajar` attribution:
-   ```bash
-   ajar report --audience internal --format md --output internal-ledger.md
-   ajar report --audience internal --format json --output internal-ledger.json
-   ```
-   Pass `--include-rejected-appendix` only on `--audience internal` postmortems.
-
-## 2. Audience-Scoped Deliverables (`customer` vs `maintainer`)
-
-Render external deliverables from timestamp-ordered calibrated truth (`apply_latest_finding_corrections`) with repo-relative `path:line` normalization and host-path scrubbing (`ajar report --audience customer|maintainer [--finding <id>]`):
+Run `ajar report` after `ajar verify` has written verdicts into `.ajar/verdicts.jsonl`:
 
 ```bash
-ajar report --audience customer --format md --output security-review.md
-ajar report --audience customer --format json --output security-review.json
-ajar report --audience maintainer --finding <finding_id> --format md --output advisory.md
-ajar ledger commit-preimage <finding_id> --public-out commitment.json --preimage-out preimage.json
-ajar bundle seal <bundle_dir>
-ajar bundle verify <bundle_dir>
+ajar report <repo> --out ./reports
 ```
 
-- **`customer` (default):** Buyer-safe `DEC-0099` security review report reporting `distinct_root_causes_count`, verified multi-step chains, and inspected `dry` controls while stripping internal unit-economics headers, worker handles, and harness state enums.
-- **`maintainer`:** Upstream OSS, GHSA, or bug-bounty advisory (`### Summary`, `### Details`, `### PoC`, `### Impact`, `### Suggested Fix`, `### Workarounds`; pass `--finding <finding_id>` to split one subsystem per advisory) preferring `9-arm` `verified_local` production patches over raw counterfactual micropatches.
-- **Channel Drafting & Voice Gate Handoff:** Load [`security-advisory-report`](../security-advisory-report/SKILL.md) when tailoring channel-specific submissions (`ghsa`, `mailing-list`, `h1`, `immunefi`, `customer`) and validate outbound drafts with [`report_voice_lint.py`](../security-advisory-report/scripts/report_voice_lint.py) (`--strict`).
-- **External Action & Sealing Gate:** Never file advisories, contact vendors, or publish deliverables without explicit operator authorization (`AGENTS.md` Boundary #4). Commit the `DEC-0113` SHA-256 preimage (`ajar ledger commit-preimage`) and seal/verify deliverable directories (`BUNDLE-MANIFEST.json` + `SEAL.sha256`, rejecting symlinks, secrets, and local host paths) before authorized handoff.
+`src/ajar/verify.py:export_reports` separates outputs deterministically:
 
-## 3. Precedent-Grounded Severity Calibration & Deduplication
+- **`advisories/`:** Exclusively `VERIFIED` `C3` security advisories (passed `3x` attributed pre-patch fail, fuzzy patch apply, mandatory post-patch rebuild, `3x` post-patch pass + upstream `test_cmd`, and Cross-Family Critic `APPROVED`). Each file is checked automatically against `skills/security-advisory-report/scripts/report_voice_lint.py --channel ghsa --strict`.
+- **`hardening-notes/`:** Verified `C1`/`C2` items (such as `--offline` runs) and explicit `hardening` / `informational` findings.
+- **Withdrawn & Rejected Omission (`DEC-0139`):** Any candidate with `withdrawn: true` or verdict `WITHDRAWN` / `REJECTED` is omitted completely from exported deliverables.
 
-Deduplicate shared root causes and calibrate every finding against primary external rulings before rendering `customer` or `maintainer` outputs:
+## 2. Severity Calibration & Deduplication
 
-1. **Root-Cause Deduplication & Pre-Filing Checks:** Group alternate entry routes sharing one defect under a single root cause (`ajar claim duplicate <claim_id> --of <parent_claim_id> --worker <worker_id> --reason "<shared root defect>"` or `--same-root-of` at proposal) so `distinct_root_causes_count` stays exact. Before external filing, verify upstream `HEAD`, latest release tag, open and recently closed PRs/issues, published advisories/changelogs, documented security boundaries/known issues, and real capability delta over starting privilege.
-2. **Precedent Search & Atomic Calibration:** Query `skills/references/severity-precedent-corpus.md` (NVD/GHSA CVSS v3.1/v4.0 anchors) and `skills/references/defi-contest-rulings-corpus.md` (Code4rena, Sherlock, and Immunefi rulings), then update severity, title, root-cause prose, victim step count, or realism tier atomically:
-   ```bash
-   ajar precedent search "<vulnerability_class> severity"
-   ajar finding calibrate <finding_id> \
-     --severity <critical|high|medium|low> \
-     --title "<calibrated title>" \
-     --root-cause "<calibrated root-cause prose>" \
-     --declared-steps <N> \
-     --realism-tier <crown_jewel|high_impact|stepping_stone> \
-     --reason "<precondition and precedent rationale>"
-   ```
-3. **Precondition Honesty & Executive Split:** Score strictly by proven preconditions, enumerated sample scope (`N`), and reproduced impact: require `AV:L` / `UI:R` for local file open or user interaction (`ZDI-26-355` / `CVE-2026-27220`), cap non-default config or permissioned operator prerequisites (`CVE-2012-5613`), and never score a crash or out-of-bounds read as RCE without reproduced control-flow or write execution (`CVE-2013-3245`). Separate **(a) Unprivileged Live Entrypoint Findings** from **(b) Config/Operator-Gated, Component-Isolated, or Pre-Activation Findings** in executive summaries.
+Before external handoff, calibrate every advisory against primary external rulings in `skills/references/severity-precedent-corpus.md` and `skills/references/defi-contest-rulings-corpus.md`:
 
-## 4. Humanistic Technical Writing & Zero-Jargon Discipline
+1. **Deduplicate Root Causes:** Merge alternate entry routes that share one underlying defect into a single advisory rather than inflating finding counts.
+2. **Precondition Honesty:** Score strictly by proven preconditions and reproduced impact (local/user-interaction preconditions require `AV:L`/`UI:R`; non-default config or operator prerequisites cap severity; never call a crash or OOB read RCE without reproduced control-flow execution).
+3. **Check Upstream State:** Confirm the bug reproduces on upstream `HEAD`, is not already patched in a release or open PR, and violates the project's documented security boundary.
 
-Write direct, active-voice prose for senior software maintainers and security engineers (see [`security-advisory-report`](../security-advisory-report/SKILL.md) for full channel spines and rubric):
+## 3. Channel Tailoring & `100/100` Voice Lint
 
-1. **2-Sentence Lead (`<= 55w`):** State the tested revision/commit SHA, repo-relative `file:line` and function/struct symbol, required attacker precondition, and concrete outcome within the first `1–2` sentences (`<= 55` words).
-2. **Complexity-Proportional Length, Canonical Section Completeness, & Unwrapped Markdown Paragraphs:** Match prose length inside sections to the bug (`90–380w` single-invariant simple defect, `180–650w` stateful or protocol bug, `350–1,000w` multi-step chain) without padding, repeating explanations, or omitting required channel sections (`Impact`, `PoC`, `Suggested Fix`, `Workarounds`). Keep one line per paragraph and bullet item in Markdown (`ghsa`, `h1`, `immunefi`, `customer`) so GFM never turns mid-sentence `\n` breaks into `<br>`, reserving 72-column hard wrapping strictly for `--channel mailing-list` plain text.
-3. **Code-Subject Causal Trace & Upfront Negative Scope:** Put functions, types, and callers in the grammatical subject slot, cite `Introduced-in:` commit provenance (`git bisect` SHA, subject, and date) plus sibling-route contrast where applicable, and state non-default config/OS/build gates, sanitizer vs release (`-O2`) behavior, and blast-radius ceilings upfront.
-4. **Portable Defensive Verification & `9-Arm` `Suggested Fix`:** Supply a self-contained, hermetic verification script (`mktemp -d` + `trap` cleanup) paired with a benign control check, and present an idiomatic root-cause `Suggested Fix` diff verified against the `9-arm` `verified_local` remediation gate (`ajar patch verify` covering caller error/NULL safety, sibling symmetry, regression suite, and `git apply -R` revert proof).
-5. **Zero Internal Jargon & Zero Host Paths:** Strip all internal harness tokens (`G1–G5`, `H1–H9`, `4-arm`, `9-arm`, `micropatched`, `verified_local`, `Steers`, `clm-*`, `fnd-*`, `prim-*`, `chn-*`, `Hop 1..N`, `trust_gadget`, `stepping_stone`, `found_autonomously_by_ajar`, worker IDs, and raw `/Users/`, `/home/`, `/tmp/`, or `~/.ajar/` host paths), em-dash punctuation, minimizing adverbs (`simply`/`trivially`), and AI filler from `customer` and `maintainer` prose, then run `python3 skills/security-advisory-report/scripts/report_voice_lint.py <draft_file> --strict`.
-6. **Honest Dry-Run & Review Boundaries (`DEC-0099`):** When a run or surface finishes with zero findings, state the exact commit/scope, engineering invariants tested, repo-relative `file:line` guards verified, unresolved or blocked paths, explicit non-certification notice (never claim "complete security", "proof of clean", "guaranteed findings", or "zero false positives"), and next-review trigger.
+Load [`skills/security-advisory-report/SKILL.md`](../security-advisory-report/SKILL.md) when tailoring drafts for specific disclosure channels (`ghsa`, `mailing-list`, `h1`, `immunefi`, `customer`), and run the strict voice gate on every outbound file:
+
+```bash
+python3 skills/security-advisory-report/scripts/report_voice_lint.py <draft.md> --channel ghsa --strict
+```
+
+Mandatory prose rules:
+- **Direct 2-Sentence Lead (`<= 55` words):** State tested revision, repo-relative `file:line` and symbol, attacker precondition, and concrete impact upfront.
+- **Canonical Sections:** Keep `### Summary`, `### Details`, `### PoC`, `### Impact`, `### Suggested Fix`, and `### Workarounds` crisp and proportional to bug complexity (one line per Markdown paragraph; 72-column wrapping only for `--channel mailing-list`).
+- **Zero Internal Jargon & Zero Host Paths:** Never leak internal harness terms, speculative hedging (`could potentially`, `might be vulnerable`, `appears to be`), AI filler, `.ajar/` paths, or developer home paths.
+- **Honest Dry-Run Boundaries (`DEC-0099`):** When an audit finishes with zero findings, state exact commit, scope, tested invariants, verified guard loci, and an explicit non-certification notice (never claim "complete security", "proof of clean", "zero false positives", or "guaranteed findings").
+
+## 4. External Action Gate
+
+Never submit advisories, open vendor tickets, contact maintainers, or publish deliverables without explicit founder authorization (`AGENTS.md` Boundary #4).

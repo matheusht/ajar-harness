@@ -1,29 +1,28 @@
 # Architecture Decision Records
 
-This directory records architectural decisions for Ajar.
+This directory preserves Ajar's architectural decision history.
 
-## Active Decisions
+## Active Architecture (`v3.6-Balanced`)
 
-| ADR | Title | Status | Summary |
+The active system is **Ajar v3.6-Balanced** (Three-Ring Earned-Mass autonomous verification engine, `L4 · C3 · B3`), documented in:
+
+- [docs/architecture.md](../architecture.md) — Ring 0 (`cli.py`, `llm.py`, `agent.py`, `verify.py`), Ring 1 (7 toggleable muscles), 4 CLI verbs (`run`, `verify`, `bench`, `report`), `.ajar/` state layout, and 5-stage `C3` verification.
+- [docs/campaigns-and-roadmap.md](../campaigns-and-roadmap.md) — Phase-0 probes (`P0-A`..`P0-D`) and the Leave-One-Out Earned-Mass rent rule.
+- [docs/engineering/AGENTS.md](../engineering/AGENTS.md) — Mechanical enforcers (`extra/sz_ajar.py`, `tools/arch_lint.py`) and pre-PR verification.
+
+## Superseded Historical Decisions (`archive/v3.4-legacy`)
+
+All prior ADRs (`0001` through `0025`) are **superseded by `v3.6-Balanced`**. They remain untouched in this directory strictly as immutable historical context; the legacy `v3.4` codebase they describe is preserved in git at tag **`archive/v3.4-legacy`**. Do **not** invoke CLI commands, schemas, or modules referenced in `0001..0025` against `v3.6-Balanced`.
+
+| ADR Range | Era | Status | Notes |
 | --- | --- | --- | --- |
-| [0017](0017-ajar-v3-dual-mode-architecture.md) | Ajar v3 Dual-Mode Verification Architecture | **Accepted (Active)** | Defines the zero-LLM SQLite WAL state engine (`run.db`), Host Mode + Standalone Mode execution, 4-arm causal reproduction (`source`/`binary`/`live`), deterministic SQL gates `G1–G5`, contrastive domain packs, `zero_skill` first-principles quota, and ASD-STE100 documentation rules. |
-| [0018](0018-ajar-v3-1-bug-brain-and-platform-economics.md) | Ajar v3.1 Bug-Brain Upgrades, 8-Arm Fixes Gate, and Platform Economics | **Accepted (Active)** | Adds bi-directional task search, anti-premature-`dry` guarded primitives, locus-bound 4-arm path proof + `claim rescope`, Stage-5 `Converge`, 8-arm `ajar patch verify`, attributable `Steers`, prefix-stable KV caching, `ajar quote` + `35%` COGS cap + `25%` dry-surface breaker, and `ajar export-graph`. |
-| [0019](0019-ajar-v3-2-hooks-and-composable-repro.md) | Ajar v3.2 Event-Driven Epistemic Hooks, Composable Stage Builders, and 9-Arm Fixes Gate | **Accepted (Active)** | Adds zero-overhead epistemic micro-hooks (`H1`–`H8`) with mandatory `Kill Rule` lines, cross-subsystem `provides_tags <-> requires_tags` bridges, `StageContext` helpers + $N$-step chain ablation, Arm 5A/5B `--release-cmd` UB differential, 9-arm `ajar patch verify` (`git apply -R`), `<= 3,500` LoC call slices, and PR `--diff` state sync. |
-| [0020](0020-ajar-v3-2-2-swarm-wire-profiles-and-reopen.md) | Ajar v3.2.2 Stage-Split Swarm Wire Profiles, Runtime Anti-Cheat Gates, Hybrid Storage, and Cross-VM Reopen | **Accepted (Active)** | Adds `ajar swarm {packet,fallback,complete,status}` (`direct -> swarm_patch_first -> regression_tdd` + batch splitting), structural claim prose & `--env-blocker` gates, entrypoint fidelity + anti-source-grep enforcement, `/tmp/ajar-build-cache` + compact shared mirror sync, and cross-VM `ajar reopen`. |
-| [0021](0021-ajar-v3-2-3-exogenous-target-checks-and-retro-routing.md) | Ajar v3.2.3 Exogenous Target-Readiness Checks and Reviewer-Skill Retro Routing | **Accepted (Active)** | Adds offline archival/stale-`HEAD` blocking on `ajar init` (`--allow-historical-target`), `ajar doctor --target` upstream/branch/subdir/peer/PVR/disk checks, `CLAUDE.md`/`AGENTS.md` target-snapshot stripping, and reviewer-skill external-validity checks while keeping `run.db` schema unchanged during active Wave-1 runs. |
-| [0022](0022-ajar-v3-3-reactive-open-doors-and-phase-split.md) | Ajar v3.3 Reactive Open Doors, Multi-Hop Middle-Unicorn Percolation, and Hunt/Remediate Phase Split | **Accepted (Active)** | Adds `hunt` vs `remediate` campaign phases (`verified_local`), suspended Open Doors (`crown_jewels`, `parked_doors`, `door_fts`) with tri-modal wakeup + bounded `bridge` hunters, $N$-hop middle-unicorn percolation + `trust_gadget`, `crown-jewel` realism gates, direct `fnd-*`/`clm-*`/`prim-*` chain composition, post-state snapshots + `ajar repro try`, and non-strike `build_or_env_error` separation. |
-| [0023](0023-agent-friendly-layered-architecture-and-dst.md) | Agent-Friendly Layered Architecture, Mechanical Guardrails, and Deterministic Simulation Testing | **Accepted (Active)** | Establishes strict `ajar/{domain,store,services}/` layer DAG with `mypy --strict`, eliminates inline SQL from `ajar/mcp.py`, enforces mechanical invariants via `tools/arch_lint.py`, adds seeded multi-worker DST (`tests/dst/`), batches FTS oracle indexing + caches CLI parser, adds `scripts/verify-repo.sh` (`--fast`/`--full`), and adds advisory `ajar economics export` and redacted `ajar ledger commit-preimage`. |
-| [0024](0024-modular-dag-zero-cycles-and-swarm-resilience.md) | Zero-Cycle Modular DAG, Universal Strict Typing, Atomic Transactions, and Swarm Resilience | **Accepted (Active)** | Enforces 100% `mypy --strict` across `ajar/`, locks `0` raw SQL writes in `ajar/cli/`, enforces `NO_COMMIT_NOOP` / `MULTI_WRITE_REQUIRES_IMMEDIATE_TX` / Tarjan SCC `NO_CIRCULAR_IMPORTS`, splits `ajar/cli/`, `ajar/store/{migrations,util}.py`, `ajar/repro_helpers.py`, and `ajar/reactions.py`, upgrades `repro try` to the 8-slot pool with `.git` lock heal + replayable failure artifacts, adds self-healing transition/MCP errors, semantic stall detection, inline structured swarm packets, `ajar doctor --run [--prune-slots]`, and expanded WAL/percolation DST. |
-| [0025](0025-ajar-v3-4-value-hillclimbing-catalog-and-fail-closed-truth.md) | Ajar v3.4 Value Hill-Climbing, Unified Issue & Gadget Catalog, Fail-Closed Arm-3 Proof, and Bundle Sealing | **Accepted (Active)** | Adds multi-agent EV lead voting (`ajar lead`), `QD-Islands` subsystem reservation, Grounded Lyapunov epistemic potential $\Phi(t)$, per-root plateau breaker, convergence-gated `ajar phase advance`, `ajar map --unvisited`, Unified Catalog + backward sink slicing (`ajar catalog {search,backslice}`), conjunctive percolation + `AH-PUCT` cut-lemma scoring + `H9_INVARIANT_SYMMETRY`, `--backup-step` + 2-strike `chain probe` gate, zero-dependency `@VISITED`/`@UNREACHED` `ajar repro slice-probe`, fail-closed Arm-3 proof + zero-strike `micropatch_error`, `runs.harness_sha256`, `ajar close`, and atomic `ajar bundle {seal,verify}`. |
+| `0001`–`0013` (`0001-*.md` .. `0013-*.md`) | `v1` / `v2` | **Superseded** | Historical context for archived benchmark runs under `engagements/` and read-only readers under `tools/legacy/`. |
+| `0014`–`0016` | Unmerged `v2` drafts | **Superseded** | Never merged; superseded before `v3.0`. |
+| `0017`–`0025` (`0017-*.md` .. `0025-*.md`) | `v3.0`–`v3.4` | **Superseded by `v3.6-Balanced`** | Legacy dual-mode SQLite orchestration architecture preserved at git tag `archive/v3.4-legacy`. |
 
-## Superseded Historical Decisions
+## Authoring Rules for New ADRs
 
-- **`0001` through `0013` (`0001-*.md` .. `0013-*.md` in this directory):** **Superseded by [ADR-0017](0017-ajar-v3-dual-mode-architecture.md).** Retained strictly as immutable historical context for the archived benchmark runs under `engagements/{cve-bench,cybench,xbow-benchmarks}` and the read-only reader closure in `tools/legacy/`.
-- **`0014` through `0016` (unmerged v2 pull-request drafts `#209`, `#220`, `#224`):** **Superseded before merge by [ADR-0017](0017-ajar-v3-dual-mode-architecture.md).**
-
-## Authoring Rules
-
-1. Read [ADR-0017](0017-ajar-v3-dual-mode-architecture.md), [ADR-0018](0018-ajar-v3-1-bug-brain-and-platform-economics.md), [ADR-0019](0019-ajar-v3-2-hooks-and-composable-repro.md), [ADR-0020](0020-ajar-v3-2-2-swarm-wire-profiles-and-reopen.md), [ADR-0021](0021-ajar-v3-2-3-exogenous-target-checks-and-retro-routing.md), [ADR-0022](0022-ajar-v3-3-reactive-open-doors-and-phase-split.md), [ADR-0023](0023-agent-friendly-layered-architecture-and-dst.md), [ADR-0024](0024-modular-dag-zero-cycles-and-swarm-resilience.md), [ADR-0025](0025-ajar-v3-4-value-hillclimbing-catalog-and-fail-closed-truth.md), and [docs/architecture.md](../architecture.md) before proposing any structural change.
-2. Number new decision records sequentially starting at `0026`.
-3. Write in concise ASD-STE100 technical prose and include explicit Context, Decision, Consequences, Risks, and Revisit Triggers sections.
-4. Never delete or rewrite historical ADR files; mark superseded records with a pointer to the replacing ADR.
+1. Read [docs/architecture.md](../architecture.md), [docs/engineering/AGENTS.md](../engineering/AGENTS.md), and [`extra/sz_ajar.py`](../../extra/sz_ajar.py) before proposing any structural change.
+2. Number new `v3.6+` decision records sequentially starting at `0026`.
+3. Keep prose plain-spoken and concise, with explicit **Context**, **Decision**, **Consequences**, **Risks**, and **Revisit Triggers** sections.
+4. Never delete or rewrite historical ADR files `0001..0025`.

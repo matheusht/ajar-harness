@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
+import json
 import os
 import re
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -25,6 +27,7 @@ from ajar.cli import (
     ajar_dir,
     dataclass_from_dict,
     read_jsonl,
+    scrub_subprocess_env,
 )
 from ajar.llm import LLMClient, LLMResponse, resolve_role_model
 
@@ -35,31 +38,18 @@ SAN_PID_RE = re.compile(r"==\d+==")
 TMP_WT_RE = re.compile(r"/[^\s:]*ajar-wt-[^/\s:]+/work/")
 PY_FRAME_RE = re.compile(r'File "([^"]+)", line (\d+), in ([^\s\n]+)')
 SAN_FRAME_RE = re.compile(r"#\d+\s+0x[0-9a-fA-F]+\s+in\s+([^\s]+)\s+([^\s]+)")
-
+VOICE_LINT_SCRIPT = (
+    Path(__file__).resolve().parents[2]
+    / "skills"
+    / "security-advisory-report"
+    / "scripts"
+    / "report_voice_lint.py"
+)
 BANNED_VOICE_PATTERNS = (
-    "sprt",
-    "rmst",
-    "map-elites",
-    "lyapunov",
-    "ah-puct",
-    "macaroon",
-    "could potentially",
-    "might be vulnerable",
-    "it seems",
-    "appears to be",
-    "i think",
-    "we believe",
-    "possibly",
-    "delve",
-    "catastrophic",
-    "devastating",
-    "as an ai",
-    "in conclusion",
-    "withdrawn",
-    "relay_capsule",
-    ".ajar/",
-    "todo:",
-    "tbd",
+    "sprt", "rmst", "map-elites", "lyapunov", "ah-puct", "macaroon",
+    "could potentially", "might be vulnerable", "it seems", "appears to be",
+    "i think", "we believe", "delve", "catastrophic", "devastating",
+    "as an ai", "in conclusion", "relay_capsule", ".ajar/", "todo:", "tbd",
 )
 
 
@@ -79,10 +69,11 @@ def _run_proc(
     timeout: int = 120,
 ) -> tuple[int, str]:
     shell_args = ["/bin/sh", "-c", cmd] if isinstance(cmd, str) else cmd
+    proc_env = scrub_subprocess_env() if env is None else env
     proc = subprocess.Popen(
         shell_args,
         cwd=str(cwd),
-        env=env,
+        env=proc_env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -325,6 +316,8 @@ def parse_crash_signature(output: str, rc: int) -> CrashSignature | None:
     kind = ""
     if "AddressSanitizer" in text:
         kind = "ASAN"
+    elif "MemorySanitizer" in text:
+        kind = "MSAN"
     elif "UndefinedBehaviorSanitizer" in text:
         kind = "UBSAN"
     elif "ThreadSanitizer" in text or "DATA RACE" in text:
@@ -344,6 +337,8 @@ def parse_crash_signature(output: str, rc: int) -> CrashSignature | None:
         kind = "SIGABRT"
     elif rc in (139, -11):
         kind = "SIGSEGV"
+    elif rc in (132, -4, 133, -5):
+        kind = "SIGTRAP"
     else:
         return None
 
@@ -430,7 +425,7 @@ def verify_candidate(
         return Verdict(cand.id, "REJECTED", "C0", 0, 0, critic_verdict="SKIPPED", notes=taut_reason)
 
     req_runs = max(1, int(runs))
-    run_env = {**os.environ, **active_recipe.env}
+    run_env = scrub_subprocess_env(active_recipe.env)
 
     with clean_worktree(repo) as wt:
         if active_recipe.build_script.strip():
@@ -524,48 +519,45 @@ def verify_candidate(
 
     critic_resp = _invoke_critic_sync(llm, cand, ref_sig)
     upper = critic_resp.content.strip().upper()
-    if "REJECT" in upper or "FALSE POSITIVE" in upper or "INVALID" in upper:
+    lead_tok = re.split(r"[\s:.,;-]+", upper, maxsplit=1)[0] if upper else ""
+    is_approve = lead_tok in ("APPROVE", "APPROVED", "CONFIRM", "VALID", "PASS", "ACCEPT", "LGTM")
+    is_reject = lead_tok in ("REJECT", "REJECTED", "INVALID", "DENY") or (
+        not is_approve and any(tok in upper for tok in ("REJECT", "FALSE POSITIVE", "INVALID"))
+    )
+    if is_reject:
         return Verdict(
-            cand.id,
-            "REJECTED",
-            "C2",
-            pre_failed,
-            post_passed,
-            asdict(ref_sig),
-            critic_verdict="REJECTED",
-            notes=critic_resp.content.strip()[:240],
+            cand.id, "REJECTED", "C2", pre_failed, post_passed, asdict(ref_sig),
+            critic_verdict="REJECTED", notes=critic_resp.content.strip()[:240],
         )
-    if any(tok in upper for tok in ("APPROVE", "CONFIRM", "VALID", "PASS", "ACCEPT", "LGTM")):
+    if is_approve or any(tok in upper for tok in ("APPROVE", "CONFIRM", "VALID", "PASS", "ACCEPT", "LGTM")):
         return Verdict(
-            cand.id,
-            "VERIFIED",
-            "C3",
-            pre_failed,
-            post_passed,
-            asdict(ref_sig),
-            critic_verdict="APPROVED",
-            notes=critic_resp.content.strip()[:240],
+            cand.id, "VERIFIED", "C3", pre_failed, post_passed, asdict(ref_sig),
+            critic_verdict="APPROVED", notes=critic_resp.content.strip()[:240],
         )
     return Verdict(
-        cand.id,
-        "VERIFIED",
-        "C2",
-        pre_failed,
-        post_passed,
-        asdict(ref_sig),
-        critic_verdict="INCONCLUSIVE",
-        notes=critic_resp.content.strip()[:240],
+        cand.id, "VERIFIED", "C2", pre_failed, post_passed, asdict(ref_sig),
+        critic_verdict="INCONCLUSIVE", notes=critic_resp.content.strip()[:240],
     )
 
 
 def lint_report_text(text: str) -> LintResult:
-    issues: list[str] = []
-    lower = text.lower()
-    for phrase in BANNED_VOICE_PATTERNS:
-        if phrase in lower:
-            issues.append(f"disallowed phrase: '{phrase}'")
-    score = max(0, 100 - 20 * len(issues))
-    return LintResult(score=score, issues=issues)
+    issues = [f"disallowed phrase: '{p}'" for p in BANNED_VOICE_PATTERNS if p in text.lower()]
+    return LintResult(score=max(0, 100 - 20 * len(issues)), issues=issues)
+
+
+def _run_voice_lint_gate(path: Path, channel: str = "ghsa") -> LintResult:
+    if not VOICE_LINT_SCRIPT.is_file():
+        return lint_report_text(path.read_text(encoding="utf-8", errors="replace"))
+    cmd = [sys.executable, str(VOICE_LINT_SCRIPT), str(path), "--channel", channel, "--json", "--strict"]
+    rc, out = _run_proc(cmd, cwd=path.parent, timeout=30)
+    try:
+        data = json.loads(out)
+        rep = (data.get("reports") or [{}])[0]
+        score = int(rep.get("mechanical_score_100", 100 if rc == 0 else 0))
+        issues = [str(x) for x in (rep.get("issues") or []) + (rep.get("warnings") or [])]
+        return LintResult(score=score if rc == 0 and not issues else min(score, 95), issues=issues)
+    except ValueError:
+        return LintResult(score=100 if rc == 0 else 0, issues=[] if rc == 0 else [out.strip()[:160]])
 
 
 def _clean_prose(raw: str, fallback: str) -> str:
@@ -576,29 +568,36 @@ def _clean_prose(raw: str, fallback: str) -> str:
 
 
 def _render_finding_md(cand: Candidate, verdict: Verdict | None) -> str:
-    truth = verdict.truth_level if verdict is not None else "C1"
-    root = _clean_prose(cand.root_cause, "Deterministic state defect at the target entry span.")
-    impact = _clean_prose(cand.impact, "Controlled input triggers deterministic failure in target execution.")
+    del verdict
     title = _clean_prose(cand.title, cand.id)
-    sections = [
-        f"# {cand.id}: {title}",
+    loc = f"`{cand.entry_span}`" if cand.entry_span else "the affected entrypoint"
+    sym = f"`{cand.sink_symbol}()`" if cand.sink_symbol else "the target handler"
+    root = _clean_prose(cand.root_cause, f"{sym} at {loc} processes untrusted input without enforcing the required boundary check.")
+    impact = _clean_prose(cand.impact, f"Untrusted input reaching {sym} breaks the security boundary and fails deterministically.")
+    repro = cand.repro_cmd.strip() or "true"
+    patch = cand.patch_diff.strip() or "# Minimal patch attached in repository diff"
+    return "\n".join([
+        f"# {title}",
         "",
-        f"- **Severity**: {cand.severity.upper()}",
-        f"- **Verification Level**: {truth}",
-        f"- **Location**: `{cand.entry_span or 'unspecified'}`",
-        f"- **Sink Symbol**: `{cand.sink_symbol or 'unspecified'}`",
+        "### Summary",
+        f"In {loc}, {sym} fails to enforce its boundary check under untrusted input. {impact}",
         "",
-        "## Root Cause",
+        "### Details",
         root,
         "",
-        "## Impact",
+        "### PoC",
+        f"Run the isolated reproducer below against an unpatched checkout:\n\n```sh\n{repro}\n```",
+        "",
+        "### Impact",
         impact,
-    ]
-    if cand.repro_cmd.strip():
-        sections.extend(["", "## Minimal Reproduction", f"```sh\n{_clean_prose(cand.repro_cmd, 'true')}\n```"])
-    if cand.patch_diff.strip():
-        sections.extend(["", "## Minimal Patch", f"```diff\n{cand.patch_diff.strip()}\n```"])
-    return "\n".join(sections) + "\n"
+        "",
+        "### Suggested Fix",
+        f"Apply the minimal boundary check below and re-run the test suite:\n\n```diff\n{patch}\n```",
+        "",
+        "### Workarounds",
+        "No configuration workaround is documented; apply the patch and rebuild.",
+        "",
+    ])
 
 
 def export_reports(repo: Path, out_dir: Path) -> dict[str, Any]:
@@ -608,48 +607,47 @@ def export_reports(repo: Path, out_dir: Path) -> dict[str, Any]:
     adv_dir.mkdir(parents=True, exist_ok=True)
     hard_dir.mkdir(parents=True, exist_ok=True)
 
-    cands_by_id: dict[str, Candidate] = {}
-    for row in read_jsonl(state_dir / "candidates.jsonl"):
-        cand = dataclass_from_dict(Candidate, row)
-        cands_by_id[cand.id] = cand
-
-    verdicts_by_id: dict[str, Verdict] = {}
-    for row in read_jsonl(state_dir / "verdicts.jsonl"):
-        verdict = dataclass_from_dict(Verdict, row)
-        verdicts_by_id[verdict.candidate_id] = verdict
+    cands_by_id = {
+        c.id: c for c in (dataclass_from_dict(Candidate, r) for r in read_jsonl(state_dir / "candidates.jsonl"))
+    }
+    verdicts_by_id = {
+        v.candidate_id: v for v in (dataclass_from_dict(Verdict, r) for r in read_jsonl(state_dir / "verdicts.jsonl"))
+    }
 
     advisories: list[Path] = []
     hardening_notes: list[Path] = []
+    lint_issues: dict[str, list[str]] = {}
     min_score = 100
+    lint_passed = True
 
     for cid, cand in sorted(cands_by_id.items()):
         cand_verdict = verdicts_by_id.get(cid)
-        if cand.withdrawn or (cand_verdict is not None and cand_verdict.status == "WITHDRAWN"):
+        if cand.withdrawn or (cand_verdict is not None and cand_verdict.status in ("WITHDRAWN", "REJECTED")):
             continue
-        if cand_verdict is not None and cand_verdict.status == "REJECTED":
-            continue
-
         cat = cand.category.strip().lower()
         sev = cand.severity.strip().lower()
         is_hardening = cat.startswith("hardening") or sev in ("info", "informational", "hardening")
-        is_verified_adv = (
+        is_c3_adv = (
             not is_hardening
             and cand_verdict is not None
             and cand_verdict.status == "VERIFIED"
-            and cand_verdict.truth_level in ("C2", "C3")
+            and cand_verdict.truth_level == "C3"
         )
-        if not is_verified_adv and not is_hardening:
-            if cand_verdict is None or cand_verdict.truth_level != "C1":
+        if not is_c3_adv and not is_hardening:
+            if cand_verdict is None or cand_verdict.truth_level not in ("C1", "C2"):
                 continue
             is_hardening = True
 
         md = _render_finding_md(cand, cand_verdict)
-        lint = lint_report_text(md)
-        min_score = min(min_score, lint.score)
         safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", cid) + ".md"
-        dst = (adv_dir / safe_name) if is_verified_adv else (hard_dir / safe_name)
+        dst = (adv_dir / safe_name) if is_c3_adv else (hard_dir / safe_name)
         dst.write_text(md, encoding="utf-8")
-        if is_verified_adv:
+        if is_c3_adv:
+            lint = _run_voice_lint_gate(dst, channel="ghsa")
+            min_score = min(min_score, lint.score)
+            if not lint.passed:
+                lint_passed = False
+                lint_issues[cid] = lint.issues
             advisories.append(dst)
         else:
             hardening_notes.append(dst)
@@ -658,4 +656,6 @@ def export_reports(repo: Path, out_dir: Path) -> dict[str, Any]:
         "advisories": advisories,
         "hardening_notes": hardening_notes,
         "lint_score": min_score,
+        "lint_passed": lint_passed,
+        "lint_issues": lint_issues,
     }

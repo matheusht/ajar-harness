@@ -205,3 +205,286 @@ def test_live_async_swarm_with_mock_llm_and_ablation_flags(tmp_path: Path) -> No
 
     solo = LiveSwarm(proj, MockLLMClient(), workers=4, disable_swarm=True)
     assert solo.workers == 1
+
+
+def test_scrub_subprocess_env_strips_secrets_across_verify_agent_and_autobuild(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ajar import autobuild, verify
+    from ajar.agent import WorkspaceTools
+    from ajar.cli import scrub_subprocess_env
+
+    secret_vars = {
+        "OPENAI_API_KEY": "sk-test-openai-secret-key",
+        "GITHUB_TOKEN": "ghp_test_token_value",
+        "AWS_SECRET_ACCESS_KEY": "aws-secret-value",
+        "DB_PASSWORD": "db-password-value",
+        "BASIC_AUTH_HEADER": "basic-auth-value",
+        "GOOGLE_APPLICATION_CREDENTIALS": "/tmp/fake-cred.json",
+    }
+    for k, v in secret_vars.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("AJAR_SAFE_TEST_MARKER", "visible_non_secret_value")
+
+    cleaned = scrub_subprocess_env({"AJAR_EXTRA_FLAG": "1"})
+    for k in secret_vars:
+        assert k not in cleaned
+    assert cleaned["AJAR_SAFE_TEST_MARKER"] == "visible_non_secret_value"
+    assert cleaned["AJAR_EXTRA_FLAG"] == "1"
+
+    rc_v, out_v = verify._run_proc("env", cwd=tmp_path)
+    assert rc_v == 0
+    assert "AJAR_SAFE_TEST_MARKER=visible_non_secret_value" in out_v
+    for k, v in secret_vars.items():
+        assert k not in out_v and v not in out_v
+
+    res_a = WorkspaceTools(tmp_path).exec_cmd("env")
+    assert res_a.returncode == 0
+    assert "AJAR_SAFE_TEST_MARKER=visible_non_secret_value" in res_a.output
+    for k, v in secret_vars.items():
+        assert k not in res_a.output and v not in res_a.output
+
+    build_sh = tmp_path / ".ajar" / "build.sh"
+    build_sh.parent.mkdir(parents=True, exist_ok=True)
+    build_sh.write_text("#!/usr/bin/env bash\nset -euo pipefail\nenv\n", encoding="utf-8")
+    build_sh.chmod(0o755)
+    rc_b, out_b = autobuild._run_build_script(tmp_path, profile="upstream")
+    assert rc_b == 0
+    assert "AJAR_SAFE_TEST_MARKER=visible_non_secret_value" in out_b
+    for k, v in secret_vars.items():
+        assert k not in out_b and v not in out_b
+
+
+def test_cli_bench_phase0_exit_code_reflects_probe_pass_and_fail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ajar import bench, cli
+
+    monkeypatch.setattr(
+        bench,
+        "run_phase0_probes",
+        lambda _out: {"P0-A": {"passed": True}, "P0-B": {"passed": False}},
+    )
+    assert cli.main(["bench", "--phase0", "--out", str(tmp_path / "fail")]) == 1
+
+    monkeypatch.setattr(
+        bench,
+        "run_phase0_probes",
+        lambda _out: {
+            "P0-A": {"passed": True},
+            "P0-B": {"passed": True},
+            "P0-C": {"passed": True},
+            "P0-D": {"passed": True},
+        },
+    )
+    assert cli.main(["bench", "--phase0", "--out", str(tmp_path / "pass")]) == 0
+
+
+def test_export_reports_enforces_c3_voice_lint_and_omits_withdrawn_or_rejected(
+    tmp_path: Path,
+) -> None:
+    from ajar import cli
+    from ajar.cli import Candidate, Verdict, ajar_dir, append_jsonl
+    from ajar.verify import export_reports
+
+    clean_repo = tmp_path / "clean_repo"
+    clean_repo.mkdir()
+    sd = ajar_dir(clean_repo)
+
+    c3_clean = Candidate(
+        id="ADV-CLEAN",
+        title="Cross-tenant note disclosure in get_note",
+        severity="high",
+        entry_span="app.py:17",
+        sink_symbol="get_note",
+        repro_cmd="python3 app.py --selftest poc",
+        root_cause=(
+            "In `app.py:17`, `get_note()` checks authentication (`not requester`) but omits "
+            "the tenant ownership check (`requester != tenant`), allowing an authenticated "
+            "caller in `tenant_a` to read notes owned by `tenant_b`."
+        ),
+        impact=(
+            "Any authenticated tenant can read arbitrary private notes belonging to another "
+            "tenant by passing the victim tenant identifier in the request path."
+        ),
+        patch_diff=(
+            "--- a/app.py\n+++ b/app.py\n@@ -17,6 +17,8 @@\n"
+            " def get_note(tenant: str, note_id: str, requester: str):\n"
+            "     if not requester:\n"
+            "         return 401, {'error': 'unauthenticated'}\n"
+            "+    if requester != tenant:\n"
+            "+        return 403, {'error': 'forbidden'}\n"
+        ),
+    )
+    c2_note = Candidate(
+        id="NOTE-C2",
+        title="Unconfirmed timing side channel",
+        severity="medium",
+        entry_span="app.py:21",
+        sink_symbol="get_note",
+        repro_cmd="python3 app.py --selftest control",
+    )
+    withdrawn_cand = Candidate(
+        id="WD-001",
+        title="Withdrawn draft must be omitted",
+        severity="high",
+        withdrawn=True,
+    )
+    rejected_cand = Candidate(
+        id="REJ-001",
+        title="Rejected draft must be omitted",
+        severity="high",
+    )
+    for cand in (c3_clean, c2_note, withdrawn_cand, rejected_cand):
+        append_jsonl(sd / "candidates.jsonl", cand)
+    for verd in (
+        Verdict("ADV-CLEAN", "VERIFIED", "C3", 3, 3, critic_verdict="APPROVED"),
+        Verdict("NOTE-C2", "VERIFIED", "C2", 3, 3, critic_verdict="SKIPPED"),
+        Verdict("WD-001", "WITHDRAWN", "C0", 0, 0, critic_verdict="SKIPPED"),
+        Verdict("REJ-001", "REJECTED", "C0", 0, 0, critic_verdict="REJECTED"),
+    ):
+        append_jsonl(sd / "verdicts.jsonl", verd)
+
+    out_clean = tmp_path / "out_clean"
+    rep_clean = export_reports(clean_repo, out_clean)
+    assert rep_clean["lint_passed"] is True, f"Unexpected lint issues: {rep_clean['lint_issues']}"
+    assert rep_clean["lint_score"] == 100
+    assert [p.name for p in rep_clean["advisories"]] == ["ADV-CLEAN.md"]
+    assert [p.name for p in rep_clean["hardening_notes"]] == ["NOTE-C2.md"]
+    assert not (out_clean / "advisories" / "WD-001.md").exists()
+    assert not (out_clean / "hardening-notes" / "WD-001.md").exists()
+    assert not (out_clean / "advisories" / "REJ-001.md").exists()
+    assert not (out_clean / "hardening-notes" / "REJ-001.md").exists()
+    assert cli.main(["report", str(clean_repo), "--out", str(tmp_path / "cli_clean")]) == 0
+
+    jargon_repo = tmp_path / "jargon_repo"
+    jargon_repo.mkdir()
+    j_sd = ajar_dir(jargon_repo)
+    jargon_cand = Candidate(
+        id="ADV-SLOP",
+        title="Cross-tenant note disclosure tracked as clm-abcdef12",
+        severity="high",
+        entry_span="app.py:17",
+        sink_symbol="get_note",
+        repro_cmd="python3 app.py --selftest poc",
+        root_cause=(
+            "This finding was found_autonomously_by_ajar via ajar-investigate as clm-abcdef12 "
+            "and verified_local in our harness."
+        ),
+        impact="Unauthorized cross-tenant note read via missing authorization check.",
+        patch_diff=c3_clean.patch_diff,
+    )
+    append_jsonl(j_sd / "candidates.jsonl", jargon_cand)
+    append_jsonl(
+        j_sd / "verdicts.jsonl",
+        Verdict("ADV-SLOP", "VERIFIED", "C3", 3, 3, critic_verdict="APPROVED"),
+    )
+    rep_jargon = export_reports(jargon_repo, tmp_path / "out_jargon")
+    assert rep_jargon["lint_passed"] is False
+    assert "ADV-SLOP" in rep_jargon["lint_issues"]
+    assert cli.main(["report", str(jargon_repo), "--out", str(tmp_path / "cli_jargon")]) == 1
+
+
+def test_verify_candidate_critic_leading_token_precedence(tmp_path: Path) -> None:
+    from ajar.cli import BuildRecipe, Candidate
+    from ajar.llm import MockLLMClient
+    from ajar.verify import verify_candidate
+
+    repo = tmp_path / "critic_repo"
+    repo.mkdir()
+    (repo / "check.py").write_text(
+        "import sys\n"
+        "def check_len(n: int) -> int:\n"
+        "    if n > 32:\n"
+        "        return -1\n"
+        "    if n > 16:\n"
+        "        print('BOUNDS_CORRUPTED')\n"
+        "        return 1\n"
+        "    return 0\n"
+        "sys.exit(check_len(20))\n",
+        encoding="utf-8",
+    )
+    patch = (
+        "--- a/check.py\n"
+        "+++ b/check.py\n"
+        "@@ -1,8 +1,8 @@\n"
+        " import sys\n"
+        " def check_len(n: int) -> int:\n"
+        "-    if n > 32:\n"
+        "-        return -1\n"
+        "+    if n > 16:\n"
+        "+        return 0\n"
+        "     if n > 16:\n"
+        "         print('BOUNDS_CORRUPTED')\n"
+        "         return 1\n"
+    )
+    cand = Candidate(
+        id="CRITIC-PREC-1",
+        title="Bounds check off-by-limit",
+        severity="high",
+        repro_cmd="python3 check.py",
+        failure_oracle="BOUNDS_CORRUPTED",
+        patch_diff=patch,
+    )
+    recipe = BuildRecipe(profile="upstream", build_script="")
+    approve_critic = MockLLMClient(["APPROVE: rejects invalid length and is not a false positive"])
+    v_ok = verify_candidate(repo, cand, recipe=recipe, llm=approve_critic, runs=1)
+    assert v_ok.status == "VERIFIED"
+    assert v_ok.truth_level == "C3"
+    assert v_ok.critic_verdict == "APPROVED"
+
+    reject_critic = MockLLMClient(["REJECT: false positive with no real boundary violation"])
+    v_rej = verify_candidate(repo, cand, recipe=recipe, llm=reject_critic, runs=1)
+    assert v_rej.status == "REJECTED"
+    assert v_rej.critic_verdict == "REJECTED"
+
+
+def test_run_bench_executes_all_fifteen_targets(tmp_path: Path) -> None:
+    from ajar import bench
+
+    res = bench.run_bench(REPO_ROOT / "benchmarks", tmp_path)
+    assert res["all_passed"] is True
+    assert res["suite_targets_total"] == 15
+    assert (tmp_path / "bench_report.json").is_file()
+
+    poly = res["polyglot"]
+    assert poly["targets_total"] == 4
+    assert poly["patches_total"] == 8
+    assert poly["patches_matched"] == 8
+    assert poly["valid_patches_verified"] == 4
+    assert poly["neg_controls_rejected"] == 4
+    assert res["profile"]["valid_patch_pass_rate"] == 1.0
+    assert res["profile"]["neg_control_rejection_rate"] == 1.0
+
+    herm = res["hermetic"]
+    assert herm["targets_total"] == 8
+    assert herm["targets_passed"] == 8
+    assert herm["fp_count"] == 0
+    assert herm["fp_rate"] == 0.0
+    trap_eval = bench.evaluate_hermetic_request(
+        {"oracle": "bopla_property_authz"},
+        {
+            "operation": "write",
+            "echoed_guarded_property": True,
+            "persisted_guarded_property": False,
+            "effective_property_impact": False,
+        },
+    )
+    assert trap_eval == {"signal": False, "effect": False, "control_ok": False}
+
+    fnd = res["foundry"]
+    assert fnd["targets_total"] == 3
+    assert fnd["static_ready_count"] == 3
+    assert fnd["targets"]["curve-readonly-reentrancy"]["execution_status"] == "skipped_requires_rpc"
+    for offline_name in ("erc4626-first-depositor", "jpegd-reentrancy"):
+        entry = fnd["targets"][offline_name]
+        assert entry["static_ready"] is True
+        assert entry["build_system"] == "foundry"
+        if fnd["forge_available"]:
+            assert entry["execution_status"] == "passed"
+        else:
+            assert entry["execution_status"] == "skipped_missing_tool"
+            assert entry["missing_tool"] == "forge"
+

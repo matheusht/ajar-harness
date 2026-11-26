@@ -1,73 +1,37 @@
 ---
 name: ajar-patch
-description: Upgrade a verified 4-arm micro-patch into a maintainer-grade production fix verified by the hardened 9-Arm Remediation Gate (ajar patch verify).
+description: Author minimal, maintainer-grade root-cause patches verified through Ajar v3.6 verify.py (fuzzy apply, mandatory post-patch rebuild, 3x repro pass, and upstream test_cmd regression suite).
 ---
 
-# Ajar Patch (`Fixes` 9-Arm Gate)
+# Ajar Patch (`v3.6-Balanced`)
 
-Use this skill during `Fixes` workflows (`campaign_phase = 'remediate'`) to upgrade a minimal `1–5` line `micropatch` from `ajar claim reproduce` (`remediation_state = 'micropatched'`) into a locally verified production patch (`remediation_state = 'verified_local'`).
+Use this skill to craft an idiomatic, root-cause `patch_diff` for a `Candidate` in `.ajar/candidates.jsonl` and prove it mechanically via `ajar verify`.
 
-## 1. Hunt vs. Remediate Phase Split (`ajar phase`)
+## 1. Maintainer-Grade Engineering Constraints
 
-Ajar strictly separates active vulnerability/chain hunting from heavy 9-arm test-suite remediation so runs never burn discovery hours recompiling full suites prematurely:
+Consult `skills/references/ghsa-fix-diff-corpus.md` for real-world fix shapes and incomplete-fix pitfalls before writing the diff:
 
-- **Default `hunt` Phase:** `ajar patch verify` is blocked (`EXIT_GATE_BLOCKED`) and `ajar task lease` skips `patch` tasks while discovery, Open-Door bridge hunts, and Stage-5 chain synthesis remain underway.
-- **Advancing to `remediate`:** Advance only when explicitly running a `Fixes` workflow or after discovery and chain synthesis have finished:
-  ```bash
-  ajar phase show
-  ajar phase advance --to remediate
-  ```
+1. **Fix the Structural Invariant, Not a Denylist:** Enforce canonical bounds checks, post-symlink path containment, checked arithmetic, checks-effects-interactions / reentrancy locks, session-derived principal checks, or domain-separated signatures instead of fragile string blacklists.
+2. **Match Local Idioms:** Preserve surrounding error codes, return conventions, lock/unlock ordering, memory cleanup (`goto cleanup` / RAII / `defer`), and custom errors.
+3. **Audit Callers on New Error Returns:** Whenever a patch introduces a new `NULL`, `None`, error code, or revert on a previously infallible function, inspect all callers (`repomap.py` / `search`) to verify they handle the error cleanly without leaking locks or memory.
+4. **Audit Sibling Routes & Peer Hooks:** Inspect parallel endpoints (`v1`/`v2`, batch/single, `create`/`update`) sharing the same broken helper or assumption so the fix closes the whole root cause rather than one caller.
+5. **No Cheating or Test Edits:** Never modify test files, disable the feature unconditionally, swallow all exceptions, or inject early `exit(0)` stubs. Both `verify.py` and the Cross-Family Critic reject sham patches.
 
-## 2. Inspect Callers, Sibling Routes, and Fix Precedents
+## 2. Mechanical Verification (`ajar verify`)
 
-1. Lease the `patch` task and query all callers, callees, and sibling routes:
-   ```bash
-   ajar task lease --worker <worker_id> --kind patch --recover
-   ajar ref query --kind reachability "<affected_symbol>"
-   ajar ref query --kind intent "<affected_module>"
-   ```
-2. Check real-world fix shapes and incomplete-fix pitfalls in `skills/references/ghsa-fix-diff-corpus.md`:
-   ```bash
-   ajar precedent search "<cwe_or_vulnerability_class> fix"
-   ```
-
-## 3. Maintainer-Grade Engineering Constraints
-
-1. **Preserve Local Idioms:** Match surrounding error types, HTTP status mappings, lock/unlock/RCU ordering, resource-cleanup paths, Solidity custom errors, and logging conventions.
-2. **Fix Structural State Rather Than Input Denylists:** Enforce canonical invariants (parameterized queries, post-symlink canonical path containment, session-derived principal checks, checks-effects-interactions + reentrancy guards, checked arithmetic, or domain-separated signatures) instead of regex blacklists.
-3. **Audit Caller Error/NULL Paths (`GhostLock` Rule — Arm 7):** Whenever your patch introduces a new error return, `None`/`NULL` return, or revert on previously infallible paths, inspect every caller and supply `--caller-cmd` where executable caller tests exist.
-4. **Audit Sibling Routes and Peer Hooks (Arm 8):** Check parallel endpoints (`v1` vs `v2`), batch/GraphQL resolvers, and paired lifecycle hooks (`create`/`update`/`transfer`) sharing the same assumption; supply `--sibling-cmd` where executable sibling tests exist.
-
-## 4. Run the Hardened 9-Arm Production Remediation Gate
-
-Execute `ajar patch verify` (preserving compiled `.o`/`.a` objects across resets with a default `1800s` `--suite-timeout`) to promote the finding to `verified_local`:
+Attach the unified diff (`git diff`) as `patch_diff` on the candidate in `.ajar/candidates.jsonl` and run:
 
 ```bash
-ajar patch verify <finding_id> \
-  --worker <worker_id> \
-  --patch <path/to/production_fix.diff> \
-  --suite-cmd "<project or subsystem regression suite command>" \
-  [--suite-timeout 1800] \
-  --variant-cmd "<bypass variant 1: alternate encoding or normalization>" \
-  --variant-cmd "<bypass variant 2: boundary value or nested/batch payload>" \
-  --variant-cmd "<bypass variant 3: sibling route or second-order path>" \
-  --caller-audit "<verified callers of patched function handle error/NULL returns cleanly>" \
-  --sibling-audit "<verified v1/v2/batch sibling handlers and peer hooks>" \
-  [--caller-cmd "<executable caller error-handling test>"] \
-  [--sibling-cmd "<executable sibling-route symmetry test>"]
+ajar verify <repo> --candidate-id <id> --runs 3 --profile upstream
 ```
 
-| Arm | Verification Check |
-| --- | --- |
-| **Arms 1–4** | Clean PoC fires, clean control passes, production patch blocks PoC, production patch passes control at `finding.locus` |
-| **Arm 5** | Regression suite (`--suite-cmd`) introduces zero new failures vs cached clean-`HEAD` `repro/baseline_suite.json` |
-| **Arm 6** | `>= 3` distinct `--variant-cmd` tests all pass on patched worktree AND `>= 1` triggers the defect oracle on clean `HEAD` |
-| **Arm 7** | Caller NULL/error-return audit (`--caller-audit`) + optional `--caller-cmd` exits `0` |
-| **Arm 8** | Sibling-route symmetry audit (`--sibling-audit`) + optional `--sibling-cmd` exits `0` |
-| **Arm 9** | `git apply -R` patch-revert check on the same worktree proves the PoC re-triggers the defect oracle |
+`src/ajar/verify.py` validates the patch inside a clean `git worktree` across four patch-bearing stages:
 
-Close the `patch` task once `ajar patch verify` exits `0`:
+1. **`apply_patch_fuzzy`:** Confirms the unified diff applies cleanly to `HEAD` without rejecting hunks.
+2. **Mandatory Post-Patch Rebuild:** Re-executes `.ajar/build.sh` so compiled artifacts genuinely reflect the patch (stale binaries or broken builds fail closed as `REJECTED`).
+3. **Post-Patch Pass (`3x`):** Re-runs `repro_cmd` `3` times requiring exit code `0`, zero `CrashSignature` detections, and zero `failure_oracle` matches.
+4. **Upstream Regression Suite (`recipe.test_cmd`) & Cross-Family Critic:** Executes `BuildRecipe.test_cmd` (if configured) to confirm zero regressions, then submits the diff and crash proof to the Cross-Family Critic to mint `C3`.
 
-```bash
-ajar task done <task_id> --worker <worker_id> --summary "<finding_id promoted to verified_local across 9 arms>"
-```
+## 3. Bypass Variant Check Before Finalizing
+
+Before treating a patch as maintainer-ready for `ajar report`, manually test `2–3` bypass variants against the patched worktree (alternate encodings, boundary lengths `0` / `MAX` / off-by-one, or sibling routes) to ensure the fix closes the underlying defect class rather than only the initial PoC input.

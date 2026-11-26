@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ajar.agent import SpanTracker, WorkspaceTools
-from ajar.cli import BuildRecipe
+from ajar.cli import BuildRecipe, scrub_subprocess_env
 from ajar.llm import LLMClient
 from ajar.verify import clean_worktree, parse_crash_signature
 from ajar.whiteboard import Section, StigmergicWhiteboard
@@ -185,8 +185,7 @@ def synthesize_build_recipe(repo: Path, profile: str = "upstream") -> BuildRecip
 
 
 def _run_build_script(repo: Path, profile: str, timeout: float = 90.0) -> tuple[int, str]:
-    env = os.environ.copy()
-    env.update(BUILD_PROFILES.get(profile, BUILD_PROFILES["upstream"]))
+    env = scrub_subprocess_env(BUILD_PROFILES.get(profile, BUILD_PROFILES["upstream"]))
     script = repo / ".ajar" / "build.sh"
     if not script.is_file():
         return (127, ".ajar/build.sh missing")
@@ -263,7 +262,7 @@ async def run_build_doctor(
         if rc == 0:
             return replace(
                 recipe,
-                build_script="sh .ajar/build.sh",
+                build_script="bash .ajar/build.sh",
                 static_only=False,
                 verified=True,
                 last_error="",
@@ -369,8 +368,7 @@ def run_microfuzz_encoder(
     tokens = shlex.split(entrypoint_cmd_template)
     if not tokens:
         return []
-    env = os.environ.copy()
-    env.update(BUILD_PROFILES.get(profile, BUILD_PROFILES["upstream"]))
+    env = scrub_subprocess_env(BUILD_PROFILES.get(profile, BUILD_PROFILES["upstream"]))
     crashes_by_hash: dict[str, dict[str, Any]] = {}
 
     with clean_worktree(repo_path) as wt:

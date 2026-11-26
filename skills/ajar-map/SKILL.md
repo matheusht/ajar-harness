@@ -1,121 +1,44 @@
 ---
 name: ajar-map
-description: Map bi-directional attack surfaces, trust boundaries, workspace Steers, and executable surface drivers at the start of an Ajar run.
+description: Map attack surfaces, Crown-Jewel sinks, and build recipes using Ajar v3.6 repomap.py (.ajar/REALITY.md), autobuild.py (.ajar/build.sh), and stigmergic whiteboard seeding.
 ---
 
-# Ajar Map
+# Ajar Map (`v3.6-Balanced`)
 
-Use this skill to build the initial component and attack-surface map, record operator `Steers`, register executable surface drivers, and enqueue bi-directional `investigate` tasks in `run.db`.
+Use this skill at the start of an audit to orient on production code, build a working sanitizer harness, and seed forward/backward targets on the stigmergic whiteboard.
 
-## 1. Inputs, Quote, and Orientation
+## 1. Pure Conductor Discipline & Structural Map (`repomap.py`)
 
-1. Verify canonical target liveness (`archived == false`, active production branch, fresh `HEAD`, and sibling `--peer` checkouts if coupled) and initialize the run (`ajar init` computes `Code` quote and `35%` COGS cap inline without requiring `ajar quote` first; pass `--max-spend <usd>` to clamp ceiling or `--yes` to silence quote notices):
+1. Exclude `tests/`, `docs/`, and `benchmarks/` at minute zero. Never spend mapping budget on test fixtures or mock harnesses.
+2. Start the swarm or generate `.ajar/REALITY.md` and `.ajar/build.sh` via `ajar run` (or inspect `.ajar/REALITY.md` produced by `repomap.build_repomap_and_reality`):
    ```bash
-   ajar doctor --target <target_dir> [--subdir <rel_path>] [--peer <sibling_repo>]
-   ajar init <target_dir> [--stopping exhaustive-high|first-verified-high|crown-jewel] [--phase hunt|remediate] [--max-spend <usd>] [--warn-above-usd <usd>] [--yes] [--diff <base..head>] [--brief-file <brief.md>] [--uncapped] [--parent-run <baseline_run_id>]
-   ajar brief
+   ajar bench --phase0
+   ajar run <repo> --workers 8 --budget-usd 50 --profile upstream
    ```
-   When pursuing end-to-end multi-stage chains (`--stopping crown-jewel --phase hunt`), register concrete terminal sinks (`crown_jewels`) so backward sink cones and Open Doors anchor on real execution/state boundaries without closing out on early multi-step stepping stones:
-   ```bash
-   ajar door jewel-add \
-     --name "<sink_name>" \
-     --locus "<file:line>" \
-     --impact-class <rce|arbitrary_write|auth_bypass|fund_drain|sandbox_escape|state_takeover> \
-     --symbols "<fn_or_sink_symbol_1,symbol_2>" \
-     --max-steps 2
-   ```
-2. Inspect the Personalized PageRank symbol graph, unvisited subsystem call cones (`--unvisited`), and backward sink-to-source call slices (`ajar catalog backslice`):
-   ```bash
-   ajar map --budget-tokens 1500 --slice-cap 15000
-   ajar map --unvisited --budget-tokens 1500
-   ajar map --focus-file <rel_path> --focus-symbol <symbol> --budget-tokens 1500
-   ajar catalog backslice <sink_or_jewel_id> --max-hops 3
-   ```
-3. Query local documentation, comments, ADRs, and test intent before labeling behavior anomalous (target docs carry `[UNTRUSTED_TARGET_DOC: verify in code]` so prose claims are always verified in code):
-   ```bash
-   ajar ref query --kind intent "<subsystem or symbol>"
-   ajar ref query --kind reachability "<entrypoint or sink>"
-   ```
-4. Record explicit operator threat-model or scope boundaries as attributable `Steers` (`scope_authority` preserves autonomous finding attribution; `research_steering` marks human-guided hypotheses):
-   ```bash
-   ajar steer add --scope global --kind scope_authority --rule "<explicit scope or threat-model boundary>"
-   ```
-5. Synthesize the **Adaptive Threat Model** before registering surfaces: explicitly separate **unprivileged external principals** from **permissioned operators, governance owners, or local admins** (never lump trusted operators and untrusted callers into one string), and register falsifiable architectural assumptions (`assumption-add`):
-   ```bash
-   ajar threat-model set \
-     --principals "<unprivileged_external: remote peer/tx sender; permissioned_operator: admin/sequencer/owner>" \
-     --assets "<RCE, cross-tenant data, unauthorized fund transfer, state-root soundness>" \
-     --consumer-tiers "<CLI, server daemon, on-chain verifier>" \
-     --summary "<1-2 sentence trust-boundary architecture>"
-   ajar threat-model assumption-add \
-     --subsystem "<module>" \
-     --trust-boundary "<external -> internal>" \
-     --assumption "<what architecture assumes holds>" \
-     --check-locus "<file:line>" \
-     --invalidated-by-tags "<ns:tag>" \
-     --dependent-surface "<optional_surface_id>"
-   ```
+3. Read `.ajar/REALITY.md` first: it ranks production files by Personalized PageRank, lists detected build manifests (`CMakeLists.txt`, `Cargo.toml`, `go.mod`, `pyproject.toml`, `package.json`, `foundry.toml`), and enumerates entrypoints and high-value sinks (`memcpy`, `realloc`, `system`, `subprocess`, `delegatecall`, `transferFrom`, `mulDiv`, `exec.Command`, `cursor.execute`, etc.).
+4. Verify `.ajar/build.sh` and `.ajar/build_recipe.json` (synthesized by `autobuild.py` under `upstream`, `debian`, or `al2023` ASan/UBSan profiles). If the initial build fails, let `run_build_doctor` repair `.ajar/build.sh` inside its write-allowlist jail before deep auditing.
 
-## 2. Surface Ranking Rules
+## 2. Two-Tier Pincer Coverage
 
-Assign each surface one priority level based on **live production activation**, **unprivileged reachability**, and **state impact** (never assign `critical` to devnet/test-only binaries, unactivated future flags, or operator-gated paths unless authorized by a `scope_authority` steer):
+Trace both directions so neither outer parsers nor deep state transitions are missed:
 
-- `critical`: Active production unauthenticated network parsers, RPC/HTTP/GraphQL/gRPC entrypoints, cross-chain packet/proof handlers, VM state-transition hooks, or multi-tenant asset/token custody functions reachable by unprivileged external callers.
-- `high`: Authenticated cross-tenant APIs, privilege-boundary transitions, signature/JWT/OAuth verifiers, deserializers, webhook fetchers, FFI/unsafe boundaries, or sandbox/plugin execution hosts.
-- `medium`: Authenticated single-tenant mutations, background workers with indirect external input, or rate/accounting helpers.
-- `low`: Local CLI flags, permissioned operator/admin maintenance paths, or read-only diagnostics with no secret exposure.
+1. **100% Forward Entrypoints:** Unauthenticated network/RPC/HTTP/wire parsers, CLI/archive/file decoders, public smart-contract entrypoints, and cross-tenant APIs reachable by unprivileged principals.
+2. **100% Backward Crown-Jewel Sinks:** Memory/FFI boundaries (`memcpy`, `memmove`, `realloc`, `free`, `unsafe`), command/SQL/file sinks, privilege/auth transitions, and asset/accounting mutations (`delegatecall`, `transferFrom`, `mulDiv`).
+3. **Peer Symmetry & Sibling Routes:** Note paired lifecycle handlers (`create`/`update`/`delete`, `deposit`/`withdraw`, `v1`/`v2`) where one path may omit a check enforced on its sibling.
 
-## 3. Bi-Directional Task Seeding (`--direction`)
+Separate **unprivileged external principals** from **permissioned operators or local admins** before prioritizing surfaces. Never rank operator-only or test-only paths as high-priority targets unless explicitly in scope.
 
-Do not map external HTTP/RPC routes alone. Enqueue `investigate` tasks across all four search directions so inner state bugs and native parser bugs are never missed:
+## 3. Seed `.ajar/WHITEBOARD.md` (`whiteboard.py`)
 
-1. **`outside_in` (Entrypoint -> Sink):** Trace untrusted inputs from HTTP/RPC/CLI/contract entrypoints through middleware to state transitions.
-2. **`inside_out` (High-Value Sink -> Callers):** Start at sensitive state mutations, accounting/settlement math, role/permission writes, SQL/command/template builders, and cache deserializers; trace backward to find unguarded callers.
-3. **`native_ffi` (Memory / Unsafe / FFI Boundary):** Target `ext/`, `cgo`, `ctypes`, `wasm`, JNI/N-API bridges, `unsafe` Rust blocks, `@IntrinsicCandidate` intrinsics, and custom binary/archive parsers.
-4. **`peer_symmetry` (Sibling Routes & Lifecycle Hooks):** Compare parallel endpoints (`v1` vs `v2`, REST vs GraphQL/batch), outbound client response parsers, and paired lifecycle hooks (`create`/`update`/`delete`, `deposit`/`withdraw`, `lock`/`unlock`) for missing checks present on peers.
+Record verified orientation facts in `.ajar/events.jsonl` (projected atomically to `.ajar/WHITEBOARD.md`):
 
-## 4. Recording Surfaces, Drivers, and Tasks
-
-1. Register every distinct attack surface with its `file:line` locus, explicit trust boundary, and optional `--requires-tags` (`ns:name` preconditions needed to trigger guarded sinks):
-   ```bash
-   ajar surface add \
-     --name "<surface_name>" \
-     --kind "<http|rpc|contract|parser|ffi|ipc|cli>" \
-     --subsystem "<module>" \
-     --locus "<file:line>" \
-     --priority critical \
-     --trust-boundary "<untrusted caller -> guarded resource>" \
-     [--requires-tags "<ns:tag1,ns:tag2>"]
-   ```
-2. Attach an executable surface driver whenever a test target, fuzz harness, local server, or Foundry test reaches the surface:
-   ```bash
-   ajar driver add \
-     --surface <surface_id> \
-     --setup-cmd "<build or fixture setup command>" \
-     --invoke-template "<command invoking the entrypoint>" \
-     --teardown-cmd "<optional cleanup command>"
-   ```
-3. Enqueue bi-directional `investigate` tasks tied to each `critical` and `high` surface:
-   ```bash
-   ajar task add \
-     --kind investigate \
-     --direction <outside_in|inside_out|native_ffi|peer_symmetry> \
-     --title "<specific boundary, sink, or peer-symmetry check>" \
-     --surface <surface_id> \
-     --subsystem "<module>" \
-     --locus "<file:line>" \
-     --priority high
-   ```
-4. Plan a disjoint parallel Swarm wave (auto-breaking zero-yield discovery stalls on unvisited slices and auto-bridging 1-link Middle-Unicorn gaps) and emit compact (`<= 40`-line) Layer-0 worker briefs:
-   ```bash
-   ajar swarm plan [--workers <N>] [--no-enqueue] [--stall-window <K>]
-   ajar swarm brief <task_id> [--worker <worker_id>] [--raw]
-   ```
-5. Export the deterministic `Platform` component and attack-flow graph when inspecting coverage:
-   ```bash
-   ajar export-graph --output graph.json
-   ```
+- **`insight` / `invariant`:** Exact trust boundaries, verified guards with `path:line` spans, and build/test commands.
+- **`bounty`:** High-value unaudited entrypoints or sibling seams for `surface_scout` and `deep_auditor` workers.
+- **`wish`:** Backward Crown-Jewel sinks awaiting a matching upstream `EffectType` and `CarrierKind` (consumed by `chain_weaver.py`).
 
 ## Exit Check
 
-Verify that `ajar surface list` and `ajar task list` cover external entrypoints (`outside_in`), critical state sinks (`inside_out`), native/unsafe bridges (`native_ffi`), and sibling route/hook pairs (`peer_symmetry`). Closeout gate `G1` blocks run completion if zero surfaces exist or if any `critical` or `high` surface has zero completed tasks under `exhaustive-high`.
+Before moving to deep investigation, confirm:
+- `.ajar/REALITY.md` covers production entrypoints and Crown-Jewel sinks with `tests/`/`docs/`/`benchmarks/` excluded.
+- `.ajar/build.sh` builds cleanly (or `static_only` is recorded honestly if no compiler/runtime exists).
+- Initial `bounty`, `invariant`, and `wish` entries are visible in `.ajar/WHITEBOARD.md`.

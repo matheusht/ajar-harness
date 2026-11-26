@@ -1,72 +1,77 @@
-# Ajar Campaign Ladder & Horizon Roadmap (`v3.4` -> `v3.5`)
+# Ajar Campaigns, Rent Rule, & Roadmap (`v3.6-Balanced`)
 
-This document explains why **Ajar v3.4** exists, defines the **3-Tier Campaign Feedback-Loop Ladder** used to evaluate engine changes with fast `Keep / Simplify / Delete` discipline, and outlines the **Ajar v3.5** technical roadmap across `Platform`, `Code`, `Fixes`, `Security reviews`, and `Supply chain`.
+This document explains why **Ajar v3.6-Balanced** replaced the legacy `v3.4` orchestration stack, defines the **Earned-Mass Rent Rule** used to keep or evict Ring-1 modules, and outlines the active campaign workflow and roadmap.
 
-See [architecture.md](architecture.md) for the active module map and [ADR-0025](decisions/0025-ajar-v3-4-value-hillclimbing-catalog-and-fail-closed-truth.md) for the `v3.4` decision record.
-
----
-
-## 1. Why `Ajar v3.4` Exists
-
-Telemetry from a 78.8h C systems campaign (`355` worker sessions) exposed five recurring failure modes in long-horizon autonomous security runs. `Ajar v3.4` eliminates each failure mode deterministically inside `ajar/` without adding LLM calls to the core engine:
-
-1. **Premature Production Patching (`25.5% -> 0.0%` during `hunt`):**
-   - *Failure mode:* Workers pivoted into writing multi-revision production patches and running full test suites while high-value attack surfaces and multi-hop chains remained unaudited.
-   - *`v3.4` mechanism:* Runs start in `campaign_phase = 'hunt'`. `ajar patch verify` (and MCP `ajar_patch_verify`), `ajar task lease`, `ajar swarm plan`, and `ajar swarm brief` hard-block `patch` execution during `hunt` (`EXIT_GATE_BLOCKED`), deferring 9-arm `Fixes` until `ajar phase advance --to remediate` verifies `G5` chain convergence.
-2. **Single-Root Mode Collapse (`8.3% -> 100.0%` subsystem illumination):**
-   - *Failure mode:* Under `--uncapped` research runs, early `stepping_stone` findings spawned corroboration tasks that monopolized `1..2` files while sibling subsystems received zero exploration leases.
-   - *`v3.4` mechanism:* `QD-Islands` (`compute_island_illumination`) boosts unvisited subsystem islands (`+12` salience + anti-monopoly wave reservation while illumination `< 0.75`) and caps over-mined islands (`-25` salience, `<= 55` cap), `compute_root_plateau_throttles` penalizes post-reproduction non-chain churn (`-35`), `ajar map --unvisited` surfaces unaudited call cones, and `ajar lead` aggregates multi-worker Expected-Value quorum votes.
-3. **Disjunctive `1`-of-`k` False Chains & Hidden Multi-Hop Bridges:**
-   - *Failure mode:* Matching a single tag on a multi-precondition sink enqueued unexploitable `chain` tasks while fixed list truncation hid late `(forward_tip, backward_entry)` Crown-Jewel bridges.
-   - *`v3.4` mechanism:* `detect_percolated_multi_hop_paths` enforces full conjunctive `requires_tags` subset and upstream guard satisfaction, `ah_puct_score` ranks every 1-link `unicorn_gap` by Crown-Jewel impact, `repomap_edges` call proximity, and materialized `repro_snapshots`, and `ajar catalog {search,backslice}` unifies backward sink-to-source call slicing.
-4. **Blind Input Guessing & Permissive Arm-3 Counterfactuals:**
-   - *Failure mode:* Workers retried failing PoCs and multi-step chains without line-coverage feedback, while broken micropatches that crashed or failed to compile could falsely satisfy Arm 3 if the exploit oracle did not fire.
-   - *`v3.4` mechanism:* `ajar repro slice-probe` renders zero-dependency Python `sys.settrace` and GCC `gcov` `@VISITED` / `@UNREACHED` (`FIRST_UNREACHED_AFTER_GUARD`) line annotations plus ASan/UBSan crash frames; `evaluate_chain_failure_streak` enforces a 2-strike runtime probe pivot on `ajar chain propose`; and Arm 3 / step ablation fail closed on compiler, runtime, or `SIGKILL`/`OOM` errors while separating zero-strike `micropatch_error` (`poc_proven = True`).
-5. **Administrative Prose Churn & Onboarding Friction:**
-   - *Failure mode:* Non-epistemic log events reset stall counters, manual archive scripts leaked local paths or symlinks, and operators had to run separate quote commands before initializing bounded runs.
-   - *`v3.4` mechanism:* Grounded Lyapunov potential $\Phi(t)$ (`compute_epistemic_delta`) advances strictly on verified epistemic state transitions; `ajar bundle {seal,verify}` seals symlink-free, path-scrubbed deliverables; and `ajar init` computes inline quotes and COGS caps in one command with non-blocking warnings and `--max-spend` / `--warn-above-usd` / `--yes` guardrails.
+See [architecture.md](architecture.md) for the Three-Ring module map and [decisions/README.md](decisions/README.md) for archived `v3.4` decision records (`archive/v3.4-legacy`).
 
 ---
 
-## 2. The 3-Tier Campaign Feedback-Loop Ladder
+## 1. Why `v3.6-Balanced` Replaced `v3.4`
 
-Never validate a new scheduler, hook, or verification rule solely on a multi-day moonshot run. Evaluate every engine change bottom-up across three target tiers, applying **`Keep / Simplify / Delete`** at Tier 1 before advancing:
+The legacy `v3.4` harness (`~45k` LoC, preserved at git tag `archive/v3.4-legacy`) accumulated heavy orchestration middleware that added worker friction without proportional `C3` yield. `v3.6-Balanced` applies two strict design rules:
 
-| Tier | Target Scope (`LoC`) | Wall-Clock Budget | Representative Target Classes | Required Exit Criteria |
-| --- | --- | --- | --- | --- |
-| **Tier 1: Fast-Feedback Calibration Targets** | `5K–45K LoC` | `< 90m` | Focused C/Rust archive unpackers, binary/wire frame parsers, auth/JWT verifiers, compact RPC daemons | Deterministic DST pass (`scripts/verify-repo.sh --full`) + measurable lift in root-cause precision, token efficiency, or chain completion; delete or simplify mechanisms with zero lift. |
-| **Tier 2: Medium State-Machine Targets** | `50K–300K LoC` | `2h–8h` | Protocol state machines, execution/consensus clients, multi-tenant API gateways, embedded storage engines | `>= 0.75` `QD-Islands` subsystem illumination, `0` premature `hunt`-phase patches, clean `H1`–`H9` hook termination, and verified `Open Door` wakeup / 2–3 hop chain ablation. |
-| **Tier 3: Moonshot Multi-Hop Targets** | `500K–40M LoC` | `8h–72h+` | Systems toolchains, compilers, language runtimes, OS services, browser/media pipelines, monorepos | Slice-capped PageRank + `ajar catalog backslice` coverage on Crown Jewels, `AH-PUCT` multi-hop percolation, warm `.o` 8-slot throughput, and `remediate`-phase 9-arm `Fixes` (`verified_local`). |
+1. **Zero Bureaucracy in the Inner Loop:** Workers read code, run commands, and iterate freely through `WorkspaceTools` (`agent.py`). Coordination happens via lock-free `.ajar/events.jsonl` -> `.ajar/WHITEBOARD.md`, never blocking state-machine locks.
+2. **Earned-Mass Governance:** Ring 0 stays strictly `<= 1,800` SLOC (`cli.py`, `llm.py`, `agent.py`, `verify.py`). Every Ring-1 capability must justify its SLOC via local ablation (`--disable-<module>`) under the empirical rent rule in `src/ajar/bench.py`.
 
-### Canonical Operator Flow Across Tiers
+---
+
+## 2. Local Phase-0 Probes & Empirical Rent Rule (`ajar bench`)
+
+Paid benchmark runs never gate CI. Every commit runs `$0` deterministic checks (`pytest`, `extra/sz_ajar.py`, `tools/arch_lint.py`), and operators run local on-demand probes before spending inference budget:
 
 ```bash
-# Single-command initialization with inline estimate and optional spend ceiling
-ajar init <target_dir> --stopping crown-jewel --phase hunt --max-spend 50.0
-ajar door jewel-add --name "<terminal_sink>" --locus "<file:line>" --impact-class rce --symbols "<sink_fn>"
+python3 extra/sz_ajar.py .
+ajar bench --phase0
+```
 
-# Disjoint wave dispatch + zero-dependency runtime slice probing during hunt
-ajar swarm plan --workers 6
-ajar repro slice-probe --focus-locus <file:start-end> --cmd "<probe_cmd>" --record-coverage
+### Phase-0 Deterministic Probes (`P0-A` .. `P0-D`)
 
-# Convergence-gated transition to remediate for 9-arm production Fixes
-ajar phase advance --to remediate
-ajar patch verify <finding_id> --patch <fix.diff> --suite-cmd "<suite>" \
-  --variant-cmd "<v1>" --variant-cmd "<v2>" --variant-cmd "<v3>" \
-  --caller-audit "<caller safety>" --sibling-audit "<peer symmetry>"
+- **`P0-A` (Polyglot Indexer):** Verifies `repomap.py` indexes Solidity sinks (`.call{`, `delegatecall`) and emits `.ajar/REALITY.md`.
+- **`P0-B` (Sanitizer Autobuild):** Verifies `autobuild.py` synthesizes an executable `.ajar/build.sh` with ASan/UBSan flags and parallel build settings.
+- **`P0-C` (5-Stage `C3` Anti-Stale Gate):** Compiles a real C target, proves `verify.py` rejects a stale/comment-only patch after mandatory post-patch rebuild, and mints `C3` for a genuine bounds fix.
+- **`P0-D` (Effect/Wish Chain Join):** Verifies `chain_weaver.py` joins compatible `EffectType` + `CarrierKind` events posted to `.ajar/events.jsonl` while ignoring incompatible wishes.
+
+### Leave-One-Out Rent Rule (`evaluate_rent_rule`)
+
+A Ring-1 module earns `KEEP` (otherwise `EVICT`) via `ajar bench --disable-<module>` when:
+- It delivers **at least one** measurable gain: `recall >= +5%`, `FP reduction >= +5%` (non-regressing recall), `chain_hops >= +0.5` (non-regressing recall), or `cost <= -15%` (non-regressing recall); **and**
+- It satisfies all safety caps: `recall regression <= 1%`, `worker friction <= 5%`, and `loc_added <= 600` SLOC.
+
+---
+
+## 3. Campaign Tier Ladder & Operator Workflow
+
+Validate every harness change bottom-up before running long multi-worker campaigns:
+
+| Tier | Scope | Budget / Wall-Clock | Exit Criteria |
+| --- | --- | --- | --- |
+| **Tier 0: Local Structural & Phase-0** | Synthetic fixtures + unit suite | `$0` / `< 30s` | `scripts/verify-repo.sh --fast` + `ajar bench --phase0` green |
+| **Tier 1: Focused Calibration** | Single parser, verifier, or contract (`5K–45K` LoC) | `$5–$15` / `< 90m` | `C3` reproduction in clean `git worktree` + positive Leave-One-Out rent lift |
+| **Tier 2: Multi-Subsystem Targets** | State machines, gateways, storage engines (`50K–300K` LoC) | `$25–$50` / `2h–6h` | Full forward/backward pincer in `.ajar/REALITY.md`, clean `45m` pivot, `92%` drain to `C3` |
+| **Tier 3: Deep Multi-Hop Campaigns** | Toolchains, runtimes, monorepos (`300K+` LoC) | `$50+` / `6h+` | Multi-hop `EffectType`/`WISH` chains verified end-to-end to `C3` and `100/100` voice-linted advisories |
+
+### Canonical Operator Flow
+
+```bash
+# 1. Confirm harness integrity and Phase-0 deterministic probes
+python3 extra/sz_ajar.py .
+ajar bench --phase0
+
+# 2. Run the 8-worker autonomous swarm (45m pivot, 65%/70% relay, 92% drain)
+ajar run <repo> --workers 8 --budget-usd 50 --hours 6 --profile upstream
+
+# 3. Re-run or inspect 5-stage mechanical C3 verification for candidates
+ajar verify <repo> --runs 3 --profile upstream
+
+# 4. Export voice-linted C3 advisories and hardening notes
+ajar report <repo> --out ./reports
 ```
 
 ---
 
-## 3. `Ajar v3.5` Horizon Roadmap
+## 4. Active Engineering Roadmap (`v3.6+`)
 
-`Ajar v3.5` builds on `v3.4`'s deterministic SQLite state engine and strict zero-LLM core invariant across four engineering tracks:
-
-1. **Tree-Search MCTS over Conjunctive AND-OR Hypergraphs:**
-   - Generalize 1-link `ah_puct_score` cut-lemma ranking into full Selection / Expansion / Backpropagation Monte Carlo Tree Search over conjunctive hypergraph states `(held_tags, cleared_guards, snapshot_id)`, propagating empirical `bridge` and `slice-probe` outcomes up ancestor hyperedges.
-2. **Persistent Single-Tenant Attack-Surface Knowledge Graph Across Repositories:**
-   - Persist tenant-isolated `ajar-platform-graph/2` invariants, `certified_bindings`, `surface_drivers`, and `trust_gadget` catalogs across coupled microservice repositories and incremental `ajar init --diff <base..head> --parent-run <id>` PR reviews with zero cross-tenant state sharing.
-3. **C and Native Micro-Fuzz Runtime Harnesses:**
-   - Synthesize bounded in-process `libFuzzer` / sanitizer micro-harnesses inside isolated `repro/slot-<k>` worktrees when `ajar repro slice-probe` identifies narrow arithmetic, framing, or state-flag guards (`FIRST_UNREACHED_AFTER_GUARD`) blocking deep parser sinks.
-4. **Copy-on-Write (`reflink` / Overlay) Snapshot Slots:**
-   - Replace full directory copies and tarball extraction across `repro/slot-<k>` and `ajar chain probe --from-snapshot` with Copy-on-Write filesystem clones (`cp --reflink=auto`, APFS `clonefile`, or user-space overlay mounts with automatic fallback), cutting large-repository slot reset latency to sub-second overhead.
+1. **Empirical Ring-1 Ablation Sweeps:** Measure Leave-One-Out lift across all 7 `--disable-*` flags on Tier 1 and Tier 2 benchmarks and evict or simplify any muscle that fails `evaluate_rent_rule`.
+2. **Deeper Polyglot Build Profiles:** Expand `autobuild.py` recipes and Build Doctor heuristics across C/C++ (`CMake`, `Meson`, `Autotools`), Rust (`cargo`), Go, Foundry, and OSS-Fuzz targets while keeping `.ajar/build.sh` fast and hermetic.
+3. **End-to-End Multi-Hop Chain Synthesis:** Improve `chain_weaver.py` `EffectType` / `CarrierKind` joins and `Input Encoder` payload generation so multi-step chains consistently clear 5-stage `C3` verification.
+4. **Zero-Friction Maintainer Deliverables:** Keep `ajar report` + `skills/security-advisory-report/scripts/report_voice_lint.py` locked at `100/100` mechanical voice hygiene with zero internal jargon or host paths.

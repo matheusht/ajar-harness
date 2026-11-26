@@ -138,6 +138,20 @@ def ajar_dir(repo: Path) -> Path:
     return target
 
 
+SCRUB_ENV_TOKENS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "AUTH", "CREDENTIAL")
+
+
+def scrub_subprocess_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    clean = {
+        k: v
+        for k, v in os.environ.items()
+        if not any(tok in k.upper() for tok in SCRUB_ENV_TOKENS)
+    }
+    if extra:
+        clean.update(extra)
+    return clean
+
+
 def append_jsonl(path: Path, record: dict[str, Any] | Any) -> None:
     dst = Path(path)
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -279,11 +293,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.phase0:
             probes = bench.run_phase0_probes(out_dir)
             print(json.dumps({"probes": probes}, sort_keys=True))
-            return 0 if all(probes.values()) else 1
+            return 0 if all(bool(v.get("passed", False)) for v in probes.values()) else 1
         suite = (args.suite_opt or args.suite or Path("benchmarks")).resolve()
         res = bench.run_bench(suite=suite, out_dir=out_dir, ablation=ablation)
         print(json.dumps(res, sort_keys=True))
-        return 0
+        return 0 if res.get("all_passed", False) else 1
 
     if args.command == "verify":
         from ajar.llm import StdlibLLMClient, has_configured_api_key
@@ -307,8 +321,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         repo = (args.repo_opt or args.repo or Path(".")).resolve()
         out_dir = (args.out or (ajar_dir(repo) / "reports")).resolve()
-        export_reports(repo, out_dir)
-        return 0
+        rep = export_reports(repo, out_dir)
+        return 0 if rep.get("lint_passed", True) else 1
 
     return 2
 

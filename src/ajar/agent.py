@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol, runtime_checkable
 
-from ajar.cli import Candidate, Span, dataclass_from_dict
+from ajar.cli import Candidate, Span, dataclass_from_dict, scrub_subprocess_env
 from ajar.llm import ROLE_MODEL_MAP, BudgetExhaustedError, CostMeter, LLMClient, ToolCall
 
 SOFT_CAPSULE_RATIO = 0.65
@@ -141,6 +141,7 @@ class WorkspaceTools:
         proc = subprocess.run(
             cmd,
             cwd=str(self.root),
+            env=scrub_subprocess_env(),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -188,6 +189,7 @@ class WorkspaceTools:
         proc = subprocess.Popen(
             ["/bin/sh", "-c", cmd],
             cwd=str(self.root),
+            env=scrub_subprocess_env(),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,

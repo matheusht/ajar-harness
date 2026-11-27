@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import os
 import shutil
 import signal
 import subprocess
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol, runtime_checkable
 
@@ -17,6 +20,22 @@ from ajar.llm import ROLE_MODEL_MAP, BudgetExhaustedError, CostMeter, LLMClient,
 SOFT_CAPSULE_RATIO = 0.65
 HARD_RECYCLE_RATIO = 0.70
 TOKEN_WINDOW_GUARD_RATIO = 0.92
+TOOL_EXECUTOR_MAX_WORKERS = 32
+PROTECTED_BUILD_PATHS: frozenset[str] = frozenset({
+    ".ajar/build.sh",
+    ".ajar/build_recipe.json",
+})
+_TOOL_EXECUTOR: ThreadPoolExecutor | None = None
+
+
+def _get_tool_executor() -> ThreadPoolExecutor:
+    global _TOOL_EXECUTOR
+    if _TOOL_EXECUTOR is None:
+        _TOOL_EXECUTOR = ThreadPoolExecutor(
+            max_workers=TOOL_EXECUTOR_MAX_WORKERS,
+            thread_name_prefix="ajar-tool",
+        )
+    return _TOOL_EXECUTOR
 
 
 def _normalize_rel_path(raw_path: str) -> str:
@@ -113,9 +132,14 @@ class WorkspaceTools:
         rel = "." if candidate == self.root else candidate.relative_to(self.root).as_posix()
         return candidate, rel
 
-    def _enforce_write_allowed(self, rel: str) -> None:
-        if self.write_allowlist is not None and rel not in self.write_allowlist:
-            raise PermissionError(f"Write denied by allowlist for path: {rel}")
+    def _enforce_write_allowed(self, rel: str, raw_path: str = "") -> None:
+        if self.write_allowlist is not None:
+            if rel not in self.write_allowlist:
+                raise PermissionError(f"Write denied by allowlist for path: {rel}")
+            return
+        lex_rel = _normalize_rel_path(os.path.normpath(raw_path)) if raw_path else rel
+        if rel in PROTECTED_BUILD_PATHS or lex_rel in PROTECTED_BUILD_PATHS:
+            raise PermissionError(f"Write denied to protected build artifact: {rel}")
 
     def read_file(self, path: str, start: int = 1, end: int = 200) -> str:
         target, rel = self._resolve_safe(path)
@@ -154,7 +178,7 @@ class WorkspaceTools:
 
     def write_file(self, path: str, content: str) -> str:
         target, rel = self._resolve_safe(path)
-        self._enforce_write_allowed(rel)
+        self._enforce_write_allowed(rel, path)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         if rel.endswith(".sh"):
@@ -165,7 +189,7 @@ class WorkspaceTools:
         if new is None:
             return self.write_file(path, old)
         target, rel = self._resolve_safe(path)
-        self._enforce_write_allowed(rel)
+        self._enforce_write_allowed(rel, path)
         if not target.exists():
             if old != "":
                 raise FileNotFoundError(f"Cannot match non-empty old text in missing file: {rel}")
@@ -403,6 +427,7 @@ async def run_worker_loop(
     cost_meter: CostMeter | None = None,
     max_steps: int = 32,
     context_limit: int | None = None,
+    on_candidate: Callable[[Candidate], Any] | None = None,
 ) -> dict[str, Any]:
     active_hooks: AgentHooks = hooks if hooks is not None else NullHooks()
     spec = ROLE_MODEL_MAP.get(role, ROLE_MODEL_MAP["auditor"])
@@ -418,6 +443,7 @@ async def run_worker_loop(
     final_text = ""
     status = "max_steps"
     step = 0
+    loop = asyncio.get_running_loop()
 
     for step in range(1, max_steps + 1):  # noqa: B007
         if cost_meter is not None and cost_meter.drain_triggered:
@@ -509,11 +535,13 @@ async def run_worker_loop(
                     allowed, reason = (True, "")
                 if allowed:
                     candidates.append(cand)
+                    if on_candidate is not None:
+                        await _maybe_await(on_candidate(cand))
                     tool_out = f"ACCEPTED: {cand.id}"
                 else:
                     tool_out = f"REJECTED_PRE_PROVE: {reason}"
             else:
-                tool_out = _run_tool_call(tools, tc)
+                tool_out = await loop.run_in_executor(_get_tool_executor(), _run_tool_call, tools, tc)
 
             if len(tool_out) > max_tool_chars:
                 window_guard_hits += 1

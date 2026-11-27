@@ -136,6 +136,12 @@ def _detect_tier0_commands(repo: Path) -> tuple[str, list[str], str]:
     return ("static", ['echo "No Tier-0 build recipe detected" >&2', "exit 2"], "")
 
 
+def _sha256_file(path: Path) -> str:
+    if not path.is_file() or path.is_symlink():
+        return ""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def synthesize_build_recipe(repo: Path, profile: str = "upstream") -> BuildRecipe:
     repo_path = Path(repo)
     if profile not in BUILD_PROFILES:
@@ -146,6 +152,7 @@ def synthesize_build_recipe(repo: Path, profile: str = "upstream") -> BuildRecip
         return BuildRecipe(
             profile=profile,
             build_script="bash .ajar/build.sh",
+            build_script_sha256=_sha256_file(script_file),
             test_cmd="",
             static_only=False,
             verified=False,
@@ -176,6 +183,7 @@ def synthesize_build_recipe(repo: Path, profile: str = "upstream") -> BuildRecip
     return BuildRecipe(
         profile=profile,
         build_script="bash .ajar/build.sh" if build_system != "static" else "",
+        build_script_sha256=_sha256_file(script_file) if build_system != "static" else "",
         test_cmd=test_cmd,
         static_only=build_system == "static",
         verified=False,
@@ -286,6 +294,7 @@ async def run_build_doctor(
         return replace(
             recipe,
             build_script="bash .ajar/build.sh",
+            build_script_sha256=_sha256_file(repo_path / ".ajar" / "build.sh"),
             static_only=False,
             verified=True,
             last_error="",
@@ -330,6 +339,7 @@ async def run_build_doctor(
             return replace(
                 recipe,
                 build_script="bash .ajar/build.sh",
+                build_script_sha256=_sha256_file(script_path),
                 static_only=False,
                 verified=True,
                 last_error="",

@@ -54,6 +54,7 @@ class Span:
 class BuildRecipe:
     profile: str = "upstream"
     build_script: str = ""
+    build_script_sha256: str = ""
     test_cmd: str = ""
     static_only: bool = False
     verified: bool = False
@@ -120,6 +121,7 @@ class RunConfig:
     budget_usd: float = 50.0
     hours: float = 6.0
     profile: str = "upstream"
+    resume: bool = False
     ablation: AblationConfig = field(default_factory=AblationConfig)
 
     def __post_init__(self) -> None:
@@ -220,6 +222,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--budget-usd", "--budget", dest="budget_usd", type=float, default=50.0)
     p_run.add_argument("--hours", type=float, default=6.0)
     p_run.add_argument("--profile", type=str, default="upstream")
+    p_run.add_argument("--resume", action="store_true", default=False)
     _attach_ablation_args(p_run, suppress=True)
 
     p_verify = sub.add_parser("verify", help="Mechanically verify candidate findings to C3")
@@ -278,6 +281,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             budget_usd=args.budget_usd,
             hours=args.hours,
             profile=args.profile,
+            resume=bool(args.resume),
             ablation=ablation,
         )
         from ajar import swarm

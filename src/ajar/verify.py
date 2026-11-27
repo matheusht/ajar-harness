@@ -6,6 +6,7 @@ import ast
 import asyncio
 import hashlib
 import inspect
+import json
 import os
 import re
 import shlex
@@ -141,9 +142,18 @@ def clean_worktree(repo: Path, mount_deps: Sequence[str] | None = None) -> Itera
                 symlinks=True,
                 ignore=shutil.ignore_patterns(".git", "__pycache__"),
             )
-        elif (src_repo / ".ajar" / "build.sh").is_file() and not (wt / ".ajar" / "build.sh").exists():
-            (wt / ".ajar").mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src_repo / ".ajar" / "build.sh", wt / ".ajar" / "build.sh")
+        src_build_sh = src_repo / ".ajar" / "build.sh"
+        wt_build_sh = wt / ".ajar" / "build.sh"
+        if src_build_sh.is_symlink() or wt_build_sh.is_symlink():
+            wt_build_sh.unlink(missing_ok=True)
+        elif src_build_sh.is_file():
+            wt_build_sh.parent.mkdir(parents=True, exist_ok=True)
+            if wt_build_sh.exists():
+                wt_build_sh.unlink()
+            shutil.copyfile(src_build_sh, wt_build_sh)
+            os.chmod(wt_build_sh, 0o555)
+        elif wt_build_sh.is_file():
+            os.chmod(wt_build_sh, 0o555)
         deps_to_link = list(mount_deps if mount_deps is not None else DEFAULT_MOUNT_DEPS)
         for sub_path in _parse_gitmodules_paths(src_repo):
             if sub_path not in deps_to_link:
@@ -663,6 +673,58 @@ def _collect_critic_evidence(
     }
 
 
+_STRICT_APPROVE_LINE_RE = re.compile(r"^\s*APPROVE(?:D)?(?:\s*$|\s*[:\-])")
+_STRICT_REJECT_LINE_RE = re.compile(r"^\s*(?:REJECT(?:ED)?|DENY|INVALID)(?:\s*$|\s*[:\-])")
+
+
+def _parse_critic_verdict(raw_text: str) -> tuple[str, str]:
+    """Fail-closed Critic verdict parser: accepts only strict JSON or leading APPROVE line."""
+    text = (raw_text or "").strip()
+    if not text:
+        return "REJECTED", "empty critic response"
+
+    json_candidate = text
+    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+    if fence:
+        json_candidate = fence.group(1).strip()
+    if json_candidate.startswith("{") and json_candidate.endswith("}"):
+        try:
+            obj = json.loads(json_candidate)
+        except ValueError:
+            return "REJECTED", f"malformed critic json: {text[:200]}"
+        if isinstance(obj, dict):
+            verdict = str(obj.get("verdict", "")).strip().upper()
+            reason = str(obj.get("reason") or obj.get("notes") or text)[:240]
+            if verdict in ("APPROVE", "APPROVED"):
+                return "APPROVED", reason
+            return "REJECTED", reason
+        return "REJECTED", text[:240]
+
+    first_line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+    if _STRICT_APPROVE_LINE_RE.match(first_line):
+        return "APPROVED", text[:240]
+    if _STRICT_REJECT_LINE_RE.match(first_line):
+        return "REJECTED", text[:240]
+    return "REJECTED", text[:240]
+
+
+def _check_build_sh_integrity(root: Path, recipe: BuildRecipe) -> tuple[bool, str]:
+    root_real = Path(root).resolve()
+    build_sh = root_real / ".ajar" / "build.sh"
+    if build_sh.is_symlink():
+        resolved = build_sh.resolve()
+        if resolved != root_real and root_real not in resolved.parents:
+            return False, "build.sh symlink escapes repository"
+        return False, "build.sh must not be a symlink"
+    if recipe.build_script_sha256:
+        if not build_sh.is_file():
+            return False, "build.sh missing for pinned sha256"
+        actual = hashlib.sha256(build_sh.read_bytes()).hexdigest()
+        if actual != recipe.build_script_sha256:
+            return False, "build.sh sha256 mismatch: tampering detected"
+    return True, ""
+
+
 def _invoke_critic_sync(
     llm: LLMClient,
     cand: Candidate,
@@ -672,12 +734,13 @@ def _invoke_critic_sync(
     critic_spec = resolve_role_model("critic")
     ev = evidence or {}
     sections = [
-        f"Candidate: {cand.id} - {cand.title}",
-        f"Severity: {cand.severity}",
-        f"Sink: {cand.sink_symbol}",
-        f"Repro: {cand.repro_cmd}",
-        f"Crash: {sig.kind} ({sig.summary}) frames={sig.top_frames}",
-        f"Root cause: {cand.root_cause}",
+        f"Candidate ID: {cand.id}",
+        (
+            f"Target Metadata: severity={cand.severity} entry_span={cand.entry_span} "
+            f"sink_symbol={cand.sink_symbol} build_profile={cand.build_profile}"
+        ),
+        f"Repro Command: {cand.repro_cmd}",
+        f"Crash Signature: {sig.kind} ({sig.summary}) frames={sig.top_frames}",
         f"Mutated PoV / Control Summary: {ev.get('summary', 'none')}",
     ]
     if ev.get("reality"):
@@ -688,11 +751,12 @@ def _invoke_critic_sync(
     sections.append(f"Post-patch Output:\n{ev.get('post_out', '')[-2500:]}")
     sections.append(f"Patch Diff:\n{cand.patch_diff[:4000]}")
     sections.append(
-        "Verify whether the repro triggers a genuine target defect and the patch fixes "
-        "the root cause without masking symptoms. Reply APPROVE or REJECT with brief notes."
+        "Verify from mechanical evidence alone whether the repro triggers a genuine target "
+        "defect and the patch fixes the root cause without masking symptoms. "
+        'Reply ONLY with strict JSON: {"verdict": "APPROVE" | "REJECT", "reason": "..."}'
     )
     msgs = [{"role": "user", "content": "\n\n".join(sections)}]
-    sys_msg = "You are an adversarial Cross-Family C3 Security Critic."
+    sys_msg = "You are an adversarial Blind Cross-Family C3 Security Critic."
     if hasattr(llm, "complete_sync"):
         return llm.complete_sync(
             msgs, role="critic", model=critic_spec, system=sys_msg, allow_drain_reserve=True
@@ -739,6 +803,7 @@ def verify_candidate(
         return Verdict(cand.id, "UNVERIFIED", "C1", 0, 0, critic_verdict="SKIPPED", notes="static/incomplete")
 
     for ok, reason in (
+        _check_build_sh_integrity(repo, active_recipe),
         _check_patch_policy(cand),
         _check_output_suppression_patch(cand.patch_diff),
         _check_literal_overfit_patch(cand),
@@ -756,6 +821,9 @@ def verify_candidate(
     ctrl_cmd = cand.control_cmd.strip()
 
     with clean_worktree(repo) as wt:
+        ok_wt_build, wt_build_reason = _check_build_sh_integrity(wt, active_recipe)
+        if not ok_wt_build:
+            return Verdict(cand.id, "REJECTED", "C0", 0, 0, critic_verdict="SKIPPED", notes=wt_build_reason)
         if active_recipe.build_script.strip():
             b_rc, _ = _run_proc(active_recipe.build_script, cwd=wt, env=run_env, timeout=180)
             if b_rc != 0:
@@ -800,6 +868,12 @@ def verify_candidate(
             return Verdict(cand.id, "REJECTED", "C0", pre_failed, 0, asdict(ref_sig), notes=patch_note)
 
         if active_recipe.build_script.strip():
+            ok_rb_build, rb_reason = _check_build_sh_integrity(wt, active_recipe)
+            if not ok_rb_build:
+                return Verdict(
+                    cand.id, "REJECTED", "C0", pre_failed, 0, asdict(ref_sig),
+                    critic_verdict="SKIPPED", notes=rb_reason,
+                )
             rb_rc, _ = _run_proc(active_recipe.build_script, cwd=wt, env=run_env, timeout=180)
             if rb_rc != 0:
                 return Verdict(
@@ -857,23 +931,13 @@ def verify_candidate(
         )
 
     critic_resp = _invoke_critic_sync(llm, cand, ref_sig, evidence=evidence)
-    upper = critic_resp.content.strip().upper()
-    lead_tok = re.split(r"[\s:.,;-]+", upper, maxsplit=1)[0] if upper else ""
-    is_approve = lead_tok in ("APPROVE", "APPROVED", "CONFIRM", "VALID", "PASS", "ACCEPT", "LGTM")
-    is_reject = lead_tok in ("REJECT", "REJECTED", "INVALID", "DENY") or (
-        not is_approve and any(tok in upper for tok in ("REJECT", "FALSE POSITIVE", "INVALID"))
-    )
-    if is_reject:
-        return Verdict(
-            cand.id, "REJECTED", "C2", pre_failed, post_passed, asdict(ref_sig),
-            critic_verdict="REJECTED", notes=critic_resp.content.strip()[:240],
-        )
-    if is_approve or any(tok in upper for tok in ("APPROVE", "CONFIRM", "VALID", "PASS", "ACCEPT", "LGTM")):
+    critic_verdict, critic_notes = _parse_critic_verdict(critic_resp.content)
+    if critic_verdict == "APPROVED":
         return Verdict(
             cand.id, "VERIFIED", "C3", pre_failed, post_passed, asdict(ref_sig),
-            critic_verdict="APPROVED", notes=critic_resp.content.strip()[:240],
+            critic_verdict="APPROVED", notes=critic_notes,
         )
     return Verdict(
-        cand.id, "VERIFIED", "C2", pre_failed, post_passed, asdict(ref_sig),
-        critic_verdict="INCONCLUSIVE", notes=critic_resp.content.strip()[:240],
+        cand.id, "REJECTED", "C2", pre_failed, post_passed, asdict(ref_sig),
+        critic_verdict="REJECTED", notes=critic_notes,
     )

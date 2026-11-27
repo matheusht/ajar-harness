@@ -1,12 +1,12 @@
-# Ajar Agent Instructions (v3.6-Balanced)
+# Ajar Agent Instructions (v3.6.2)
 
 Ajar (built by Ajar Labs) is a Three-Ring Earned-Mass autonomous security verification engine (`L4 · C3 · B3`).
-Your product is mechanical `C3` proof in a clean `git worktree`, not plausible prose. Every external advisory must pass 5-stage `C3` verification (`3x` attributed fail -> fuzzy patch apply -> mandatory post-patch rebuild -> `3x` pass + upstream suite -> Cross-Family Critic).
+Your product is mechanical `C3` proof in a clean `git worktree`, not plausible prose. Every external advisory must pass 5-stage `C3` verification (`3x` attributed fail -> fuzzy patch apply -> mandatory post-patch rebuild -> `3x` pass + upstream suite -> Blind Cross-Family Critic).
 
 ## Three-Ring Architecture (Policed by `extra/sz_ajar.py`)
 
-1. **Ring 0 (`0` upward imports, sole `git worktree` owner, telemetry-tracked SLOC):** `cli.py` (4 verbs: `run`, `verify`, `bench`, `report` + `--disable-*` ablation flags for present Ring-1 modules), `llm.py` (stdlib async HTTP + reservation `CostMeter`), `agent.py` (free bash/read/search/edit inner loop + `SpanTracker`), `verify.py` (sole `git worktree` owner & 5-stage `C3` judge).
-2. **Ring 1 (Pro-Deletion Earned-Mass: `0..7` Toggleable Modules):** any subset of `repomap.py` (PageRank + `.ajar/REALITY.md`), `whiteboard.py` (lock-free `events.jsonl` -> atomic `WHITEBOARD.md`), `epistemic.py` (`seen_spans` guard), `chain_weaver.py` (12-Type `EffectType` + backward `WISH` abduction), `autobuild.py` (polyglot `.ajar/build.sh` + write-jailed Build Doctor + `Input Encoder`), `swarm.py` (8-worker async + 45m pivot + 65%/70% relay + 92% drain), `bench.py` (local Phase-0 + Leave-One-Out rent scorer); deleting Ring-1 modules passes `sz_ajar.py`.
+1. **Ring 0 (`0` upward imports, sole `git worktree` owner, telemetry-tracked SLOC):** `cli.py` (4 verbs: `run`, `verify`, `bench`, `report` + `--disable-*` ablation flags for present Ring-1 modules), `llm.py` (stdlib async HTTP + prompt caching + dynamic cross-family routing + `CostMeter`), `agent.py` (non-blocking `ThreadPoolExecutor(32)` tool loop + `SpanTracker`), `verify.py` (sole `git worktree` owner, pinned read-only `build.sh`, & fail-closed Blind `C3` judge).
+2. **Ring 1 (Pro-Deletion Earned-Mass: `0..7` Toggleable Modules):** any subset of `repomap.py` (PageRank + `.ajar/REALITY.md`), `whiteboard.py` (SQLite WAL + FTS5 + atomic `try_claim` + `<=8KB` prioritized `WHITEBOARD.md`), `epistemic.py` (`seen_spans` guard), `chain_weaver.py` (12-Type `EffectType` + backward `WISH` abduction), `autobuild.py` (polyglot `.ajar/build.sh` + SHA-256 pin + write-jailed Build Doctor + `Input Encoder`), `swarm.py` (Erlang `one_for_one` async swarm + streaming `c_2>=2` verifiers + CONWIP `<=2` + `--resume`), `bench.py` (local Phase-0 + Leave-One-Out rent scorer); deleting Ring-1 modules passes `sz_ajar.py`.
 3. **Ring 2 (Uncapped Assurance):** `tests/`, `extra/sz_ajar.py`, `extra/report.py`.
 
 ## Core Workflow (`ajar run` -> `ajar verify` -> `ajar report`)

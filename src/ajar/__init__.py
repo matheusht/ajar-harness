@@ -1,8 +1,8 @@
-"""AJAR v3.6 — Three-Ring Earned-Mass Autonomous Verification Engine."""
+"""AJAR v3.6.2 — Three-Ring Earned-Mass Autonomous Verification Engine."""
 
 from __future__ import annotations
 
-__version__ = "3.6.0"
+__version__ = "3.6.2"
 
 RING0_MODULES = (
     "cli.py",

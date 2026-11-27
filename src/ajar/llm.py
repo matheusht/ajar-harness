@@ -3,18 +3,24 @@
 from __future__ import annotations
 
 import asyncio
+import email.utils
+import functools
 import json
 import os
+import random
 import threading
 import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 DRAIN_RESERVE_RATIO = 0.92
 HARD_CEILING_RATIO = 0.99
+DEFAULT_HTTP_CONCURRENCY = 64
+LONG_PREFIX_CACHE_CHARS = 1024
 
 
 class BudgetExhaustedError(RuntimeError):
@@ -28,10 +34,24 @@ class ModelSpec:
     input_usd_1m: float
     output_usd_1m: float
     context_limit: int = 200_000
+    cached_input_usd_1m: float | None = None
 
-    def estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
-        in_cost = max(0, input_tokens) * self.input_usd_1m
-        out_cost = max(0, output_tokens) * self.output_usd_1m
+    def estimate_cost(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        cached_input_tokens: int = 0,
+    ) -> float:
+        total_in = max(0, int(input_tokens))
+        cached = max(0, min(int(cached_input_tokens), total_in))
+        uncached = total_in - cached
+        cached_rate = (
+            self.cached_input_usd_1m
+            if self.cached_input_usd_1m is not None
+            else (self.input_usd_1m * 0.1)
+        )
+        in_cost = (uncached * self.input_usd_1m) + (cached * cached_rate)
+        out_cost = max(0, int(output_tokens)) * self.output_usd_1m
         return (in_cost + out_cost) / 1_000_000.0
 
 
@@ -40,28 +60,72 @@ GLM_PRO_SPEC = ModelSpec("glm-5.3", "zhipu-glm", 1.00, 4.00, 200_000)
 CLAUDE_CRITIC_SPEC = ModelSpec("claude-sonnet-4-6", "anthropic-claude", 3.00, 15.00, 200_000)
 
 ROLE_MODEL_MAP: dict[str, ModelSpec] = {
-    "scout": GLM_FLASH_SPEC, "auditor": GLM_PRO_SPEC, "weaver": GLM_PRO_SPEC,
-    "doctor": GLM_FLASH_SPEC, "critic": CLAUDE_CRITIC_SPEC,
+    "scout": GLM_FLASH_SPEC,
+    "auditor": GLM_PRO_SPEC,
+    "weaver": GLM_PRO_SPEC,
+    "doctor": GLM_FLASH_SPEC,
+    "critic": CLAUDE_CRITIC_SPEC,
 }
 
 MODEL_REGISTRY: dict[str, ModelSpec] = {
     s.model_id: s for s in (GLM_FLASH_SPEC, GLM_PRO_SPEC, CLAUDE_CRITIC_SPEC)
 }
 
+CRITIC_FALLBACK_SPECS: tuple[ModelSpec, ...] = (CLAUDE_CRITIC_SPEC, GLM_PRO_SPEC)
+
+
+def _infer_model_family(model_id: str) -> str:
+    low = model_id.lower().strip()
+    if low in MODEL_REGISTRY:
+        return MODEL_REGISTRY[low].family
+    if "claude" in low or low.startswith("anthropic/"):
+        return "anthropic-claude"
+    if "glm" in low or "zhipu" in low or low.startswith("z-ai/"):
+        return "zhipu-glm"
+    if "gemini" in low or low.startswith("google/"):
+        return "google-gemini"
+    if "deepseek" in low:
+        return "deepseek"
+    if any(k in low for k in ("gpt-", "o1-", "o3-", "o4-", "openai/")):
+        return "openai"
+    return low.split("/", 1)[0] if "/" in low else "custom"
+
 
 def resolve_role_model(
-    role: str, override: ModelSpec | str | None = None, role_map: Mapping[str, ModelSpec] = ROLE_MODEL_MAP,
+    role: str,
+    override: ModelSpec | str | None = None,
+    role_map: Mapping[str, ModelSpec] = ROLE_MODEL_MAP,
+    hunter_model: ModelSpec | str | None = None,
 ) -> ModelSpec:
     if isinstance(override, ModelSpec):
         spec = override
     elif isinstance(override, str) and override:
-        spec = MODEL_REGISTRY.get(override, ModelSpec(override, "custom", 1.0, 4.0))
+        spec = MODEL_REGISTRY.get(
+            override,
+            ModelSpec(override, _infer_model_family(override), 1.0, 4.0),
+        )
     else:
         if role not in role_map:
             raise KeyError(f"Unknown agent role: {role}")
         spec = role_map[role]
-    if role == "critic" and spec.family == "zhipu-glm":
-        raise ValueError("Cross-family critic role must not use family 'zhipu-glm'")
+
+    if role == "critic":
+        if isinstance(hunter_model, ModelSpec):
+            hunter_family = hunter_model.family
+        elif isinstance(hunter_model, str) and hunter_model:
+            hunter_family = _infer_model_family(hunter_model)
+        else:
+            hunter_spec = role_map.get("auditor", ROLE_MODEL_MAP["auditor"])
+            hunter_family = hunter_spec.family
+        if spec.family == hunter_family:
+            if override is None and role_map is ROLE_MODEL_MAP:
+                for alt in CRITIC_FALLBACK_SPECS:
+                    if alt.family != hunter_family:
+                        return alt
+            raise ValueError(
+                f"Cross-family critic role must differ from hunter family "
+                f"'{hunter_family}' (got '{spec.family}')"
+            )
     return spec
 
 
@@ -89,18 +153,18 @@ class CostMeter:
         with self._lock:
             if self.budget_usd <= 0.0:
                 return True
-            return (self.spent_usd + self.reserved_usd) >= (self.budget_usd * DRAIN_RESERVE_RATIO)
+            return self.spent_usd >= (self.budget_usd * DRAIN_RESERVE_RATIO)
 
     def reserve(self, est_usd: float, allow_drain_reserve: bool = False) -> bool:
         est = max(0.0, float(est_usd))
         with self._lock:
             if self.budget_usd <= 0.0:
                 return False
-            committed = self.spent_usd + self.reserved_usd
             drain_cap = self.budget_usd * DRAIN_RESERVE_RATIO
             hard_cap = self.budget_usd * HARD_CEILING_RATIO
-            if not allow_drain_reserve and committed >= drain_cap:
+            if not allow_drain_reserve and self.spent_usd >= drain_cap:
                 return False
+            committed = self.spent_usd + self.reserved_usd
             limit = hard_cap if allow_drain_reserve else drain_cap
             if committed + est > limit + 1e-12:
                 return False
@@ -144,6 +208,7 @@ class LLMResponse:
     model_id: str = ""
     cost_usd: float = 0.0
     raw: dict[str, Any] = field(default_factory=dict)
+    cached_input_tokens: int = 0
 
     def __getitem__(self, key: str) -> Any:
         return asdict(self)[key]
@@ -152,16 +217,28 @@ class LLMResponse:
 @runtime_checkable
 class LLMClient(Protocol):
     async def complete(
-        self, messages: list[dict[str, Any]], *, role: str = "auditor",
-        model: ModelSpec | str | None = None, tools: list[dict[str, Any]] | None = None,
-        system: str = "", max_tokens: int = 4096, temperature: float = 0.0,
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        role: str = "auditor",
+        model: ModelSpec | str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        system: str = "",
+        max_tokens: int = 4096,
+        temperature: float = 0.0,
         allow_drain_reserve: bool = False,
     ) -> LLMResponse: ...
 
     def complete_sync(
-        self, messages: list[dict[str, Any]], *, role: str = "auditor",
-        model: ModelSpec | str | None = None, tools: list[dict[str, Any]] | None = None,
-        system: str = "", max_tokens: int = 4096, temperature: float = 0.0,
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        role: str = "auditor",
+        model: ModelSpec | str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        system: str = "",
+        max_tokens: int = 4096,
+        temperature: float = 0.0,
         allow_drain_reserve: bool = False,
     ) -> LLMResponse: ...
 
@@ -192,6 +269,62 @@ def _normalize_openai_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]
     return normalized
 
 
+def _parse_retry_after(raw: str | None) -> float | None:
+    if not raw:
+        return None
+    cleaned = raw.strip()
+    if not cleaned:
+        return None
+    try:
+        return max(0.0, float(cleaned))
+    except ValueError:
+        pass
+    try:
+        dt = email.utils.parsedate_to_datetime(cleaned)
+        return max(0.0, dt.timestamp() - time.time())
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _compute_retry_delay(
+    attempt: int,
+    base_backoff_s: float,
+    retry_after: str | None = None,
+) -> float:
+    ra_sec = _parse_retry_after(retry_after)
+    if ra_sec is not None:
+        jitter_cap = min(0.25, max(0.01, base_backoff_s * 0.25))
+        return float(ra_sec + random.uniform(0.0, jitter_cap))
+    exp = max(0.0, float(base_backoff_s)) * float(1 << max(0, int(attempt)))
+    return float(exp * (0.5 + 0.5 * random.random()))
+
+
+def _with_prefix_cache_control(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    marked = False
+    for msg in messages:
+        content = msg.get("content")
+        if (
+            not marked
+            and msg.get("role") == "user"
+            and isinstance(content, str)
+            and len(content) >= LONG_PREFIX_CACHE_CHARS
+        ):
+            copied = dict(msg)
+            copied["content"] = [
+                {
+                    "type": "text",
+                    "text": content,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+            out.append(copied)
+            marked = True
+        else:
+            out.append(msg)
+    return out
+
+
 class StdlibLLMClient:
     """OpenRouter, OpenAI, and Anthropic compatible stdlib HTTP client."""
 
@@ -203,6 +336,7 @@ class StdlibLLMClient:
         timeout_s: float = 90.0,
         max_retries: int = 4,
         base_backoff_s: float = 0.5,
+        max_concurrency: int | None = None,
     ) -> None:
         self.cost_meter = cost_meter
         self.api_key = (
@@ -220,6 +354,25 @@ class StdlibLLMClient:
         self.timeout_s = timeout_s
         self.max_retries = max_retries
         self.base_backoff_s = base_backoff_s
+        env_conc = os.environ.get("AJAR_LLM_MAX_CONCURRENCY", "").strip()
+        raw_conc = (
+            max_concurrency
+            if max_concurrency is not None
+            else (int(env_conc) if env_conc.isdigit() else DEFAULT_HTTP_CONCURRENCY)
+        )
+        self.max_concurrency = max(1, int(raw_conc))
+        self._http_executor: ThreadPoolExecutor | None = None
+        self._exec_lock = threading.Lock()
+
+    def _get_http_executor(self) -> ThreadPoolExecutor:
+        if self._http_executor is None:
+            with self._exec_lock:
+                if self._http_executor is None:
+                    self._http_executor = ThreadPoolExecutor(
+                        max_workers=self.max_concurrency,
+                        thread_name_prefix="ajar-http",
+                    )
+        return self._http_executor
 
     def _is_anthropic_native(self) -> bool:
         return "api.anthropic.com" in self.base_url or self.base_url.endswith("/v1/messages")
@@ -238,6 +391,7 @@ class StdlibLLMClient:
             "anthropic-beta": "prompt-caching-2024-07-31",
             "X-Prompt-Cache": "ephemeral",
         }
+        cached_msgs = _with_prefix_cache_control(messages)
         if self._is_anthropic_native():
             headers["x-api-key"] = self.api_key
             headers["anthropic-version"] = "2023-06-01"
@@ -245,7 +399,7 @@ class StdlibLLMClient:
                 "model": spec.model_id,
                 "max_tokens": max_tokens,
                 "temperature": temperature,
-                "messages": messages,
+                "messages": cached_msgs,
             }
             if system:
                 body["system"] = [
@@ -273,8 +427,19 @@ class StdlibLLMClient:
             headers["X-Title"] = "ajar-ring0"
             wire_msgs: list[dict[str, Any]] = []
             if system:
-                wire_msgs.append({"role": "system", "content": system})
-            wire_msgs.extend(messages)
+                wire_msgs.append(
+                    {
+                        "role": "system",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": system,
+                                "cache_control": {"type": "ephemeral"},
+                            }
+                        ],
+                    }
+                )
+            wire_msgs.extend(cached_msgs)
             body = {
                 "model": spec.model_id,
                 "messages": wire_msgs,
@@ -288,6 +453,7 @@ class StdlibLLMClient:
     def _parse_payload(self, data: dict[str, Any], spec: ModelSpec) -> LLMResponse:
         tool_calls: list[ToolCall] = []
         text_parts: list[str] = []
+        cached_tok = 0
         if "choices" in data:
             msg = (data.get("choices") or [{}])[0].get("message") or {}
             if isinstance(msg.get("content"), str):
@@ -309,6 +475,10 @@ class StdlibLLMClient:
             usage = data.get("usage") or {}
             in_tok = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
             out_tok = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+            details = usage.get("prompt_tokens_details") or {}
+            cached_tok = int(
+                details.get("cached_tokens") or usage.get("cache_read_input_tokens") or 0
+            )
         else:
             for idx, block in enumerate(data.get("content") or []):
                 btype = block.get("type")
@@ -324,9 +494,10 @@ class StdlibLLMClient:
                         )
                     )
             usage = data.get("usage") or {}
-            in_tok = int(usage.get("input_tokens") or 0)
+            cached_tok = int(usage.get("cache_read_input_tokens") or 0)
+            in_tok = int(usage.get("input_tokens") or 0) + cached_tok
             out_tok = int(usage.get("output_tokens") or 0)
-        cost = spec.estimate_cost(in_tok, out_tok)
+        cost = spec.estimate_cost(in_tok, out_tok, cached_input_tokens=cached_tok)
         return LLMResponse(
             content="\n".join(p for p in text_parts if p),
             tool_calls=tool_calls,
@@ -335,6 +506,7 @@ class StdlibLLMClient:
             model_id=spec.model_id,
             cost_usd=cost,
             raw=data,
+            cached_input_tokens=cached_tok,
         )
 
     def complete_sync(
@@ -351,10 +523,11 @@ class StdlibLLMClient:
     ) -> LLMResponse:
         spec = resolve_role_model(role, model)
         headers, raw_body = self._build_http_payload(
-            spec, messages, tools, tools and len(tools) >= 0 and system or system, max_tokens, temperature
+            spec, messages, tools, system, max_tokens, temperature
         )
         est_in = max(1, len(raw_body) // 4)
-        est_usd = spec.estimate_cost(est_in, max_tokens // 2)
+        est_out = min(max(64, max_tokens // 8), 512)
+        est_usd = spec.estimate_cost(est_in, est_out)
         if self.cost_meter is not None:
             if not self.cost_meter.reserve(est_usd, allow_drain_reserve=allow_drain_reserve):
                 raise BudgetExhaustedError(f"Budget cap reached for role={role}")
@@ -365,6 +538,7 @@ class StdlibLLMClient:
                 req = urllib.request.Request(
                     self.base_url, data=raw_body, headers=headers, method="POST"
                 )
+                retry_after: str | None = None
                 try:
                     with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
                         decoded = json.loads(resp.read().decode("utf-8"))
@@ -376,27 +550,43 @@ class StdlibLLMClient:
                     retryable = exc.code == 429 or (500 <= exc.code < 600)
                     if not retryable or attempt >= self.max_retries:
                         raise
+                    if exc.headers is not None:
+                        retry_after = exc.headers.get("Retry-After")
                 except urllib.error.URLError as exc:
                     last_err = exc
                     if attempt >= self.max_retries:
                         raise
-                time.sleep(self.base_backoff_s * (2**attempt))
+                time.sleep(_compute_retry_delay(attempt, self.base_backoff_s, retry_after))
             raise RuntimeError(f"LLM request failed: {last_err}")
         finally:
             if self.cost_meter is not None:
                 self.cost_meter.settle(est_usd, actual_usd, spec.model_id)
 
     async def complete(
-        self, messages: list[dict[str, Any]], *, role: str = "auditor",
-        model: ModelSpec | str | None = None, tools: list[dict[str, Any]] | None = None,
-        system: str = "", max_tokens: int = 4096, temperature: float = 0.0,
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        role: str = "auditor",
+        model: ModelSpec | str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        system: str = "",
+        max_tokens: int = 4096,
+        temperature: float = 0.0,
         allow_drain_reserve: bool = False,
     ) -> LLMResponse:
-        return await asyncio.to_thread(
-            self.complete_sync, messages, role=role, model=model, tools=tools,
-            system=system, max_tokens=max_tokens, temperature=temperature,
+        loop = asyncio.get_running_loop()
+        fn = functools.partial(
+            self.complete_sync,
+            messages,
+            role=role,
+            model=model,
+            tools=tools,
+            system=system,
+            max_tokens=max_tokens,
+            temperature=temperature,
             allow_drain_reserve=allow_drain_reserve,
         )
+        return await loop.run_in_executor(self._get_http_executor(), fn)
 
 
 class MockLLMClient:
@@ -411,6 +601,7 @@ class MockLLMClient:
         self.calls: list[dict[str, Any]] = []
         self.spent_usd: float = 0.0
         self.total_tokens: int = 0
+        self._lock = threading.Lock()
 
     def _coerce(self, item: Any, spec: ModelSpec, messages: list[dict[str, Any]]) -> LLMResponse:
         if callable(item):
@@ -424,6 +615,7 @@ class MockLLMClient:
                 model_id=item.model_id or spec.model_id,
                 cost_usd=0.0,
                 raw=dict(item.raw),
+                cached_input_tokens=item.cached_input_tokens,
             )
         if isinstance(item, dict):
             tcs = [
@@ -460,17 +652,18 @@ class MockLLMClient:
         allow_drain_reserve: bool = False,
     ) -> LLMResponse:
         spec = resolve_role_model(role, model)
-        self.calls.append(
-            {
-                "role": role,
-                "model_id": spec.model_id,
-                "messages": list(messages),
-                "system": system,
-                "tools": tools,
-                "allow_drain_reserve": allow_drain_reserve,
-            }
-        )
-        nxt = self._queue.pop(0) if self._queue else ""
+        with self._lock:
+            self.calls.append(
+                {
+                    "role": role,
+                    "model_id": spec.model_id,
+                    "messages": list(messages),
+                    "system": system,
+                    "tools": tools,
+                    "allow_drain_reserve": allow_drain_reserve,
+                }
+            )
+            nxt = self._queue.pop(0) if self._queue else ""
         return self._coerce(nxt, spec, messages)
 
     async def complete(

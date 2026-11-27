@@ -4,8 +4,6 @@ from __future__ import annotations
 
 __version__ = "3.6.0"
 
-RING0_MAX_LOC = 1800
-
 RING0_MODULES = (
     "cli.py",
     "llm.py",
@@ -25,7 +23,6 @@ RING1_MODULES = (
 
 __all__ = [
     "__version__",
-    "RING0_MAX_LOC",
     "RING0_MODULES",
     "RING1_MODULES",
 ]

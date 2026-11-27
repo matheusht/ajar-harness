@@ -1,13 +1,14 @@
-"""AJAR Ring-0 mechanical C3 verification oracle, worktree isolation, and report exporter."""
+"""AJAR Ring-0 mechanical C3 verification oracle, worktree isolation, and anti-gaming guard."""
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import hashlib
 import inspect
-import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -17,18 +18,8 @@ from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, NamedTuple
 
-from ajar.cli import (
-    BuildRecipe,
-    Candidate,
-    CrashSignature,
-    Verdict,
-    ajar_dir,
-    dataclass_from_dict,
-    read_jsonl,
-    scrub_subprocess_env,
-)
+from ajar.cli import BuildRecipe, Candidate, CrashSignature, Verdict, scrub_subprocess_env
 from ajar.llm import LLMClient, LLMResponse, resolve_role_model
 
 DEFAULT_MOUNT_DEPS = ("node_modules", "vendor", "lib", ".venv", "target")
@@ -38,28 +29,43 @@ SAN_PID_RE = re.compile(r"==\d+==")
 TMP_WT_RE = re.compile(r"/[^\s:]*ajar-wt-[^/\s:]+/work/")
 PY_FRAME_RE = re.compile(r'File "([^"]+)", line (\d+), in ([^\s\n]+)')
 SAN_FRAME_RE = re.compile(r"#\d+\s+0x[0-9a-fA-F]+\s+in\s+([^\s]+)\s+([^\s]+)")
-VOICE_LINT_SCRIPT = (
-    Path(__file__).resolve().parents[2]
-    / "skills"
-    / "security-advisory-report"
-    / "scripts"
-    / "report_voice_lint.py"
+FORBIDDEN_BUILD_NAMES = frozenset({
+    "Makefile",
+    "GNUmakefile",
+    "makefile",
+    "CMakeLists.txt",
+    "build.sh",
+    "setup.py",
+    "pyproject.toml",
+})
+FORBIDDEN_PATCH_DIRS = frozenset({".ajar", "tests", "test", "docs", "doc", "benchmarks", "benchmark"})
+SRC_FILE_RE = re.compile(r"[\w./-]+\.(?:c|h|cc|cpp|hpp|py|go|rs|sol|js|ts)\b", re.IGNORECASE)
+OUTPUT_TRAP_RE = re.compile(
+    r"^(?:(?:std::|fmt\.|os\.|sys\.|console\.|log\.)?"
+    r"(?:printf|fprintf|sprintf|snprintf|puts|fputs|putchar|print|println|eprintln|echo"
+    r"|write|fflush|abort|exit|_exit|panic|__builtin_trap)\b"
+    r"|pass\b|\(void\)\s*\w+|if\s*\(?\s*(?:0|false)\s*\)?|;|\{\s*\})",
+    re.IGNORECASE,
 )
-BANNED_VOICE_PATTERNS = (
-    "sprt", "rmst", "map-elites", "lyapunov", "ah-puct", "macaroon",
-    "could potentially", "might be vulnerable", "it seems", "appears to be",
-    "i think", "we believe", "delve", "catastrophic", "devastating",
-    "as an ai", "in conclusion", "relay_capsule", ".ajar/", "todo:", "tbd",
-)
-
-
-class LintResult(NamedTuple):
-    score: int
-    issues: list[str]
-
-    @property
-    def passed(self) -> bool:
-        return self.score == 100 and not self.issues
+COMMENT_LINE_RE = re.compile(r"^(?://|#|/\*|\*|\*/|--)")
+EXEC_STDLIB_MODS = frozenset({
+    "subprocess",
+    "socket",
+    "http",
+    "urllib",
+    "ctypes",
+    "asyncio",
+    "multiprocessing",
+    "pty",
+    "importlib",
+    "ssl",
+})
+FILE_READ_CALLS = frozenset({"open", "Path", "PurePath", "read_text", "read_bytes", "getsource", "getline", "getlines"})
+SHELL_GREP_RE = re.compile(r"\b(?:grep|egrep|fgrep|rg|ag|ack|cat|head|tail|sed|awk)\b")
+SHELL_TRIVIAL_RE = re.compile(r"^(?:set|export|echo|printf|sleep|exit|false|true|test|\[)\b")
+HEX_PAYLOAD_RE = re.compile(r"(?<![0-9a-fA-F])([0-9a-fA-F]{16,})(?![0-9a-fA-F])")
+QUOTED_LIT_RE = re.compile(r'["\']([^"\']{12,})["\']')
+PY_BIN_RE = re.compile(r"^python3?(?:\.\d+)?$")
 
 
 def _run_proc(
@@ -363,33 +369,329 @@ def parse_crash_signature(output: str, rc: int) -> CrashSignature | None:
     return CrashSignature(kind=kind, summary=summary_line, top_frames=top_frames, stack_hash=stack_hash)
 
 
-def _is_tautological_repro(cand: Candidate) -> tuple[bool, str]:
-    cmd = cand.repro_cmd.strip()
-    if not cmd:
-        return True, "empty repro_cmd"
-    if re.match(r"^(false|/bin/false|exit\s+[1-9]\d*)$", cmd):
-        return True, "trivial shell failure command"
-    if re.match(r"^(grep|rg)\b", cmd):
-        return True, "static grep command is not a dynamic reproducer"
-    if re.search(r"python3?\s+-c\s+['\"]\s*(assert\s+False|raise\s+\w+\()", cmd) and "import " not in cmd:
-        return True, "inline exception without target import"
+def _split_cmd(cmd: str) -> list[str]:
+    try:
+        return shlex.split(cmd)
+    except ValueError:
+        return cmd.split()
+
+
+def _norm_rel(raw: str) -> str:
+    rel = raw.strip().replace("\\", "/")
+    while rel.startswith("./"):
+        rel = rel[2:]
+    return rel
+
+
+def _extract_patch_paths(patch_diff: str) -> list[str]:
+    paths: list[str] = []
+    for line in patch_diff.splitlines():
+        if line.startswith(("--- ", "+++ ")):
+            rel = _norm_rel(_strip_diff_prefix(line[4:]))
+            if rel and rel != "/dev/null" and rel not in paths:
+                paths.append(rel)
+    return paths
+
+
+def _is_repro_script_name(rel: str) -> bool:
+    p = Path(rel)
+    lname = p.name.lower()
+    if ".ajar" in p.parts or lname.endswith((".sh", ".bash")):
+        return True
+    return any(tok in lname for tok in ("repro", "poc", "pov", "exploit"))
+
+
+def _resolve_repro_scripts(repro_cmd: str, root: Path | None) -> list[tuple[str, Path]]:
+    if root is None:
+        return []
+    root_real = root.resolve()
+    found: list[tuple[str, Path]] = []
+    seen: set[str] = set()
+    for tok in _split_cmd(repro_cmd):
+        if not tok or tok.startswith("-") or "=" in tok:
+            continue
+        rel = _norm_rel(tok)
+        if not rel or rel in seen or rel.startswith("/"):
+            continue
+        cand_path = (root_real / rel).resolve()
+        if root_real not in cand_path.parents or not cand_path.is_file():
+            continue
+        if cand_path.suffix.lower() in (".sh", ".bash", ".py") or ".ajar" in Path(rel).parts:
+            seen.add(rel)
+            found.append((rel, cand_path))
+    return found
+
+
+def _check_patch_policy(cand: Candidate) -> tuple[bool, str]:
+    paths = _extract_patch_paths(cand.patch_diff)
+    if not paths:
+        return False, "patch contains no target file paths"
+    repro_toks = {_norm_rel(t) for t in _split_cmd(cand.repro_cmd)}
+    for rel in paths:
+        p = Path(rel)
+        parts = p.parts
+        lname = p.name.lower()
+        if rel.startswith("/") or ".." in parts:
+            return False, f"forbidden path traversal in patch: {rel}"
+        if ".ajar" in parts or any(part.lower() in FORBIDDEN_PATCH_DIRS for part in parts[:-1]):
+            return False, f"forbidden test/build/repro patch path: {rel}"
+        if p.name in FORBIDDEN_BUILD_NAMES:
+            return False, f"forbidden test/build/repro patch path: {rel}"
+        is_test = (
+            lname.endswith(("_test.go", "_test.py", ".t.sol"))
+            or (lname.startswith("test_") and lname.endswith(".py"))
+            or ".spec." in lname
+            or ".test." in lname
+        )
+        if is_test:
+            return False, f"forbidden test/build/repro patch path: {rel}"
+        if rel in repro_toks and _is_repro_script_name(rel):
+            return False, f"forbidden repro script patch path: {rel}"
+    return True, ""
+
+
+def _check_output_suppression_patch(patch_diff: str) -> tuple[bool, str]:
+    rem_code: list[str] = []
+    add_code: list[str] = []
+    for line in patch_diff.splitlines():
+        if line.startswith("-") and not line.startswith("---"):
+            s = line[1:].strip()
+            if s and not COMMENT_LINE_RE.match(s):
+                rem_code.append(s)
+        elif line.startswith("+") and not line.startswith("+++"):
+            s = line[1:].strip()
+            if s and not COMMENT_LINE_RE.match(s):
+                add_code.append(s)
+    if rem_code and all(OUTPUT_TRAP_RE.match(ln) for ln in rem_code):
+        if all(OUTPUT_TRAP_RE.match(ln) for ln in add_code):
+            return False, "output/trap suppression patch without root-cause fix"
+    return True, ""
+
+
+def _check_literal_overfit_patch(cand: Candidate) -> tuple[bool, str]:
+    tokens = _split_cmd(cand.repro_cmd)
+    payload_args: list[str] = []
+    for idx, tok in enumerate(tokens):
+        if idx == 0 and "=" not in tok:
+            continue
+        val = tok.split("=", 1)[1] if tok.startswith("--") and "=" in tok else tok
+        if val.startswith("-") or ("=" in tok and not tok.startswith("--")):
+            continue
+        if len(val) >= 12 and not SRC_FILE_RE.fullmatch(val):
+            payload_args.append(val)
+    hex_payloads = [h.lower() for h in HEX_PAYLOAD_RE.findall(cand.repro_cmd)]
+    add_lines = [
+        ln[1:]
+        for ln in cand.patch_diff.splitlines()
+        if ln.startswith("+") and not ln.startswith("+++")
+    ]
+    for add_ln in add_lines:
+        low_ln = add_ln.lower()
+        if any(hx in low_ln for hx in hex_payloads):
+            return False, "literal-overfit patch embeds repro payload"
+        if any(arg in add_ln for arg in payload_args):
+            return False, "literal-overfit patch embeds repro payload"
+        for lit in QUOTED_LIT_RE.findall(add_ln):
+            low_lit = lit.lower()
+            if any(lit in arg for arg in payload_args) or any(low_lit in hx for hx in hex_payloads):
+                return False, "literal-overfit patch embeds repro payload"
+    return True, ""
+
+
+def _extract_python_c(cmd: str) -> str | None:
+    toks = _split_cmd(cmd)
+    for i, tok in enumerate(toks):
+        if not PY_BIN_RE.match(Path(tok).name):
+            continue
+        for j in range(i + 1, len(toks)):
+            if toks[j] == "-c" and j + 1 < len(toks):
+                return toks[j + 1]
+            if toks[j].startswith("-c") and len(toks[j]) > 2:
+                return toks[j][2:]
+            if not toks[j].startswith("-"):
+                break
+    return None
+
+
+def _check_python_repro_ast(
+    code: str,
+    patch_paths: Sequence[str],
+    require_target_exec: bool,
+) -> tuple[bool, str]:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return True, "invalid inline python repro syntax"
+    imports: set[str] = set()
+    calls: set[str] = set()
+    lits: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            imports.add((node.module or "").split(".")[0] if node.level == 0 else "<rel>")
+        elif isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                calls.add(node.func.id)
+            elif isinstance(node.func, ast.Attribute):
+                calls.add(node.func.attr)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            lits.append(node.value)
+    refs_src = any(
+        SRC_FILE_RE.search(s) or any(p in s or Path(p).name in s for p in patch_paths)
+        for s in lits
+    )
+    proc_calls = {"system", "popen", "run", "Popen", "check_output", "check_call"}
+    greps_src = bool(calls & proc_calls) and any(SHELL_GREP_RE.search(s) for s in lits)
+    if (bool(calls & FILE_READ_CALLS) or greps_src) and refs_src:
+        return True, "python repro reads tracked source files instead of executing target"
+    if require_target_exec:
+        non_stdlib = {m for m in imports if m and m not in sys.stdlib_module_names}
+        execs = (
+            bool(non_stdlib)
+            or bool(imports & EXEC_STDLIB_MODS)
+            or bool(calls & {"system", "popen", "execv", "execvp", "execve", "spawnv", "fork"})
+        )
+        if not execs:
+            return True, "static python repro neither imports nor executes target"
     return False, ""
 
 
-def _invoke_critic_sync(llm: LLMClient, cand: Candidate, sig: CrashSignature) -> LLMResponse:
+def _is_tautological_repro(
+    repro_cmd: str | Candidate,
+    wt: Path | None = None,
+    patch_paths: Sequence[str] = (),
+) -> tuple[bool, str]:
+    if isinstance(repro_cmd, Candidate):
+        cmd = repro_cmd.repro_cmd.strip()
+        p_paths = list(patch_paths) or _extract_patch_paths(repro_cmd.patch_diff)
+    else:
+        cmd = repro_cmd.strip()
+        p_paths = list(patch_paths)
+    if not cmd:
+        return True, "empty repro_cmd"
+    if re.match(r"^(?:false|/bin/false|exit\s+[1-9]\d*)$", cmd):
+        return True, "trivial shell failure command"
+    if re.match(r"^(?:grep|egrep|fgrep|rg|ag|ack)\b", cmd):
+        return True, "static grep command is not a dynamic reproducer"
+    if SHELL_GREP_RE.search(cmd) and (
+        SRC_FILE_RE.search(cmd) or any(p in cmd or Path(p).name in cmd for p in p_paths)
+    ):
+        return True, "repro command statically reads or greps source files"
+    py_code = _extract_python_c(cmd)
+    if py_code is not None:
+        bad, reason = _check_python_repro_ast(py_code, p_paths, require_target_exec=True)
+        if bad:
+            return True, reason
+    for rel, spath in _resolve_repro_scripts(cmd, wt):
+        body = spath.read_text(encoding="utf-8", errors="replace")
+        is_repro = _is_repro_script_name(rel)
+        if rel.endswith(".py"):
+            other_p = p_paths if is_repro else [p for p in p_paths if _norm_rel(p) != rel]
+            if is_repro or other_p:
+                bad, reason = _check_python_repro_ast(body, other_p, require_target_exec=is_repro)
+                if bad:
+                    return True, f"repro script {rel}: {reason}"
+        elif is_repro:
+            active = [
+                ln.strip()
+                for ln in body.splitlines()
+                if ln.strip() and not ln.lstrip().startswith("#")
+            ]
+            for ln in active:
+                if SHELL_GREP_RE.search(ln) and (
+                    SRC_FILE_RE.search(ln) or any(p in ln or Path(p).name in ln for p in p_paths)
+                ):
+                    return True, f"repro script {rel} statically greps source files"
+                sub_py = _extract_python_c(ln)
+                if sub_py is not None:
+                    bad, reason = _check_python_repro_ast(sub_py, p_paths, require_target_exec=True)
+                    if bad:
+                        return True, f"repro script {rel}: {reason}"
+            if active and all(SHELL_TRIVIAL_RE.match(ln) for ln in active):
+                return True, f"repro script {rel} does not execute target"
+    return False, ""
+
+
+def _mutate_hex_repro_cmds(repro_cmd: str) -> list[str]:
+    m = HEX_PAYLOAD_RE.search(repro_cmd)
+    if not m or len(m.group(1)) % 2 != 0:
+        return []
+    raw = bytearray.fromhex(m.group(1))
+    m1 = bytearray(raw)
+    m1[-1] ^= 0x01
+    m2 = bytearray(raw)
+    if len(raw) >= 4 and raw[1] == len(raw) - 2 and raw[1] < 255:
+        m2[1] += 1
+        m2.append(raw[-1] ^ 0x01)
+    else:
+        m2[len(m2) // 2] ^= 0x01
+    lo, hi = m.span(1)
+    out: list[str] = []
+    for buf in (m1, m2):
+        cand_cmd = repro_cmd[:lo] + buf.hex() + repro_cmd[hi:]
+        if cand_cmd != repro_cmd and cand_cmd not in out:
+            out.append(cand_cmd)
+    return out
+
+
+def _collect_critic_evidence(
+    repo: Path,
+    wt: Path,
+    cand: Candidate,
+    pre_out: str,
+    post_out: str,
+    summary: str,
+) -> dict[str, str]:
+    reality_path = Path(repo) / ".ajar" / "REALITY.md"
+    reality = (
+        reality_path.read_text(encoding="utf-8", errors="replace")[:1500]
+        if reality_path.is_file()
+        else ""
+    )
+    scripts = _resolve_repro_scripts(cand.repro_cmd, wt) or _resolve_repro_scripts(cand.repro_cmd, repo)
+    script_blocks = [
+        f"Repro Script Contents ({rel}):\n{sp.read_text(encoding='utf-8', errors='replace')[:4000]}"
+        for rel, sp in scripts
+    ]
+    return {
+        "reality": reality,
+        "scripts": "\n\n".join(script_blocks),
+        "pre_out": pre_out[-2500:],
+        "post_out": post_out[-2500:],
+        "summary": summary,
+    }
+
+
+def _invoke_critic_sync(
+    llm: LLMClient,
+    cand: Candidate,
+    sig: CrashSignature,
+    evidence: dict[str, str] | None = None,
+) -> LLMResponse:
     critic_spec = resolve_role_model("critic")
-    prompt = (
-        f"Candidate: {cand.id} - {cand.title}\n"
-        f"Severity: {cand.severity}\n"
-        f"Sink: {cand.sink_symbol}\n"
-        f"Repro: {cand.repro_cmd}\n"
-        f"Crash: {sig.kind} ({sig.summary}) frames={sig.top_frames}\n"
-        f"Root cause: {cand.root_cause}\n"
-        f"Patch:\n{cand.patch_diff}\n\n"
+    ev = evidence or {}
+    sections = [
+        f"Candidate: {cand.id} - {cand.title}",
+        f"Severity: {cand.severity}",
+        f"Sink: {cand.sink_symbol}",
+        f"Repro: {cand.repro_cmd}",
+        f"Crash: {sig.kind} ({sig.summary}) frames={sig.top_frames}",
+        f"Root cause: {cand.root_cause}",
+        f"Mutated PoV / Control Summary: {ev.get('summary', 'none')}",
+    ]
+    if ev.get("reality"):
+        sections.append(f"Reality Excerpt (.ajar/REALITY.md):\n{ev['reality'][:1500]}")
+    if ev.get("scripts"):
+        sections.append(ev["scripts"])
+    sections.append(f"Pre-patch Output:\n{ev.get('pre_out', '')[-2500:]}")
+    sections.append(f"Post-patch Output:\n{ev.get('post_out', '')[-2500:]}")
+    sections.append(f"Patch Diff:\n{cand.patch_diff[:4000]}")
+    sections.append(
         "Verify whether the repro triggers a genuine target defect and the patch fixes "
         "the root cause without masking symptoms. Reply APPROVE or REJECT with brief notes."
     )
-    msgs = [{"role": "user", "content": prompt}]
+    msgs = [{"role": "user", "content": "\n\n".join(sections)}]
     sys_msg = "You are an adversarial Cross-Family C3 Security Critic."
     if hasattr(llm, "complete_sync"):
         return llm.complete_sync(
@@ -401,6 +703,21 @@ def _invoke_critic_sync(llm: LLMClient, cand: Candidate, sig: CrashSignature) ->
     if inspect.isawaitable(coro):
         return asyncio.run(coro)
     raise TypeError("LLMClient returned non-awaitable response")
+
+
+def _match_pre_failure(cand: Candidate, out: str, rc: int) -> CrashSignature | None:
+    sig = parse_crash_signature(out, rc)
+    if sig is not None:
+        return sig
+    if rc != 0 and cand.failure_oracle and cand.failure_oracle in out:
+        lower = out.lower()
+        if not any(
+            bad in out or bad in lower
+            for bad in ("SyntaxError", "ImportError", "ModuleNotFoundError", "command not found")
+        ):
+            digest = hashlib.sha256(cand.failure_oracle.encode("utf-8")).hexdigest()[:16]
+            return CrashSignature("ORACLE_FAILURE", cand.failure_oracle, [], digest)
+    return None
 
 
 def verify_candidate(
@@ -420,12 +737,23 @@ def verify_candidate(
         return Verdict(cand.id, "WITHDRAWN", "C0", 0, 0, critic_verdict="SKIPPED", notes="withdrawn")
     if active_recipe.static_only or not cand.repro_cmd.strip() or not cand.patch_diff.strip():
         return Verdict(cand.id, "UNVERIFIED", "C1", 0, 0, critic_verdict="SKIPPED", notes="static/incomplete")
-    taut, taut_reason = _is_tautological_repro(cand)
+
+    for ok, reason in (
+        _check_patch_policy(cand),
+        _check_output_suppression_patch(cand.patch_diff),
+        _check_literal_overfit_patch(cand),
+    ):
+        if not ok:
+            return Verdict(cand.id, "REJECTED", "C0", 0, 0, critic_verdict="SKIPPED", notes=reason)
+    taut, taut_reason = _is_tautological_repro(cand, repo)
     if taut:
         return Verdict(cand.id, "REJECTED", "C0", 0, 0, critic_verdict="SKIPPED", notes=taut_reason)
 
     req_runs = max(1, int(runs))
     run_env = scrub_subprocess_env(active_recipe.env)
+    last_pre_out = ""
+    last_post_out = ""
+    ctrl_cmd = cand.control_cmd.strip()
 
     with clean_worktree(repo) as wt:
         if active_recipe.build_script.strip():
@@ -433,42 +761,40 @@ def verify_candidate(
             if b_rc != 0:
                 return Verdict(cand.id, "REJECTED", "C0", 0, 0, notes=f"initial build failed rc={b_rc}")
 
+        if ctrl_cmd:
+            c_rc, _ = _run_proc(ctrl_cmd, cwd=wt, env=run_env, timeout=120)
+            if c_rc != 0:
+                return Verdict(cand.id, "REJECTED", "C0", 0, 0, notes=f"pre-patch control_cmd failed rc={c_rc}")
+
         pre_failed = 0
         ref_sig: CrashSignature | None = None
         for _ in range(req_runs):
             rc, out = _run_proc(cand.repro_cmd, cwd=wt, env=run_env, timeout=120)
-            sig = parse_crash_signature(out, rc)
-            if sig is None and rc != 0 and cand.failure_oracle and cand.failure_oracle in out:
-                lower = out.lower()
-                if not any(
-                    bad in out or bad in lower
-                    for bad in ("SyntaxError", "ImportError", "ModuleNotFoundError", "command not found")
-                ):
-                    digest = hashlib.sha256(cand.failure_oracle.encode("utf-8")).hexdigest()[:16]
-                    sig = CrashSignature("ORACLE_FAILURE", cand.failure_oracle, [], digest)
+            last_pre_out = out
+            sig = _match_pre_failure(cand, out, rc)
             if sig is None:
                 return Verdict(cand.id, "REJECTED", "C0", pre_failed, 0, notes="pre-patch repro did not crash")
             if cand.failure_oracle and cand.failure_oracle not in out:
                 return Verdict(cand.id, "REJECTED", "C0", pre_failed, 0, notes="failure_oracle mismatch")
             if cand.sink_symbol and cand.sink_symbol not in out:
                 return Verdict(
-                    cand.id,
-                    "REJECTED",
-                    "C0",
-                    pre_failed,
-                    0,
-                    asdict(sig),
+                    cand.id, "REJECTED", "C0", pre_failed, 0, asdict(sig),
                     notes=f"sink_symbol '{cand.sink_symbol}' missing from trace",
                 )
             if ref_sig is None:
                 ref_sig = sig
             elif sig.stack_hash != ref_sig.stack_hash:
-                return Verdict(
-                    cand.id, "REJECTED", "C0", pre_failed, 0, asdict(sig), notes="flaky stack_hash across runs"
-                )
+                return Verdict(cand.id, "REJECTED", "C0", pre_failed, 0, asdict(sig), notes="flaky stack_hash")
             pre_failed += 1
 
         assert ref_sig is not None
+        mutant_cmds = _mutate_hex_repro_cmds(cand.repro_cmd)
+        confirmed_mutants: list[str] = []
+        for m_cmd in mutant_cmds:
+            m_rc, m_out = _run_proc(m_cmd, cwd=wt, env=run_env, timeout=120)
+            if _match_pre_failure(cand, m_out, m_rc) is not None:
+                confirmed_mutants.append(m_cmd)
+
         ok_patch, patch_note = apply_patch_fuzzy(wt, cand.patch_diff)
         if not ok_patch:
             return Verdict(cand.id, "REJECTED", "C0", pre_failed, 0, asdict(ref_sig), notes=patch_note)
@@ -477,47 +803,60 @@ def verify_candidate(
             rb_rc, _ = _run_proc(active_recipe.build_script, cwd=wt, env=run_env, timeout=180)
             if rb_rc != 0:
                 return Verdict(
-                    cand.id,
-                    "REJECTED",
-                    "C0",
-                    pre_failed,
-                    0,
-                    asdict(ref_sig),
+                    cand.id, "REJECTED", "C0", pre_failed, 0, asdict(ref_sig),
                     notes=f"post-patch rebuild failed rc={rb_rc}",
                 )
 
         post_passed = 0
         for _ in range(req_runs):
             rc, out = _run_proc(cand.repro_cmd, cwd=wt, env=run_env, timeout=120)
+            last_post_out = out
             if rc != 0 or parse_crash_signature(out, rc) is not None:
-                return Verdict(
-                    cand.id, "REJECTED", "C0", pre_failed, post_passed, asdict(ref_sig), notes="post-patch failed"
-                )
+                return Verdict(cand.id, "REJECTED", "C0", pre_failed, post_passed, asdict(ref_sig), notes="post-patch failed")
             if cand.failure_oracle and cand.failure_oracle in out:
-                return Verdict(
-                    cand.id, "REJECTED", "C0", pre_failed, post_passed, asdict(ref_sig), notes="oracle persisted"
-                )
+                return Verdict(cand.id, "REJECTED", "C0", pre_failed, post_passed, asdict(ref_sig), notes="oracle persisted")
             post_passed += 1
+
+        for m_cmd in confirmed_mutants:
+            m_rc, m_out = _run_proc(m_cmd, cwd=wt, env=run_env, timeout=120)
+            if (
+                m_rc != 0
+                or parse_crash_signature(m_out, m_rc) is not None
+                or (cand.failure_oracle and cand.failure_oracle in m_out)
+            ):
+                return Verdict(
+                    cand.id, "REJECTED", "C0", pre_failed, post_passed, asdict(ref_sig),
+                    notes="bandaid patch: mutated PoV still fails post-patch",
+                )
+
+        if ctrl_cmd:
+            c_rc, _ = _run_proc(ctrl_cmd, cwd=wt, env=run_env, timeout=120)
+            if c_rc != 0:
+                return Verdict(
+                    cand.id, "REJECTED", "C0", pre_failed, post_passed, asdict(ref_sig),
+                    notes=f"post-patch control_cmd failed rc={c_rc}",
+                )
 
         if active_recipe.test_cmd.strip():
             t_rc, _ = _run_proc(active_recipe.test_cmd, cwd=wt, env=run_env, timeout=300)
             if t_rc != 0:
                 return Verdict(
-                    cand.id,
-                    "REJECTED",
-                    "C0",
-                    pre_failed,
-                    post_passed,
-                    asdict(ref_sig),
+                    cand.id, "REJECTED", "C0", pre_failed, post_passed, asdict(ref_sig),
                     notes=f"regression test_cmd failed rc={t_rc}",
                 )
+
+        summary = (
+            f"control_cmd={'PASS(pre+post)' if ctrl_cmd else 'none'}; "
+            f"mutated_pov={len(confirmed_mutants)}/{len(mutant_cmds)} confirmed+fixed"
+        )
+        evidence = _collect_critic_evidence(repo, wt, cand, last_pre_out, last_post_out, summary)
 
     if llm is None:
         return Verdict(
             cand.id, "VERIFIED", "C2", pre_failed, post_passed, asdict(ref_sig), critic_verdict="SKIPPED"
         )
 
-    critic_resp = _invoke_critic_sync(llm, cand, ref_sig)
+    critic_resp = _invoke_critic_sync(llm, cand, ref_sig, evidence=evidence)
     upper = critic_resp.content.strip().upper()
     lead_tok = re.split(r"[\s:.,;-]+", upper, maxsplit=1)[0] if upper else ""
     is_approve = lead_tok in ("APPROVE", "APPROVED", "CONFIRM", "VALID", "PASS", "ACCEPT", "LGTM")
@@ -538,124 +877,3 @@ def verify_candidate(
         cand.id, "VERIFIED", "C2", pre_failed, post_passed, asdict(ref_sig),
         critic_verdict="INCONCLUSIVE", notes=critic_resp.content.strip()[:240],
     )
-
-
-def lint_report_text(text: str) -> LintResult:
-    issues = [f"disallowed phrase: '{p}'" for p in BANNED_VOICE_PATTERNS if p in text.lower()]
-    return LintResult(score=max(0, 100 - 20 * len(issues)), issues=issues)
-
-
-def _run_voice_lint_gate(path: Path, channel: str = "ghsa") -> LintResult:
-    if not VOICE_LINT_SCRIPT.is_file():
-        return lint_report_text(path.read_text(encoding="utf-8", errors="replace"))
-    cmd = [sys.executable, str(VOICE_LINT_SCRIPT), str(path), "--channel", channel, "--json", "--strict"]
-    rc, out = _run_proc(cmd, cwd=path.parent, timeout=30)
-    try:
-        data = json.loads(out)
-        rep = (data.get("reports") or [{}])[0]
-        score = int(rep.get("mechanical_score_100", 100 if rc == 0 else 0))
-        issues = [str(x) for x in (rep.get("issues") or []) + (rep.get("warnings") or [])]
-        return LintResult(score=score if rc == 0 and not issues else min(score, 95), issues=issues)
-    except ValueError:
-        return LintResult(score=100 if rc == 0 else 0, issues=[] if rc == 0 else [out.strip()[:160]])
-
-
-def _clean_prose(raw: str, fallback: str) -> str:
-    cleaned = raw.strip() or fallback
-    for phrase in BANNED_VOICE_PATTERNS:
-        cleaned = re.sub(re.escape(phrase), "", cleaned, flags=re.IGNORECASE)
-    return re.sub(r"\s{2,}", " ", cleaned).strip() or fallback
-
-
-def _render_finding_md(cand: Candidate, verdict: Verdict | None) -> str:
-    del verdict
-    title = _clean_prose(cand.title, cand.id)
-    loc = f"`{cand.entry_span}`" if cand.entry_span else "the affected entrypoint"
-    sym = f"`{cand.sink_symbol}()`" if cand.sink_symbol else "the target handler"
-    root = _clean_prose(cand.root_cause, f"{sym} at {loc} processes untrusted input without enforcing the required boundary check.")
-    impact = _clean_prose(cand.impact, f"Untrusted input reaching {sym} breaks the security boundary and fails deterministically.")
-    repro = cand.repro_cmd.strip() or "true"
-    patch = cand.patch_diff.strip() or "# Minimal patch attached in repository diff"
-    return "\n".join([
-        f"# {title}",
-        "",
-        "### Summary",
-        f"In {loc}, {sym} fails to enforce its boundary check under untrusted input. {impact}",
-        "",
-        "### Details",
-        root,
-        "",
-        "### PoC",
-        f"Run the isolated reproducer below against an unpatched checkout:\n\n```sh\n{repro}\n```",
-        "",
-        "### Impact",
-        impact,
-        "",
-        "### Suggested Fix",
-        f"Apply the minimal boundary check below and re-run the test suite:\n\n```diff\n{patch}\n```",
-        "",
-        "### Workarounds",
-        "No configuration workaround is documented; apply the patch and rebuild.",
-        "",
-    ])
-
-
-def export_reports(repo: Path, out_dir: Path) -> dict[str, Any]:
-    state_dir = ajar_dir(repo)
-    adv_dir = Path(out_dir) / "advisories"
-    hard_dir = Path(out_dir) / "hardening-notes"
-    adv_dir.mkdir(parents=True, exist_ok=True)
-    hard_dir.mkdir(parents=True, exist_ok=True)
-
-    cands_by_id = {
-        c.id: c for c in (dataclass_from_dict(Candidate, r) for r in read_jsonl(state_dir / "candidates.jsonl"))
-    }
-    verdicts_by_id = {
-        v.candidate_id: v for v in (dataclass_from_dict(Verdict, r) for r in read_jsonl(state_dir / "verdicts.jsonl"))
-    }
-
-    advisories: list[Path] = []
-    hardening_notes: list[Path] = []
-    lint_issues: dict[str, list[str]] = {}
-    min_score = 100
-    lint_passed = True
-
-    for cid, cand in sorted(cands_by_id.items()):
-        cand_verdict = verdicts_by_id.get(cid)
-        if cand.withdrawn or (cand_verdict is not None and cand_verdict.status in ("WITHDRAWN", "REJECTED")):
-            continue
-        cat = cand.category.strip().lower()
-        sev = cand.severity.strip().lower()
-        is_hardening = cat.startswith("hardening") or sev in ("info", "informational", "hardening")
-        is_c3_adv = (
-            not is_hardening
-            and cand_verdict is not None
-            and cand_verdict.status == "VERIFIED"
-            and cand_verdict.truth_level == "C3"
-        )
-        if not is_c3_adv and not is_hardening:
-            if cand_verdict is None or cand_verdict.truth_level not in ("C1", "C2"):
-                continue
-            is_hardening = True
-
-        md = _render_finding_md(cand, cand_verdict)
-        safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", cid) + ".md"
-        dst = (adv_dir / safe_name) if is_c3_adv else (hard_dir / safe_name)
-        dst.write_text(md, encoding="utf-8")
-        if is_c3_adv:
-            lint = _run_voice_lint_gate(dst, channel="ghsa")
-            min_score = min(min_score, lint.score)
-            if not lint.passed:
-                lint_passed = False
-                lint_issues[cid] = lint.issues
-            advisories.append(dst)
-        else:
-            hardening_notes.append(dst)
-
-    return {
-        "advisories": advisories,
-        "hardening_notes": hardening_notes,
-        "lint_score": min_score,
-        "lint_passed": lint_passed,
-        "lint_issues": lint_issues,
-    }

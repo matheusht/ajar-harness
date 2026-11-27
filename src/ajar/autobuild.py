@@ -18,7 +18,7 @@ from typing import Any, Callable
 
 from ajar.agent import SpanTracker, WorkspaceTools
 from ajar.cli import BuildRecipe, scrub_subprocess_env
-from ajar.llm import LLMClient
+from ajar.llm import BudgetExhaustedError, LLMClient
 from ajar.verify import clean_worktree, parse_crash_signature
 from ajar.whiteboard import Section, StigmergicWhiteboard
 
@@ -184,15 +184,37 @@ def synthesize_build_recipe(repo: Path, profile: str = "upstream") -> BuildRecip
     )
 
 
-def _run_build_script(repo: Path, profile: str, timeout: float = 90.0) -> tuple[int, str]:
-    env = scrub_subprocess_env(BUILD_PROFILES.get(profile, BUILD_PROFILES["upstream"]))
-    script = repo / ".ajar" / "build.sh"
+_BUILD_MANIFEST_NAMES: tuple[str, ...] = (
+    "Makefile",
+    "CMakeLists.txt",
+    "Cargo.toml",
+    "go.mod",
+    "pyproject.toml",
+    "foundry.toml",
+    "package.json",
+    "GNUmakefile",
+    "meson.build",
+)
+
+
+def _run_build_script(
+    repo: Path,
+    profile: str,
+    timeout: float = 180.0,
+    extra_env: dict[str, str] | None = None,
+) -> tuple[int, str]:
+    repo_path = Path(repo).resolve()
+    base_env = dict(BUILD_PROFILES.get(profile, BUILD_PROFILES["upstream"]))
+    if extra_env:
+        base_env.update(extra_env)
+    env = scrub_subprocess_env(base_env)
+    script = repo_path / ".ajar" / "build.sh"
     if not script.is_file():
         return (127, ".ajar/build.sh missing")
     try:
         proc = subprocess.run(
-            ["bash", str(script)],
-            cwd=str(repo),
+            ["bash", ".ajar/build.sh"],
+            cwd=str(repo_path),
             env=env,
             capture_output=True,
             text=True,
@@ -203,6 +225,33 @@ def _run_build_script(repo: Path, profile: str, timeout: float = 90.0) -> tuple[
         return (124, str(exc))
     combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
     return (proc.returncode, combined[-4000:])
+
+
+def probe_build_script(
+    repo: Path,
+    recipe: BuildRecipe,
+    timeout_s: int = 180,
+) -> tuple[bool, str]:
+    rc, tail = _run_build_script(
+        Path(repo),
+        recipe.profile,
+        timeout=float(timeout_s),
+        extra_env=recipe.env or None,
+    )
+    return (rc == 0, tail)
+
+
+def _collect_build_manifest_snapshot(repo_path: Path, max_chars: int = 3000) -> str:
+    entries = sorted(p.name for p in repo_path.iterdir())[:40]
+    parts: list[str] = [f"Repo files: {', '.join(entries)}"]
+    for name in _BUILD_MANIFEST_NAMES:
+        manifest = repo_path / name
+        if not manifest.is_file():
+            continue
+        lines = manifest.read_text(encoding="utf-8", errors="replace").splitlines()[:25]
+        snippet = "\n".join(lines)[:700]
+        parts.append(f"--- {name} ---\n{snippet}")
+    return "\n\n".join(parts)[:max_chars]
 
 
 def _parse_doctor_edits(raw_text: str) -> list[tuple[str, str]]:
@@ -227,12 +276,20 @@ async def run_build_doctor(
     recipe: BuildRecipe,
     llm: LLMClient | None,
     spans: SpanTracker | None = None,
+    max_turns: int = 5,
+    timeout_s: int = 180,
 ) -> BuildRecipe:
     repo_path = Path(repo)
     tools = WorkspaceTools(repo_path, spans=spans, write_allowlist={".ajar/build.sh"})
-    rc, log_tail = _run_build_script(repo_path, recipe.profile)
-    if rc == 0:
-        return replace(recipe, static_only=False, verified=True, last_error="")
+    ok, log_tail = probe_build_script(repo_path, recipe, timeout_s=timeout_s)
+    if ok:
+        return replace(
+            recipe,
+            build_script="bash .ajar/build.sh",
+            static_only=False,
+            verified=True,
+            last_error="",
+        )
     if llm is None:
         return replace(recipe, static_only=True, verified=False, last_error=log_tail)
 
@@ -241,25 +298,35 @@ async def run_build_doctor(
         "Never modify repository source files. "
         'Respond with JSON: {"path": ".ajar/build.sh", "content": "#!/usr/bin/env bash..."}'
     )
-    entries = sorted(p.name for p in repo_path.iterdir())[:40]
-    for turn in range(2):
+    manifest_snapshot = _collect_build_manifest_snapshot(repo_path, max_chars=3000)
+    turns = max(1, int(max_turns))
+    for turn in range(turns):
         script_path = repo_path / ".ajar" / "build.sh"
-        cur_txt = script_path.read_text(encoding="utf-8", errors="replace") if script_path.is_file() else ""
+        cur_txt = (
+            script_path.read_text(encoding="utf-8", errors="replace")
+            if script_path.is_file()
+            else ""
+        )
         prompt = (
-            f"Build turn {turn + 1}/2 failed (exit {rc}).\n"
-            f"Repo files: {', '.join(entries)}\n"
+            f"Build turn {turn + 1}/{turns} failed.\n"
+            f"{manifest_snapshot}\n\n"
             f"Current .ajar/build.sh:\n{cur_txt}\n"
             f"Error output:\n{log_tail}\n"
         )
-        res = llm.complete([{"role": "user", "content": prompt}], role="doctor", system=sys_msg)
-        resp = await res if inspect.isawaitable(res) else res
+        try:
+            res = llm.complete([{"role": "user", "content": prompt}], role="doctor", system=sys_msg)
+            resp = await res if inspect.isawaitable(res) else res
+        except BudgetExhaustedError:
+            return replace(recipe, static_only=True, verified=False, last_error="budget exhausted")
         edits = _parse_doctor_edits(resp.content)
         if not edits:
             continue
         for target_path, new_script in edits:
             tools.write_file(target_path, new_script)
-        rc, log_tail = _run_build_script(repo_path, recipe.profile)
-        if rc == 0:
+        if script_path.is_file():
+            os.chmod(script_path, 0o755)
+        ok, log_tail = probe_build_script(repo_path, recipe, timeout_s=timeout_s)
+        if ok:
             return replace(
                 recipe,
                 build_script="bash .ajar/build.sh",

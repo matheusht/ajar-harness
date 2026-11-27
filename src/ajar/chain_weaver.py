@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from ajar.cli import Candidate
-from ajar.llm import LLMClient
+from ajar.llm import BudgetExhaustedError, LLMClient
 from ajar.whiteboard import Section, StigmergicWhiteboard
 
 
@@ -297,8 +297,16 @@ async def weave_candidates(
             f"Source ({hops[0] if hops else 'n/a'}):\n{src_ctx}\n\n"
             f"Sink ({hops[1] if len(hops) > 1 else 'n/a'}):\n{dst_ctx}\n"
         )
-        res = llm.complete([{"role": "user", "content": prompt}], role="weaver", system=sys_msg)
-        resp = await res if inspect.isawaitable(res) else res
+        try:
+            res = llm.complete(
+                [{"role": "user", "content": prompt}],
+                role="weaver",
+                system=sys_msg,
+                allow_drain_reserve=True,
+            )
+            resp = await res if inspect.isawaitable(res) else res
+        except BudgetExhaustedError:
+            break
         raw = resp.content.strip()
         if not raw:
             continue

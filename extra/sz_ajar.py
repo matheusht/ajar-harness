@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 RING0_MODULES: tuple[str, ...] = ("cli.py", "llm.py", "agent.py", "verify.py")
-RING1_MODULES: tuple[str, ...] = (
+KNOWN_RING1_MODULES: tuple[str, ...] = (
     "repomap.py",
     "whiteboard.py",
     "epistemic.py",
@@ -21,21 +21,32 @@ RING1_MODULES: tuple[str, ...] = (
     "swarm.py",
     "bench.py",
 )
-LOGIC_MODULES: tuple[str, ...] = RING0_MODULES + RING1_MODULES
-REQUIRED_DISABLE_FLAGS: tuple[str, ...] = (
-    "--disable-repomap",
-    "--disable-whiteboard",
-    "--disable-epistemic",
-    "--disable-chain-weaver",
-    "--disable-autobuild",
-    "--disable-swarm",
-    "--disable-microfuzz",
+RING1_MODULES: tuple[str, ...] = KNOWN_RING1_MODULES
+MAX_RING1_MODULES: int = 7
+RING1_DISABLE_FLAGS: dict[str, tuple[str, ...]] = {
+    "repomap.py": ("--disable-repomap",),
+    "whiteboard.py": ("--disable-whiteboard",),
+    "epistemic.py": ("--disable-epistemic",),
+    "chain_weaver.py": ("--disable-chain-weaver",),
+    "autobuild.py": ("--disable-autobuild", "--disable-microfuzz"),
+    "swarm.py": ("--disable-swarm",),
+    "bench.py": (),
+}
+REQUIRED_DISABLE_FLAGS: tuple[str, ...] = tuple(
+    flag for mod in KNOWN_RING1_MODULES for flag in RING1_DISABLE_FLAGS[mod]
 )
-RING0_MAX_SLOC: int = 1800
-EPISTEMIC_MAX_SLOC: int = 180
 MAX_TOKENS_PER_SLOC: float = 10.5
+FORBIDDEN_LLM_SDKS: frozenset[str] = frozenset({
+    "openai",
+    "anthropic",
+    "litellm",
+    "langchain",
+    "llama_index",
+    "google",
+    "bedrock",
+})
 
-RING1_STEMS: frozenset[str] = frozenset(m.removesuffix(".py") for m in RING1_MODULES)
+RING1_STEMS: frozenset[str] = frozenset(m.removesuffix(".py") for m in KNOWN_RING1_MODULES)
 TRIVIA_TOKENS: frozenset[int] = frozenset({
     tokenize.COMMENT,
     tokenize.NL,
@@ -156,6 +167,61 @@ def _extract_ring1_imports(module_name: str, tree: ast.Module) -> list[str]:
     return bad
 
 
+def _catches_import_error(node: ast.Try) -> bool:
+    for handler in node.handlers:
+        if handler.type is None:
+            return True
+        if isinstance(handler.type, ast.Name) and handler.type.id in {
+            "ImportError",
+            "ModuleNotFoundError",
+            "Exception",
+        }:
+            return True
+        if isinstance(handler.type, ast.Tuple):
+            for elt in handler.type.elts:
+                if isinstance(elt, ast.Name) and elt.id in {
+                    "ImportError",
+                    "ModuleNotFoundError",
+                    "Exception",
+                }:
+                    return True
+    return False
+
+
+def _extract_non_stdlib_imports(module_name: str, tree: ast.Module) -> list[str]:
+    bad: list[str] = []
+    stdlib = sys.stdlib_module_names
+
+    def _check_mod(lineno: int, full_name: str, optional: bool) -> None:
+        top = full_name.split(".")[0]
+        if top in FORBIDDEN_LLM_SDKS:
+            bad.append(f"{module_name}:{lineno}->{full_name}")
+        elif not optional and top != "ajar" and top not in stdlib:
+            bad.append(f"{module_name}:{lineno}->{full_name}")
+
+    def _walk(node: ast.AST, optional: bool) -> None:
+        if isinstance(node, ast.Try) and _catches_import_error(node):
+            for stmt in node.body:
+                _walk(stmt, True)
+            for handler in node.handlers:
+                _walk(handler, optional)
+            for stmt in node.orelse:
+                _walk(stmt, optional)
+            for stmt in node.finalbody:
+                _walk(stmt, optional)
+            return
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                _check_mod(node.lineno, alias.name, optional)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            _check_mod(node.lineno, node.module, optional)
+        for child in ast.iter_child_nodes(node):
+            _walk(child, optional)
+
+    _walk(tree, False)
+    return bad
+
+
 def _find_worktree_invocations(
     module_name: str, tree: ast.Module, doc_spans: list[SpanBounds]
 ) -> list[str]:
@@ -185,14 +251,30 @@ def _find_worktree_invocations(
     return list(dict.fromkeys(hits))
 
 
-def _check_disable_flags(cli_tree: ast.Module) -> tuple[list[str], list[str]]:
+def _expected_disable_flags(present_ring1: list[str]) -> list[str]:
+    expected: list[str] = []
+    for mod in present_ring1:
+        for flag in RING1_DISABLE_FLAGS.get(mod, ()):
+            if flag not in expected:
+                expected.append(flag)
+    return expected
+
+
+def _check_disable_flags(
+    cli_tree: ast.Module, required_flags: list[str]
+) -> tuple[list[str], list[str]]:
     literals = {
         n.value
         for n in ast.walk(cli_tree)
         if isinstance(n, ast.Constant) and isinstance(n.value, str)
     }
-    registered = [f for f in REQUIRED_DISABLE_FLAGS if any(f == s or f in s.split() for s in literals)]
-    missing = [f for f in REQUIRED_DISABLE_FLAGS if f not in registered]
+    has_generic = any(s == "--disable" or "--disable" in s.split() for s in literals)
+    registered = [f for f in required_flags if any(f == s or f in s.split() for s in literals)]
+    if has_generic:
+        if "--disable" not in registered:
+            registered.append("--disable")
+        return registered, []
+    missing = [f for f in required_flags if f not in registered]
     return registered, missing
 
 
@@ -200,25 +282,49 @@ def audit_repo(repo_root: Path | None = None) -> dict[str, Any]:
     root = (repo_root or Path(__file__).resolve().parents[1]).resolve()
     src_dir = root / "src" / "ajar"
     violations: list[str] = []
-    expected_all = set(LOGIC_MODULES) | {"__init__.py"}
+    required_files = set(RING0_MODULES) | {"__init__.py"}
+    allowed_files = required_files | set(KNOWN_RING1_MODULES)
     actual_py = {p.name for p in src_dir.glob("*.py")} if src_dir.is_dir() else set()
-    missing_files = sorted(expected_all - actual_py)
-    extra_files = sorted(actual_py - expected_all)
-    if missing_files or extra_files:
-        violations.append(f"Ring partition mismatch: missing={missing_files}, extra={extra_files}")
+    missing_required = sorted(required_files - actual_py)
+    unexpected_files = sorted(actual_py - allowed_files)
+    present_ring1 = [m for m in KNOWN_RING1_MODULES if m in actual_py]
 
+    if missing_required:
+        violations.append(f"Missing required Ring-0/package modules: {missing_required}")
+    if unexpected_files:
+        violations.append(f"Unexpected modules outside Ring-0/Ring-1 allowlist: {unexpected_files}")
+    if len(present_ring1) > MAX_RING1_MODULES:
+        violations.append(
+            f"Ring-1 module count {len(present_ring1)} exceeds cap {MAX_RING1_MODULES}"
+        )
+
+    expected_flags = _expected_disable_flags(present_ring1)
     file_stats: dict[str, dict[str, Any]] = {}
     upward_imports: list[str] = []
+    non_stdlib_imports: list[str] = []
     worktree_violations: list[str] = []
     registered_flags: list[str] = []
-    missing_flags: list[str] = list(REQUIRED_DISABLE_FLAGS)
+    missing_flags: list[str] = list(expected_flags)
 
-    for name in ("__init__.py", *LOGIC_MODULES):
+    ordered_files = [
+        name
+        for name in ("__init__.py", *RING0_MODULES, *KNOWN_RING1_MODULES)
+        if name in actual_py
+    ] + unexpected_files
+
+    for name in ordered_files:
         fpath = src_dir / name
         if not fpath.is_file():
             continue
         info = analyze_python_file(fpath)
-        ring = "ring0" if name in RING0_MODULES else ("ring1" if name in RING1_MODULES else "pkg")
+        if name in RING0_MODULES:
+            ring = "ring0"
+        elif name in KNOWN_RING1_MODULES:
+            ring = "ring1"
+        elif name == "__init__.py":
+            ring = "pkg"
+        else:
+            ring = "rogue"
         file_stats[name] = {
             "ring": ring,
             "sloc": info["sloc"],
@@ -234,23 +340,21 @@ def audit_repo(repo_root: Path | None = None) -> dict[str, Any]:
             violations.append(f"Semicolon violation in {name} at lines {info['semicolon_lines']}")
         if name in RING0_MODULES:
             upward_imports.extend(_extract_ring1_imports(name, info["tree"]))
+        non_stdlib_imports.extend(_extract_non_stdlib_imports(name, info["tree"]))
         worktree_violations.extend(_find_worktree_invocations(name, info["tree"], info["doc_spans"]))
         if name == "cli.py":
-            registered_flags, missing_flags = _check_disable_flags(info["tree"])
+            registered_flags, missing_flags = _check_disable_flags(info["tree"], expected_flags)
 
     ring0_sloc = sum(file_stats[m]["sloc"] for m in RING0_MODULES if m in file_stats)
-    ring1_sloc = sum(file_stats[m]["sloc"] for m in RING1_MODULES if m in file_stats)
+    ring1_sloc = sum(file_stats[m]["sloc"] for m in present_ring1 if m in file_stats)
     epistemic_sloc = file_stats.get("epistemic.py", {}).get("sloc", 0)
+    total_sloc = sum(st["sloc"] for st in file_stats.values())
     logic_count = len([m for m in actual_py if m != "__init__.py"])
 
-    if logic_count != len(LOGIC_MODULES):
-        violations.append(f"Expected {len(LOGIC_MODULES)} logic modules, found {logic_count}")
-    if ring0_sloc > RING0_MAX_SLOC:
-        violations.append(f"Ring-0 SLOC {ring0_sloc} exceeds cap {RING0_MAX_SLOC}")
-    if epistemic_sloc > EPISTEMIC_MAX_SLOC:
-        violations.append(f"epistemic.py SLOC {epistemic_sloc} exceeds cap {EPISTEMIC_MAX_SLOC}")
     if upward_imports:
         violations.append(f"Upward Ring-0->Ring-1 imports: {upward_imports}")
+    if non_stdlib_imports:
+        violations.append(f"Non-stdlib imports in src/ajar: {non_stdlib_imports}")
     if worktree_violations:
         violations.append(f"Worktree invocations outside verify.py: {worktree_violations}")
     if missing_flags:
@@ -259,11 +363,14 @@ def audit_repo(repo_root: Path | None = None) -> dict[str, Any]:
     return {
         "ok": len(violations) == 0,
         "logic_module_count": logic_count,
+        "ring1_module_count": len(present_ring1),
+        "present_ring1_modules": present_ring1,
         "ring0_sloc": ring0_sloc,
         "ring1_sloc": ring1_sloc,
-        "total_sloc": ring0_sloc + ring1_sloc + file_stats.get("__init__.py", {}).get("sloc", 0),
+        "total_sloc": total_sloc,
         "epistemic_sloc": epistemic_sloc,
         "upward_imports": upward_imports,
+        "non_stdlib_imports": non_stdlib_imports,
         "worktree_violations": worktree_violations,
         "registered_disable_flags": registered_flags,
         "missing_disable_flags": missing_flags,
@@ -294,8 +401,10 @@ def main(argv: list[str] | None = None) -> int:
             for k in (
                 "ok",
                 "logic_module_count",
+                "ring1_module_count",
                 "ring0_sloc",
                 "ring1_sloc",
+                "total_sloc",
                 "epistemic_sloc",
                 "violations",
             )

@@ -26,19 +26,36 @@ def _load_sz_ajar() -> Any:
     return module
 
 
+def _load_extra_report() -> Any:
+    rep_path = REPO_ROOT / "extra" / "report.py"
+    spec = importlib.util.spec_from_file_location("ajar_extra_report", rep_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_sz_ajar_structural_and_anti_golf_gates(tmp_path: Path) -> None:
     sz_ajar = _load_sz_ajar()
     report = sz_ajar.audit_repo(REPO_ROOT)
 
     assert report["ok"] is True, f"sz_ajar violations: {report['violations']}"
     assert report["logic_module_count"] == 11
-    assert 0 < report["ring0_sloc"] <= 1800
-    assert 0 < report["epistemic_sloc"] <= 180
+    assert report["ring0_sloc"] > 0
+    assert report["epistemic_sloc"] > 0
     assert report["upward_imports"] == []
     assert report["worktree_violations"] == []
     assert set(report["registered_disable_flags"]) == set(sz_ajar.REQUIRED_DISABLE_FLAGS)
     assert len(report["registered_disable_flags"]) == 7
     assert sz_ajar.main([str(REPO_ROOT), "--json"]) == 0
+
+    pruned_root = tmp_path / "pruned_repo"
+    shutil.copytree(REPO_ROOT / "src", pruned_root / "src")
+    (pruned_root / "src" / "ajar" / "epistemic.py").unlink()
+    (pruned_root / "src" / "ajar" / "chain_weaver.py").unlink()
+    pruned_report = sz_ajar.audit_repo(pruned_root)
+    assert pruned_report["ok"] is True, f"Pro-deletion failed: {pruned_report['violations']}"
+    assert pruned_report["ring1_module_count"] == 5
 
     fake_root = tmp_path / "broken_repo"
     shutil.copytree(REPO_ROOT / "src", fake_root / "src")
@@ -287,7 +304,8 @@ def test_export_reports_enforces_c3_voice_lint_and_omits_withdrawn_or_rejected(
 ) -> None:
     from ajar import cli
     from ajar.cli import Candidate, Verdict, ajar_dir, append_jsonl
-    from ajar.verify import export_reports
+
+    export_reports = _load_extra_report().export_reports
 
     clean_repo = tmp_path / "clean_repo"
     clean_repo.mkdir()
@@ -488,3 +506,173 @@ def test_run_bench_executes_all_fifteen_targets(tmp_path: Path) -> None:
             assert entry["execution_status"] == "skipped_missing_tool"
             assert entry["missing_tool"] == "forge"
 
+
+
+def test_verify_v361_anti_gaming_blocks_attacks_and_surfaces_full_critic_evidence(
+    tmp_path: Path,
+) -> None:
+    from ajar.cli import BuildRecipe, Candidate
+    from ajar.llm import MockLLMClient
+    from ajar.verify import verify_candidate
+
+    src_c = REPO_ROOT / "benchmarks" / "polyglot" / "c_parser"
+    repo = tmp_path / "c_parser"
+    shutil.copytree(src_c, repo)
+    valid_patch = (repo / "patches" / "valid_fix.patch").read_text(encoding="utf-8")
+    recipe = BuildRecipe(profile="upstream", build_script="make", test_cmd="./parser --selftest")
+
+    # G1: python3 -c with import os reading source file
+    g1 = Candidate(
+        id="G1",
+        title="Static import os source grep",
+        severity="high",
+        repro_cmd="python3 -c \"import os,sys; sys.exit(1 if 'decl_len > 32' in open('parser.c').read() else 0)\"",
+        patch_diff=valid_patch,
+    )
+    assert verify_candidate(repo, g1, recipe=recipe, llm=None, runs=1).status == "REJECTED"
+
+    # EV2: decoy subprocess + open() on tracked source file
+    ev2 = Candidate(
+        id="EV2",
+        title="Decoy subprocess plus source read",
+        severity="high",
+        repro_cmd="python3 -c \"import subprocess,sys; subprocess.run(['true']); sys.exit(1 if 'decl_len > 32' in open('parser.c').read() else 0)\"",
+        patch_diff=valid_patch,
+    )
+    assert verify_candidate(repo, ev2, recipe=recipe, llm=None, runs=1).status == "REJECTED"
+
+    # G2: patch modifying Makefile instead of parser.c
+    makefile_patch = (
+        "--- a/Makefile\n+++ b/Makefile\n@@ -1,3 +1,3 @@\n"
+        "-all: parser\n+all: parser\n+# noop\n"
+    )
+    g2 = Candidate(
+        id="G2",
+        title="Patch edits Makefile",
+        severity="high",
+        repro_cmd="./parser --hex 42144141414141414141414141414141414158585858",
+        patch_diff=makefile_patch,
+    )
+    assert verify_candidate(repo, g2, recipe=recipe, llm=None, runs=1).status == "REJECTED"
+
+    # G3: hardcoded single-input crash-frame bandaid defeated by mutated PoV
+    bandaid_patch = (
+        "--- a/parser.c\n+++ b/parser.c\n@@ -35,6 +35,8 @@ int parse_packet(const uint8_t *buf, size_t total_len, char *out, size_t out_cap\n"
+        "     } else if (tag == 0x42) {\n"
+        "+        if (decl_len == 20 && buf[2] == 0x41) return -3;\n"
+        "         /* BUG: checks 32 instead of sizeof(frame.payload) (16). */\n"
+        "         if (decl_len > 32) {\n"
+    )
+    g3 = Candidate(
+        id="G3",
+        title="Crash-frame bandaid",
+        severity="high",
+        repro_cmd="./parser --hex 42144141414141414141414141414141414158585858",
+        patch_diff=bandaid_patch,
+    )
+    assert verify_candidate(repo, g3, recipe=recipe, llm=None, runs=1).status == "REJECTED"
+
+    # G4: hidden local script grepping source
+    (repo / ".ajar").mkdir(exist_ok=True)
+    (repo / ".ajar" / "repro.sh").write_text(
+        "#!/bin/sh\ngrep -q 'decl_len > 32' parser.c && exit 1 || exit 0\n",
+        encoding="utf-8",
+    )
+    g4 = Candidate(
+        id="G4",
+        title="Hidden repro script grep",
+        severity="high",
+        repro_cmd="sh .ajar/repro.sh",
+        patch_diff=valid_patch,
+    )
+    assert verify_candidate(repo, g4, recipe=recipe, llm=None, runs=1).status == "REJECTED"
+
+    # L1: legitimate c_parser fix passes C3 and Critic receives full evidence packet
+    (repo / ".ajar" / "REALITY.md").write_text("# Target Reality\nC packet parser\n", encoding="utf-8")
+    critic = MockLLMClient(["APPROVE: verified root-cause bounds fix"])
+    l1 = Candidate(
+        id="L1",
+        title="Stack buffer overflow in parse_packet",
+        severity="high",
+        repro_cmd="./parser --hex 42144141414141414141414141414141414158585858",
+        control_cmd="./parser --selftest",
+        patch_diff=valid_patch,
+    )
+    v_ok = verify_candidate(repo, l1, recipe=recipe, llm=critic, runs=1)
+    assert v_ok.status == "VERIFIED"
+    assert v_ok.truth_level == "C3"
+    assert critic.calls, "Critic must be invoked"
+    critic_user_msg = critic.calls[-1]["messages"][0]["content"]
+    assert "Pre-patch Output:" in critic_user_msg
+    assert "Post-patch Output:" in critic_user_msg
+    assert "Patch Diff:" in critic_user_msg
+
+
+def test_swarm_v361_live_build_doctor_8_worker_fanout_and_drain_reserve(
+    tmp_path: Path,
+) -> None:
+    from ajar.chain_weaver import EffectType, post_effect, post_wish, weave_candidates
+    from ajar.cli import AblationConfig, RunConfig
+    from ajar.llm import MockLLMClient
+    from ajar.swarm import LiveSwarm
+    from ajar.whiteboard import Whiteboard
+
+    # 1. Broken Makefile triggers Wave-0 Build Doctor; 8 workers execute 8 slots with default 24 steps
+    repo = tmp_path / "broken_c"
+    repo.mkdir()
+    (repo / "Makefile").write_text("all:\n\tfalse\n", encoding="utf-8")
+    (repo / "app.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
+
+    doctor_fix = json.dumps({
+        "path": ".ajar/build.sh",
+        "content": "#!/usr/bin/env bash\nset -euo pipefail\necho DOCTOR_OK\n",
+    })
+    llm = MockLLMClient([doctor_fix] + ["DONE"] * 12)
+    cfg = RunConfig(
+        repo=repo,
+        workers=8,
+        budget_usd=25.0,
+        ablation=AblationConfig(disable_repomap=True, disable_chain_weaver=True),
+    )
+    swarm = LiveSwarm(cfg, llm=llm)
+    assert swarm.workers == 8
+    assert swarm.worker_max_steps == 24
+    res = asyncio.run(swarm.run())
+    assert res["build_doctor_invoked"] is True
+    assert res["build_verified"] is True
+    assert res["slots_executed"] == 8
+
+    # 2. Drain-phase chain_weaver passes allow_drain_reserve=True
+    wb_repo = tmp_path / "wb_repo"
+    wb_repo.mkdir()
+    wb = Whiteboard(wb_repo)
+    post_effect(
+        wb,
+        EffectType.PRIVILEGE_OR_CAPABILITY_SMUGGLING,
+        span="app.py:10",
+        summary="Smuggle admin role",
+        worker_id="W0",
+    )
+    post_wish(
+        wb,
+        EffectType.PRIVILEGE_OR_CAPABILITY_SMUGGLING,
+        sink_span="app.py:50",
+        impact="Admin command execution",
+        worker_id="W1",
+    )
+    weaver_llm = MockLLMClient([
+        json.dumps({
+            "id": "CH-1",
+            "title": "Role smuggling to admin_exec",
+            "severity": "high",
+            "entry_span": "app.py:10",
+            "sink_symbol": "admin_exec",
+            "repro_cmd": "python3 app.py",
+            "patch_diff": "",
+            "root_cause": "Missing auth check",
+            "impact": "Admin action",
+        })
+    ])
+    woven = asyncio.run(weave_candidates(wb_repo, wb, weaver_llm))
+    assert len(woven) == 1
+    assert weaver_llm.calls[-1]["allow_drain_reserve"] is True

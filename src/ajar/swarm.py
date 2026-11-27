@@ -6,12 +6,13 @@ import asyncio
 import json
 import os
 import time
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from ajar.agent import NullHooks, SpanTracker, WorkspaceTools, run_worker_loop
-from ajar.autobuild import run_build_doctor, synthesize_build_recipe
+from ajar.autobuild import probe_build_script, run_build_doctor, synthesize_build_recipe
 from ajar.chain_weaver import join_effects_and_wishes, weave_candidates
 from ajar.cli import (
     AblationConfig,
@@ -36,6 +37,12 @@ WAVE_ROLES: tuple[str, ...] = (
     "downstream_prover",
 )
 
+OVERFLOW_ROLES: tuple[str, ...] = (
+    "deep_auditor",
+    "bounty_resolver",
+    "downstream_prover",
+)
+
 ROLE_TO_LLM_TIER: dict[str, str] = {
     "build_cartographer": "scout",
     "surface_scout": "scout",
@@ -43,6 +50,16 @@ ROLE_TO_LLM_TIER: dict[str, str] = {
     "bounty_resolver": "auditor",
     "downstream_prover": "auditor",
 }
+
+
+def _build_worker_roles(workers: int) -> list[str]:
+    count = max(1, int(workers))
+    if count <= len(WAVE_ROLES):
+        return list(WAVE_ROLES[:count])
+    roles = list(WAVE_ROLES)
+    for extra_idx in range(count - len(WAVE_ROLES)):
+        roles.append(OVERFLOW_ROLES[extra_idx % len(OVERFLOW_ROLES)])
+    return roles
 
 STAGNATION_WINDOW_SEC: float = 45.0 * 60.0
 HEARTBEAT_INTERVAL_SEC: float = 30.0 * 60.0
@@ -69,7 +86,7 @@ def _atomic_write_text(target: Path, content: str) -> Path:
 
 
 class LiveSwarm:
-    """Unified async 1..8 worker orchestrator with stigmergic coordination and C3 drain reserve."""
+    """Unified async 1..16 worker orchestrator with stigmergic coordination and C3 drain reserve."""
 
     DRAIN_THRESHOLD = DRAIN_THRESHOLD
 
@@ -82,6 +99,7 @@ class LiveSwarm:
         budget_usd: float | None = None,
         spent_usd: float = 0.0,
         disable_swarm: bool = False,
+        worker_max_steps: int = 24,
     ) -> None:
         if isinstance(root, RunConfig):
             self.config = root
@@ -96,7 +114,8 @@ class LiveSwarm:
         self.repo = self.config.repo.resolve()
         self.disable_swarm = bool(disable_swarm or self.config.ablation.disable_swarm)
         req_workers = workers if workers is not None else self.config.workers
-        self.workers = 1 if self.disable_swarm else max(1, min(8, int(req_workers)))
+        self.workers = 1 if self.disable_swarm else max(1, min(16, int(req_workers)))
+        self.worker_max_steps: int = max(1, int(worker_max_steps))
         self.budget_usd = float(budget_usd if budget_usd is not None else self.config.budget_usd)
         self.spent_usd = float(spent_usd)
         self.cost_meter = CostMeter(self.budget_usd)
@@ -110,6 +129,9 @@ class LiveSwarm:
             self.llm = None
 
         self.recipe: BuildRecipe = BuildRecipe(profile=self.config.profile)
+        self.build_verified: bool = False
+        self.build_doctor_invoked: bool = False
+        self.slots_executed: int = 0
         self.reality_md_text: str = ""
         self.whiteboard: StigmergicWhiteboard | None = None
         self.indexed_spans: list[str] = []
@@ -147,9 +169,27 @@ class LiveSwarm:
                 for sym in meta.get("symbols", []):
                     self.indexed_spans.append(f"{rel}:{sym['line']}")
         if not ab.disable_autobuild:
+            self.build_verified = False
+            self.build_doctor_invoked = False
             self.recipe = synthesize_build_recipe(self.repo, profile=self.config.profile)
-            if self.llm is not None and not (self.repo / ".ajar" / "build.sh").is_file():
+            if self.recipe.build_system == "static":
+                build_ok, probe_tail = False, "No Tier-0 build recipe detected"
+            else:
+                build_ok, probe_tail = probe_build_script(self.repo, self.recipe)
+            if build_ok:
+                self.recipe = replace(
+                    self.recipe,
+                    build_script="bash .ajar/build.sh",
+                    static_only=False,
+                    verified=True,
+                    last_error="",
+                )
+            else:
+                self.recipe = replace(self.recipe, verified=False, last_error=probe_tail)
+            if self.llm is not None and (not build_ok or self.recipe.build_system == "static"):
+                self.build_doctor_invoked = True
                 self.recipe = await run_build_doctor(self.repo, self.recipe, self.llm)
+            self.build_verified = bool(self.recipe.verified)
         if not ab.disable_whiteboard:
             self.whiteboard = StigmergicWhiteboard(self.repo)
         self._last_signal = self.physical_signal()
@@ -230,6 +270,7 @@ class LiveSwarm:
             "# AJAR Swarm Status\n\n"
             f"- Updated: `{stamp}`\n"
             f"- Workers: `{self.workers}` (swarm_disabled=`{self.disable_swarm}`)\n"
+            f"- Build verified: `{self.build_verified}` (doctor_invoked=`{self.build_doctor_invoked}`)\n"
             f"- Budget used: `${spent:.2f} / ${self.budget_usd:.2f}` (`{pct:.1%}`)\n"
             f"- Exploration frozen (92% drain): `{self.exploration_frozen}`\n"
             f"- Strategy mode: `{self.strategy_mode}`\n"
@@ -259,6 +300,7 @@ class LiveSwarm:
         if self.should_drain():
             self.exploration_frozen = True
             return
+        self.slots_executed += 1
         spans_slice = self.indexed_spans[worker_id :: max(1, self.workers)][:6]
         for sp in spans_slice:
             self.coverage_spans.add(sp)
@@ -286,7 +328,7 @@ class LiveSwarm:
             role=llm_tier,
             hooks=hooks,
             cost_meter=self.cost_meter,
-            max_steps=8,
+            max_steps=self.worker_max_steps,
         )
         for cand in outcome.get("candidates", []):
             self.candidate_queue.append(cand)
@@ -297,26 +339,30 @@ class LiveSwarm:
         self.write_status_heartbeat(force=False)
 
     async def run(self) -> dict[str, Any]:
+        self.slots_executed = 0
         await self.bootstrap()
         if not self.should_drain():
             sem = asyncio.Semaphore(self.workers)
 
-            async def _slot_task(idx: int, role_name: str) -> None:
+            async def _slot_task(slot_idx: int, role_name: str) -> None:
                 async with sem:
-                    await self._execute_worker_slot(idx % self.workers, role_name)
+                    await self._execute_worker_slot(slot_idx, role_name)
 
-            roles = WAVE_ROLES[: max(self.workers, len(WAVE_ROLES))]
+            roles = _build_worker_roles(self.workers)
             async with asyncio.TaskGroup() as tg:
-                for idx, role_name in enumerate(roles):
+                for slot_idx, role_name in enumerate(roles):
                     if self.should_drain():
                         self.exploration_frozen = True
                         break
-                    tg.create_task(_slot_task(idx, role_name))
+                    tg.create_task(_slot_task(slot_idx, role_name))
 
         await self._run_drain_proving()
         status_path = self.write_status_heartbeat(force=True)
         return {
             "workers": self.workers,
+            "slots_executed": self.slots_executed,
+            "build_verified": self.build_verified,
+            "build_doctor_invoked": self.build_doctor_invoked,
             "c3_proved": [v.candidate_id for v in self.c3_proved],
             "physical_signal": self.physical_signal(),
             "pivots": self.pivot_count,

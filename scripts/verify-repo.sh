@@ -67,7 +67,7 @@ cmp -s AGENTS.md CLAUDE.md
 echo "    OK (AGENTS.md == CLAUDE.md, ${lines} lines)"
 
 echo "==> [2/${TOTAL}] Ruff lint (E, F, I, W, B)"
-"$RUFF" check src/ajar extra/sz_ajar.py tests tools/arch_lint.py skills/security-advisory-report/scripts/report_voice_lint.py
+"$RUFF" check src/ajar extra/sz_ajar.py extra/report.py tests tools/arch_lint.py skills/security-advisory-report/scripts/report_voice_lint.py
 
 echo "==> [3/${TOTAL}] Ring-0/Ring-1 structural & anti-golf gates (extra/sz_ajar.py)"
 python3 extra/sz_ajar.py .
@@ -75,8 +75,8 @@ python3 extra/sz_ajar.py .
 echo "==> [4/${TOTAL}] Mechanical architecture guardrails (tools/arch_lint.py)"
 python3 tools/arch_lint.py
 
-echo "==> [5/${TOTAL}] Static type-check (mypy --strict src/ajar + sz_ajar + arch_lint + report_voice_lint)"
-"$MYPY" --strict src/ajar extra/sz_ajar.py tools/arch_lint.py skills/security-advisory-report/scripts/report_voice_lint.py
+echo "==> [5/${TOTAL}] Static type-check (mypy --strict src/ajar + sz_ajar + report + arch_lint + report_voice_lint)"
+"$MYPY" --strict src/ajar extra/sz_ajar.py extra/report.py tools/arch_lint.py skills/security-advisory-report/scripts/report_voice_lint.py
 
 if [[ "$MODE" == "fast" ]]; then
   echo "==> [6/${TOTAL}] Fast inner-loop suite (unit + v3.6 + voice lint)"

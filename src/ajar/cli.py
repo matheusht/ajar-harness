@@ -87,6 +87,7 @@ class Candidate:
     build_profile: str = "upstream"
     chain_hops: list[str] = field(default_factory=list)
     withdrawn: bool = False
+    control_cmd: str = ""
 
 
 @dataclass
@@ -317,11 +318,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "report":
-        from ajar.verify import export_reports
+        import importlib.util
 
+        rep_path = Path(__file__).resolve().parents[2] / "extra" / "report.py"
+        spec = importlib.util.spec_from_file_location("ajar_extra_report", rep_path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"Unable to load report exporter: {rep_path}")
+        mod: Any = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
         repo = (args.repo_opt or args.repo or Path(".")).resolve()
         out_dir = (args.out or (ajar_dir(repo) / "reports")).resolve()
-        rep = export_reports(repo, out_dir)
+        rep: dict[str, Any] = mod.export_reports(repo, out_dir)
         return 0 if rep.get("lint_passed", True) else 1
 
     return 2

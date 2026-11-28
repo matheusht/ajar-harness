@@ -11,7 +11,7 @@ Use this skill to audit mapped surfaces and sinks, coordinate with parallel swar
 
 1. Read `.ajar/REALITY.md` and `.ajar/WHITEBOARD.md` before opening files.
 2. Post a `claim` event (`20m` TTL evaporation) for the target seam so parallel workers (`surface_scout`, `deep_auditor`, `bounty_resolver`, `downstream_prover`) do not duplicate effort.
-3. Post durable discoveries as append-only events into `.ajar/events.jsonl`:
+3. Post durable discoveries into `.ajar/whiteboard.sqlite` (primary SQLite WAL + FTS5 store; mirrored to `.ajar/events.jsonl` for audit and projected to `.ajar/WHITEBOARD.md`):
    - **`insight`:** Concrete code behavior or reachability path with exact `file:start-end` span.
    - **`invariant`:** Proven compensating guard with the exact `file:line` where it executes.
    - **`effect`:** Observed partial primitive tagged with `EffectType` and `CarrierKind` for `chain_weaver.py`.
@@ -35,7 +35,6 @@ Use this skill to audit mapped surfaces and sinks, coordinate with parallel swar
 - **Context Relay (`65%` / `70%`):** Summarize open hypotheses, observed spans, and next probes onto `.ajar/WHITEBOARD.md` before context recycle so the next worker resumes cleanly.
 - **45-Minute Stagnation Pivot:** If a seam yields zero new effects, wishes, or candidates for `45m`, post a `dead_end` or `wish` and pivot to an unaudited `bounty`.
 - **92% Budget Drain:** Once `CostMeter` hits `92%` of `--budget-usd`, stop new exploration and drain remaining budget into `ajar verify` for queued candidates.
-- **Domain Packs:** Consult `skills/domains/<domain>/SKILL.md` only when matching the target domain; otherwise derive invariants from first principles in target code.
 
 ## 4. Emit Structured Candidates (`.ajar/candidates.jsonl`)
 

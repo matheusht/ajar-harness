@@ -27,7 +27,7 @@ During `ajar verify <repo> --runs 3`, `verify.py` automatically invokes a **Cros
 
 ## 3. Record Falsification Outcomes Cleanly
 
-- **Completely refuted:** Set `"withdrawn": true` on the candidate in `.ajar/candidates.jsonl` and post a `dead_end` event with the verified guard `file:line` to `.ajar/events.jsonl` (withdrawn drafts are omitted from `ajar report` per `DEC-0139`).
+- **Completely refuted:** Set `"withdrawn": true` on the candidate in `.ajar/candidates.jsonl` and post a `dead_end` event with the verified guard `file:line` to `.ajar/whiteboard.sqlite` (primary SQLite WAL + FTS5 store; `.ajar/events.jsonl` audit mirror; withdrawn drafts are omitted from `ajar report` per `DEC-0139`).
 - **Defense-in-depth / non-security gap:** Reclassify as `"category": "hardening"` and `"severity": "informational"` so `ajar report` routes it to `hardening-notes/` instead of `advisories/`.
 - **Shifted root cause or partial primitive:** Update `entry_span`, `sink_symbol`, `root_cause`, and `patch_diff` to the true locus, or post the surviving partial capability as an `effect` on `.ajar/WHITEBOARD.md` for `chain_weaver.py`.
 - **Survived disconfirmation:** Proceed immediately to `ajar verify <repo> --candidate-id <id> --runs 3`.
